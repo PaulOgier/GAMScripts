@@ -1,4 +1,4 @@
-# 🎓 Master GAM with an In-Depth Course
+# 🎓 Master GAM7 & GAMADV-XTD3 with an In-Depth Course
 
 If you want to become an expert in Google Workspace administration, check out the comprehensive Udemy course: [Taming GAM7 & GAMADV-XTD3 - A Google Workspace Admin Guide](https://taming.tech/GAMCourse).
 
@@ -9,19 +9,6 @@ This course is designed to teach you how to administer Google Workspace more eff
 Welcome! This repository is a collection of powerful and easy-to-use Python scripts designed to supercharge your **Google Workspace administration** by leveraging the incredible capabilities of **GAM7 (Google Apps Manager)**.
 
 Whether you're looking to perform **bulk operations**, process large CSV reports, or automate repetitive tasks, these scripts are here to save you time and prevent headaches.
-
----
-
-## ✨ What's Inside?
-
-This collection helps you automate tedious Google Workspace tasks that are difficult or time-consuming to do manually. Our goal is to provide practical solutions for real-world administrative challenges.
-
-* **Automate User Management**: Bulk update user attributes, process new hires, and manage offboarding.
-* **Process Large Reports**: Split, filter, and group massive CSV exports from GAM or the Admin Console.
-* **Manage Google Calendar & Drive**: Perform bulk operations on calendar events or Drive files across your organization.
-* **Streamline Workflows**: Chain commands and logic together for complex, multi-step administrative processes.
-
-
 
 ---
 
