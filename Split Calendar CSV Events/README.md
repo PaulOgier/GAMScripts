@@ -31,6 +31,8 @@ Navigate to the folder where you saved the script and your CSV file. For example
 cd Desktop
 Now, run the script by typing python3, followed by the script's name, and then the name of your CSV file. For example, if your main file is named AllUsersPrimaryEvents.csv, you would run:
 
+## split_csv.py
+
 ```
 python3 split_csv.py AllUsersPrimaryEvents.csv
 ```
