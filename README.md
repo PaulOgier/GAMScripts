@@ -1,3 +1,9 @@
+# 🎓 Master GAM with an In-Depth Course
+
+If you want to become an expert in Google Workspace administration, check out the comprehensive Udemy course: [Taming GAM7 & GAMADV-XTD3 - A Google Workspace Admin Guide](https://taming.tech/GAMCourse).
+
+This course is designed to teach you how to administer Google Workspace more efficiently and effectively. It logically breaks down all the steps to ensure the optimum administration and security of your environment, making you more productive in your role.
+
 # Google Workspace & GAM Automation Scripts 🚀
 
 Welcome! This repository is a collection of powerful and easy-to-use Python scripts designed to supercharge your **Google Workspace administration** by leveraging the incredible capabilities of **GAM7 (Google Apps Manager)**.
