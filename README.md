@@ -32,7 +32,7 @@ Before you begin, make sure you have the following installed and configured:
 
 Here is a breakdown of the available scripts. Each script is designed to solve a specific problem.
 
-### **1. CSV File Splitter (`split_by_size.py`)**
+### **1. Split Calendar CSV Events \ CSV File Splitter (`split_by_size.py`)**
 
 * **Description**: Splits a single, massive CSV file into smaller, more manageable chunks based on a specified file size (e.g., 5 MB).
 * **Best For**: Processing huge GAM reports that are too large to open in Google Sheets or Microsoft Excel.
@@ -45,7 +45,7 @@ Here is a breakdown of the available scripts. Each script is designed to solve a
 
 <br>
 
-### **2. User Event Exporter (`filter_and_split.py`)**
+### **2. Split Calendar CSV Events \ User Event Exporter (`filter_and_split.py`)**
 
 * **Description**: Filters a master CSV of calendar events for multiple users and creates a separate CSV file for each user containing only their events from a recent period.
 * **Best For**: Auditing recent user activity or creating individual calendar reports for compliance or archival purposes.
@@ -58,7 +58,7 @@ Here is a breakdown of the available scripts. Each script is designed to solve a
 
 <br>
 
-### **3. Single User CSV Creator (`split_csv.py`)**
+### **3. Split Calendar CSV Events \ Single User CSV Creator (`split_csv.py`)**
 
 * **Description**: Takes a CSV file with multiple users and creates a new, individual CSV file for each user listed.
 * **Best For**: Creating individual data files for mail merges, or preparing data for other scripts that need to run on a per-user basis.
