@@ -1,5 +1,5 @@
 # How to Use the Script
-Follow these simple steps to run the script from your macOS terminal.
+Follow these simple steps to run the script from your terminal.
 
 ## 1. Save the Script
 
@@ -7,7 +7,7 @@ Open a plain text editor (like TextEdit, VS Code, or Sublime Text).
 
 Copy the Python code and paste it into the new file.
 
-Save the file as split_csv.py in a convenient location, such as your Documents or Desktop folder.
+Save the file as split_csv.py in a convenient location.
 
 ## 2. Prepare Your CSV File
 
