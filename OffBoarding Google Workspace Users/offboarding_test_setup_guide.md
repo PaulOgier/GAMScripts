@@ -53,13 +53,23 @@ gam create user testoffboard5@yourdomain.com firstname 'Evan' lastname 'DataHeav
 
 **Wait 30 to 60 seconds** for mailbox provisioning before proceeding.
 
-### Step 3: Create the Transfer Destination User
+### Step 3: Create the Transfer Destination Users
 
-This is the user who will receive Drive files, aliases, forwarding, and
-calendar access during offboarding tests.
+`testoffboard.dest` is the single-destination receiver used by most tests
+(Drive, aliases, forwarding, calendar access).
+
+The three additional receivers (`testoffboard.manager`, `testoffboard.team`,
+`testoffboard.ops`) are only used by the split-routing tests (5b and 5c)
+that exercise the per-phase `--drive-to`, `--email-to`, `--all-transfer-to`
+combinations. If you do not plan to run those tests, you can omit them.
 
 ```bash
 gam create user testoffboard.dest@yourdomain.com firstname 'Transfer' lastname 'Destination' password 'T3st!ng_0ffb0ard_2026' changepassword off org '/Test Users'
+
+# Receivers used by split-routing tests (5b, 5c). Skip if you do not run those.
+gam create user testoffboard.manager@yourdomain.com firstname 'Manager' lastname 'Receiver' password 'T3st!ng_0ffb0ard_2026' changepassword off org '/Test Users'
+gam create user testoffboard.team@yourdomain.com firstname 'Team' lastname 'Receiver' password 'T3st!ng_0ffb0ard_2026' changepassword off org '/Test Users'
+gam create user testoffboard.ops@yourdomain.com firstname 'Ops' lastname 'Receiver' password 'T3st!ng_0ffb0ard_2026' changepassword off org '/Test Users'
 ```
 
 ### Step 4: Populate Test Data
@@ -300,6 +310,9 @@ gam delete user testoffboard3@yourdomain.com
 gam delete user testoffboard4@yourdomain.com
 gam delete user testoffboard5@yourdomain.com
 gam delete user testoffboard.dest@yourdomain.com
+gam delete user testoffboard.manager@yourdomain.com
+gam delete user testoffboard.team@yourdomain.com
+gam delete user testoffboard.ops@yourdomain.com
 
 # Delete test groups
 gam delete group offboard-test-group1@yourdomain.com
