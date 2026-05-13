@@ -147,6 +147,7 @@ Changelog
   2026-05-06 - v4.3.0 - GYB restore applies Migrated/<source-user> label; mailbox/Drive backups moved to dedicated subdirs; fixed calendar ACL syntax (calendaracl -> calendaracls, user <email> -> user:<email>).
   2026-05-07 - v4.4.0 - Added startup version check against remote VERSION file (CHECK_FOR_UPDATES toggle, fail-silent); restored author/contact header with Outsource House copyright and three Udemy course links; aligned in-script licence reference with the repo LICENSE (Apache 2.0) and added a plain-English summary emphasising attribution retention.
   2026-05-13 - v4.5.0 - BREAKING: renamed --transfer-to to --all-transfer-to. Added per-phase destination flags (--drive-to, --email-to, --alias-to, --calendar-to, --forward-to) that override the global default; precedence is phase-specific > --all-transfer-to > interactive prompt. Added upfront destination resolution and validation before any phase runs: under --force, any non-skipped phase without a resolvable destination aborts the run with a clear error instead of half-offboarding.
+  2026-05-13 - v4.5.1 - Email migration default changed: GYB restore now passes --strip-labels, discarding original Gmail labels (including INBOX) so migrated mail is archived under a single Migrated/<source-user> label. Added --strip-labels / --keep-labels mutually exclusive flags and an interactive prompt (default=strip) when neither is set. Pass --keep-labels to preserve the previous behaviour (INBOX + custom labels retained with the migration label on top). Reliability fixes: forwarding setup now polls show forwardingaddresses for verificationStatus=accepted (up to 60s) before activating, replacing the unreliable 3s sleep that caused "Invalid forwarding address" failures; activation success is now reflected accurately in the summary instead of being claimed unconditionally. Licence print timeouts raised (snapshot 30s -> 180s, removal 120s -> 180s) since the licensing API consistently takes 20-30s; a failed/timed-out licence query is now reported as an error with manual-cleanup instructions instead of silently claiming "No licences found".
 
 Planned Features (not yet implemented)
   - Batch processing via CSV file: accept a list of users (e.g. --csv users.csv)
@@ -192,7 +193,7 @@ import shutil
 
 # [IMPORTANT] Current local script version. Bumped on each release.
 # Compared against the remote VERSION file to detect updates.
-SCRIPT_VERSION = "4.5.0"
+SCRIPT_VERSION = "4.5.1"
 
 # [OPTIONAL] Check for a newer script version on startup.
 # When True (default), the script makes a single 3-second HTTP request to
@@ -1122,12 +1123,14 @@ def preflight_snapshot(email: str, dry_run: bool, timestamp: str = "") -> Option
         snapshot["data"]["forwarding"] = output
 
     # Licences
+    # The licensing API is consistently slow (20-30s typical in some tenants);
+    # use a generous timeout so the snapshot doesn't trip a false alarm.
     print_info("Capturing licences...")
     success, output = run_gam(
         ["user", email, "print", "licenses"],
         dry_run=False,
         capture_output=True,
-        timeout=30,
+        timeout=180,
         stdout_only=True
     )
     if success:
@@ -1445,10 +1448,20 @@ def remove_licences(email: str, dry_run: bool):
         ["user", email, "print", "licenses"],
         dry_run=False,
         capture_output=True,
-        timeout=120
+        timeout=180
     )
 
-    if not success or not output.strip():
+    if not success:
+        # Timeout or API failure — do NOT claim there are no licences,
+        # otherwise a timed-out query silently leaves paid seats assigned.
+        print_error("Could not query licences; manual cleanup required.")
+        summary_error(
+            f"Licence query failed for {email} — verify and remove manually "
+            f"with: gam user {email} print licenses"
+        )
+        return
+
+    if not output.strip():
         print_success("No licences to remove")
         summary_action("No licences found")
         return
@@ -1584,9 +1597,16 @@ def transfer_aliases(source: str, destination: str, dry_run: bool):
         summary_error(f"Alias transfer issue: {output[:200]}")
 
 
-def migrate_email(source: str, destination: str, dry_run: bool):
+def migrate_email(source: str, destination: str, dry_run: bool, strip_labels: bool = True):
     """
     [OPTIONAL] Back up and restore email using GYB.
+
+    When strip_labels is True (the default), GYB's --strip-labels is passed on
+    restore so all original Gmail labels — including INBOX — are discarded, and
+    the only label remaining on each restored message is Migrated/<source-user>.
+    Effectively this archives the migrated mail under a single namespaced label.
+    When False, original labels (INBOX, custom labels, system labels) are
+    preserved and the migration label is added on top.
 
     GYB syntax:
       gyb --email <src> --action backup --local-folder <path>
@@ -1615,14 +1635,15 @@ def migrate_email(source: str, destination: str, dry_run: bool):
 
     # Restore
     migration_label = f"Migrated/{source}"
-    print_info(f"Restoring email to: {destination} (label: {migration_label})")
-    run_gyb(
-        ["--email", destination, "--action", "restore",
-         "--local-folder", str(backup_path),
-         "--label-restored", migration_label],
-        dry_run=dry_run
-    )
-    summary_action(f"Email migrated to {destination} under label '{migration_label}'")
+    mode_desc = "archived under single label" if strip_labels else "original labels preserved + migration label"
+    print_info(f"Restoring email to: {destination} (label: {migration_label}; {mode_desc})")
+    restore_args = ["--email", destination, "--action", "restore",
+                    "--local-folder", str(backup_path),
+                    "--label-restored", migration_label]
+    if strip_labels:
+        restore_args.append("--strip-labels")
+    run_gyb(restore_args, dry_run=dry_run)
+    summary_action(f"Email migrated to {destination} under label '{migration_label}' ({mode_desc})")
 
 
 def transfer_calendar(source: str, destination: str, dry_run: bool):
@@ -1699,18 +1720,59 @@ def setup_forwarding(email: str, forward_to: str, dry_run: bool):
     if not dry_run and "already exists" in output.lower():
         print_info("Forwarding address already registered — continuing to activate.")
 
-    # Brief pause to let the forwarding address register
+    # Step 2: Wait until the address shows verificationStatus=accepted.
+    # Activating before verification propagates fails with
+    # "Set Failed: Invalid forwarding address" even for same-domain destinations.
     if not dry_run:
-        print_info("Waiting 3 seconds for forwarding address to register...")
-        time.sleep(3)
+        print_info("Waiting for forwarding address to be verified...")
+        verified = False
+        deadline = time.time() + 60  # poll up to 60s total
+        attempt = 0
+        while time.time() < deadline:
+            attempt += 1
+            ok, status_output = run_gam(
+                ["user", email, "show", "forwardingaddresses"],
+                dry_run=False,
+                capture_output=True,
+                timeout=30,
+                stdout_only=True
+            )
+            if ok:
+                lower_out = status_output.lower()
+                if forward_to.lower() in lower_out and "accepted" in lower_out:
+                    verified = True
+                    print_success(
+                        f"Forwarding address verified after {attempt} check(s)."
+                    )
+                    break
+            time.sleep(3)
 
-    # Step 2: Activate forwarding
+        if not verified:
+            print_error(
+                f"Forwarding address {forward_to} did not reach 'accepted' "
+                f"state within 60s. Skipping activation."
+            )
+            summary_error(
+                f"Forwarding NOT activated for {email}: {forward_to} unverified. "
+                f"Once verified, run: gam user {email} forward on {forward_to} keep"
+            )
+            return
+
+    # Step 3: Activate forwarding
     print_info(f"Activating forwarding: {email} -> {forward_to} (keep copy)")
-    run_gam(
+    activate_ok, _ = run_gam(
         ["user", email, "forward", "on", forward_to, "keep"],
-        dry_run=dry_run
+        dry_run=dry_run,
+        capture_output=True
     )
-    summary_action(f"Email forwarding set to {forward_to} (keep copy)")
+
+    if dry_run or activate_ok:
+        summary_action(f"Email forwarding set to {forward_to} (keep copy)")
+    else:
+        summary_error(
+            f"Forwarding activation failed for {email} -> {forward_to}. "
+            f"Retry with: gam user {email} forward on {forward_to} keep"
+        )
 
 
 ###############################################################################
@@ -2045,6 +2107,18 @@ def parse_args():
     skip_grp.add_argument("--unsuspend", action="store_true",
                           help="Temporarily unsuspend an already-suspended user to allow "
                                "full offboarding; they will be re-suspended at the end")
+
+    # --- Email migration label handling (mutually exclusive) ---
+    label_grp = parser.add_argument_group("Email label options")
+    label_mx = label_grp.add_mutually_exclusive_group()
+    label_mx.add_argument("--strip-labels", dest="strip_labels", action="store_true", default=None,
+                          help="On email restore, discard all original Gmail labels (including "
+                               "INBOX) and keep only Migrated/<source-user>. Migrated mail is "
+                               "effectively archived under one namespaced label. This is the "
+                               "default in --force mode; without --force you are prompted.")
+    label_mx.add_argument("--keep-labels", dest="strip_labels", action="store_false",
+                          help="Preserve original Gmail labels (INBOX, custom labels) on restore; "
+                               "Migrated/<source-user> is added on top.")
 
     # --- Target flags ---
     target_grp = parser.add_argument_group("Target options")
@@ -2387,9 +2461,17 @@ def main():
         summary_skip("Email migration (--no-email)")
     elif prompt_yes_no("Migrate email to another user (requires GYB)?", force=args.force):
         email_dest = dest_map["email"] or prompt_email("Email migration destination email")
+        # Resolve label-handling mode: CLI flag wins; otherwise prompt (default = strip+archive).
+        if args.strip_labels is None:
+            strip_labels = prompt_yes_no(
+                "Strip original Gmail labels and archive migrated mail under "
+                "Migrated/<source-user> only? (No keeps INBOX and custom labels)",
+                default=True, force=args.force)
+        else:
+            strip_labels = args.strip_labels
         with PhaseTimer("Email migration"):
             try:
-                migrate_email(user_email, email_dest, dry_run)
+                migrate_email(user_email, email_dest, dry_run, strip_labels=strip_labels)
             except Exception as e:
                 print_error(f"Email migration failed: {e}")
                 summary_error(f"Email exception: {e}")

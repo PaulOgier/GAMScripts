@@ -24,6 +24,18 @@ rules — keep them in mind if you adapt the commands:
   Add the GAM directory to PATH in your shell rc file
   (`export PATH="/path/to/gam7:$PATH"` on macOS/Linux,
   `setx PATH "%PATH%;C:\path\to\gam7"` on Windows).
+- **zsh users: enable interactive comments.** By default zsh does *not*
+  treat `#` as a comment in interactive shells, so pasting a block like
+  `# Groups (member, manager, owner roles)` produces noisy errors
+  (`zsh: command not found: #`, `zsh: number expected`,
+  `zsh: unknown sort specifier`, `zsh: unknown group` — the parenthesised
+  text is parsed as a glob qualifier). Fix once:
+  ```bash
+  echo 'setopt interactive_comments' >> ~/.zshrc
+  setopt interactive_comments   # also apply to the current shell
+  ```
+  bash, PowerShell, and cmd treat `#`/`REM` as comments natively and need
+  no change.
 
 ## Part 1: Test User Setup (5 Users)
 
@@ -36,6 +48,33 @@ Before creating test users, ensure:
 - rclone is installed (`rclone version`)
 - You have a Google Workspace edition with available licences (5 needed) if you only have 1 spare, then you would have to do this multiple times.
 - You have an OU structure ready (or the script below creates one)
+- **Automatic license assignment is OFF** for your paid Workspace SKU (see the licensing note below)
+
+#### Licensing: automatic-assignment trap
+
+The offboarding script removes the paid Workspace licence from the user so the
+seat can be reclaimed. If your tenant has **automatic license assignment**
+turned on for the only Workspace SKU you own, GAM cannot leave the user with
+zero licences — the licence is re-attached immediately and the `gam user ...
+delete license` step in the script fails (or appears to succeed but the seat
+is not freed).
+
+Check and fix this **before** running the offboarding script:
+
+1. **See which SKUs are on the tenant:**
+   [https://admin.google.com/ac/billing/subscriptions](https://admin.google.com/ac/billing/subscriptions)
+2. **Check automatic assignment:**
+   [https://admin.google.com/ac/billing/licensesettings](https://admin.google.com/ac/billing/licensesettings)
+   - If you can set automatic assignment to **OFF** for the paid SKU, do so — you are done.
+   - If the tenant has only one paid SKU and the UI will not let you turn it off, continue to step 3.
+3. **Add the free Cloud Identity Free SKU** so the offboarded user can fall back to it:
+   [https://admin.google.com/ac/billing/catalog](https://admin.google.com/ac/billing/catalog)
+   → add **Cloud Identity Free**. This gives the tenant a no-cost identity-only
+   SKU that does not consume a paid seat.
+4. Return to the licence settings page and set automatic assignment for the
+   **paid** SKU to **OFF** (Cloud Identity Free can remain on automatic).
+   Offboarded users will now drop the paid licence cleanly and land on Cloud
+   Identity Free.
 
 ### Step 1: Create the Offboarding OU
 
@@ -110,18 +149,20 @@ gam update group offboard-test-group2@yourdomain.com add member testoffboard1@yo
 # Set a vacation message (to verify it gets overwritten)
 gam user testoffboard1@yourdomain.com vacation on subject 'Old vacation' message 'This is an old vacation reply'
 ```
-We would like to add a file so that we can test the transfer of the file to another user. Please see the comand that works for your platform.
+We would like to add 5 files so that we can test the transfer of files to another user. The filename includes a timestamp so re-runs produce distinct files. Please see the command that works for your platform.
 ##### macOS/Linux
 ```bash
-# Upload a test Drive file
-echo 'Test file for offboarding' > /tmp/offboard_test.txt
-gam user testoffboard1@yourdomain.com add drivefile localfile /tmp/offboard_test.txt
+# Upload 5 test Drive files (timestamp in filename so re-runs don't collide)
+TS=$(date +%Y%m%d_%H%M%S); for i in 1 2 3 4 5; do F="/tmp/offboard_test_${TS}_${i}.txt"; echo "Test file $i for offboarding" > "$F"; gam user testoffboard1@yourdomain.com add drivefile localfile "$F"; done
 ```
 ##### Windows - please run each line by itself not as 1 command
 ```cmd
-# Upload a test Drive file
-echo Test file for offboarding > %TEMP%\offboard_test.txt
-gam user testoffboard1@yourdomain.com add drivefile localfile '%TEMP%\offboard_test.txt'
+# Build a filename-safe timestamp from %DATE% and %TIME% (slashes/colons/spaces stripped)
+set "TS=%DATE:/=-%_%TIME::=-%"
+set "TS=%TS: =0%"
+# Create and upload 5 test Drive files
+for /L %i in (1,1,5) do echo Test file %i for offboarding > "%TEMP%\offboard_test_%TS%_%i.txt"
+for /L %i in (1,1,5) do gam user testoffboard1@yourdomain.com add drivefile localfile "%TEMP%\offboard_test_%TS%_%i.txt"
 ```
 
 
@@ -192,10 +233,9 @@ gam update group offboard-test-group2@yourdomain.com add manager testoffboard5@y
 # Alias
 gam create alias evan.legacy@yourdomain.com user testoffboard5@yourdomain.com
 # Delegate (give destination user access to this mailbox)
+# NOTE: the delegator must be active (not suspended) for this to succeed.
 gam user testoffboard5@yourdomain.com delegate to testoffboard.dest@yourdomain.com
-# Drive files (see platform-specific file creation notes below)
-gam user testoffboard5@yourdomain.com add drivefile localfile /tmp/offboard_confidential.txt
-gam user testoffboard5@yourdomain.com add drivefile localfile /tmp/offboard_project.txt
+# Drive files: skip here — create & upload them in the platform-specific block below.
 # Send test emails (so GYB has something to back up)
 gam user testoffboard5@yourdomain.com sendemail recipient testoffboard5@yourdomain.com subject 'Test email 1' message 'This is a test for GYB backup'
 gam user testoffboard5@yourdomain.com sendemail recipient testoffboard5@yourdomain.com subject 'Test email 2' message 'Another test for GYB backup'
@@ -205,7 +245,11 @@ gam user testoffboard5@yourdomain.com add forwardingaddress testoffboard.dest@yo
 # Recovery info (so the script can wipe it)
 gam update user testoffboard5@yourdomain.com recoveryemail 'evan.personal@gmail.com' recoveryphone '+27821234567'
 # Calendar event (so calendar transfer has something visible)
-gam user testoffboard5@yourdomain.com add event calendar testoffboard5@yourdomain.com summary 'Weekly Standup' start '2026-04-01T09:00:00' end '2026-04-01T09:30:00'
+# The start/end strings must carry a timezone — append 'Z' (UTC) or an offset
+# like '+02:00'. The standalone 'timezone' flag does NOT cover bare times and
+# leaves GAM erroring with "Missing time zone definition for start time".
+# Also requires the Calendar service to be enabled on the user's licence/OU.
+gam user testoffboard5@yourdomain.com add event calendar testoffboard5@yourdomain.com summary 'Weekly Standup' start '2026-04-01T09:00:00Z' end '2026-04-01T09:30:00Z'
 ```
 For the Drive file creation, use the appropriate platform block
 ### macOS/Linux
@@ -361,16 +405,28 @@ restore it into the destination user's mailbox. The two-step process:
 
 ```
 gyb --email user@domain.com --action backup --local-folder ./offboarding_backups/mailboxes/user@domain.com_20260330/
-gyb --email dest@domain.com --action restore --local-folder ./offboarding_backups/mailboxes/user@domain.com_20260330/ --label-restored 'Migrated/user@domain.com'
+gyb --email dest@domain.com --action restore --local-folder ./offboarding_backups/mailboxes/user@domain.com_20260330/ --label-restored 'Migrated/user@domain.com' --strip-labels
 ```
 
 This is a **migration**, not just a backup. It copies the email from A to B.
 The local folder is kept on disk as well, so you have a local copy too.
 
-Restored messages are tagged with a `Migrated/<source-user>` label on the
-destination mailbox, so the destination user can easily filter, archive, or
-move the migrated mail in bulk without touching their own inbox. Existing
-labels (including INBOX) are preserved — the migration label is added on top.
+**Label handling (default: strip + archive).** As of v4.5.1 the restore step
+passes `--strip-labels` to GYB so all original Gmail labels — including
+`INBOX`, `Sent`, and any custom labels — are discarded on the destination side
+and the only label left on each migrated message is `Migrated/<source-user>`.
+The result: migrated mail does **not** flood the destination user's inbox; it
+lives under one namespaced label that they can browse, archive in bulk, or
+delete after a retention period.
+
+You can change this per-run:
+
+- `--strip-labels` — force the default (only `Migrated/<source-user>`, archived).
+- `--keep-labels` — opt out: keep `INBOX`, `Sent`, and custom labels and add
+  `Migrated/<source-user>` on top. Useful if the destination user needs to see
+  the original mailbox structure.
+- Neither flag set, no `--force` — the script asks interactively (default = strip).
+- Neither flag set, `--force` — strip is applied silently.
 
 If you skip the migration (using `--no-email`) but still want a local backup
 without restoring to another user, you can run GYB manually:
