@@ -2,3 +2,9 @@
 .obsidian/
 OffBoarding Google Workspace Users/logs/
 OffBoarding Google Workspace Users/offboarding_backups/
+
+# Local-only tooling and dev artifacts (intentionally NOT on GitHub).
+# regen-dev-guide.sh: substitutes dev.osh.co.za into the test guide.
+# offboarding_test_setup_guide.dev.md: its generated output.
+OffBoarding Google Workspace Users/regen-dev-guide.sh
+OffBoarding Google Workspace Users/offboarding_test_setup_guide.dev.md
