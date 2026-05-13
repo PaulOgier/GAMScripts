@@ -1,4 +1,29 @@
-# GAM7 Offboarding Script v4.3: Test Environment Setup & Backup Guide
+# GAM7 Offboarding Script v4.5: Test Environment Setup & Backup Guide
+
+## Conventions used in this guide
+
+All command examples are written to run identically on macOS, Linux, and
+Windows (PowerShell and cmd.exe). To achieve that, the guide follows these
+rules — keep them in mind if you adapt the commands:
+
+- **Single-line commands.** No `\` line continuations. `\` works in bash/zsh
+  but not in Windows cmd (`^`) or PowerShell (`` ` ``). Single-line commands
+  side-step the difference entirely. Lines are long; let your terminal wrap.
+- **Single quotes around string arguments**, e.g. `'Alice'`,
+  `'/Test Users/Offboard Candidates'`, `'T3st!ng_0ffb0ard_2026'`. Single
+  quotes prevent shell interpretation on every platform. Double quotes break
+  on zsh whenever the string contains `!` (history expansion).
+- **`python3`**, never bare `python`. Modern macOS no longer ships Python 2
+  and `python` is unavailable; `python3` works on macOS, Linux, and Windows
+  (Windows users may also use `py -3`).
+- **File-creation patterns are platform-specific.** `echo > /tmp/file` is
+  POSIX-only; Windows uses `%TEMP%\file` (cmd) or `$env:TEMP\file`
+  (PowerShell). Where this appears, the guide shows separate blocks.
+- **GAM must be on PATH.** A shell alias is not enough — the offboarding
+  script runs `gam` via Python subprocess, which does not load shell aliases.
+  Add the GAM directory to PATH in your shell rc file
+  (`export PATH="/path/to/gam7:$PATH"` on macOS/Linux,
+  `setx PATH "%PATH%;C:\path\to\gam7"` on Windows).
 
 ## Part 1: Test User Setup (5 Users)
 
@@ -18,14 +43,14 @@ This OU must have **no 2SV enforcement** policy applied. The script moves users
 here during the kill switch phase.
 
 ```bash
-gam create org "/Offboarding"
-gam create org "/Test Users"
-gam create org "/Test Users/Offboard Candidates"
+gam create org '/Offboarding'
+gam create org '/Test Users'
+gam create org '/Test Users/Offboard Candidates'
 ```
 
 If you need to delete an OU later, use:
 ```bash
-gam delete org "/Test Users"
+gam delete org '/Test Users'
 ```
 
 Go to your Google Admin console and check the 2SV setting for the `/Offboarding` organisational unit. Navigate to **Security > 2-Step Verification** ([https://admin.google.com/ac/security/2sv](https://admin.google.com/ac/security/2sv)), select the `/Offboarding` OU from the left menu, and confirm that "Enforcement" is set to "Off" or "Allow user to turn it on". Don't use "Enforce".
@@ -266,15 +291,15 @@ gam info user testoffboard1@yourdomain.com quick
 # Check groups were removed
 gam user testoffboard1@yourdomain.com print groups
 
-# Check GAL is off
-gam info user testoffboard1@yourdomain.com | grep -i "gal"
+# Check GAL is off — read the output and look for the "Included in GAL" line.
+# (Avoid `| grep` here: pipes-to-grep are not available on Windows cmd.exe.)
+gam info user testoffboard1@yourdomain.com
 
 # Check delegates were removed
 gam user testoffboard5@yourdomain.com show delegates
 
-# Check Drive files transferred
-gam user testoffboard.dest@yourdomain.com print filelist \
-    query "name contains 'offboard'"
+# Check Drive files transferred (single-line; inner single quotes are the Drive query syntax)
+gam user testoffboard.dest@yourdomain.com print filelist query "name contains 'offboard'"
 
 # Check aliases transferred
 gam print aliases user testoffboard.dest@yourdomain.com
@@ -319,8 +344,8 @@ gam delete group offboard-test-group1@yourdomain.com
 gam delete group offboard-test-group2@yourdomain.com
 
 # Delete test OUs (must be empty first)
-gam delete org "/Test Users/Offboard Candidates"
-gam delete org "/Test Users"
+gam delete org '/Test Users/Offboard Candidates'
+gam delete org '/Test Users'
 # Keep /Offboarding for production use
 ```
 
@@ -335,11 +360,8 @@ GYB to back up the departing user's entire mailbox to a local folder and then
 restore it into the destination user's mailbox. The two-step process:
 
 ```
-gyb --email user@domain.com --action backup \
-    --local-folder ./offboarding_backups/mailboxes/user@domain.com_20260330/
-gyb --email dest@domain.com --action restore \
-    --local-folder ./offboarding_backups/mailboxes/user@domain.com_20260330/ \
-    --label-restored "Migrated/user@domain.com"
+gyb --email user@domain.com --action backup --local-folder ./offboarding_backups/mailboxes/user@domain.com_20260330/
+gyb --email dest@domain.com --action restore --local-folder ./offboarding_backups/mailboxes/user@domain.com_20260330/ --label-restored 'Migrated/user@domain.com'
 ```
 
 This is a **migration**, not just a backup. It copies the email from A to B.
@@ -355,9 +377,7 @@ without restoring to another user, you can run GYB manually:
 
 ```bash
 # Backup only (no restore)
-gyb --email testoffboard5@yourdomain.com \
-    --action backup \
-    --local-folder ./offboarding_backups/mailboxes/testoffboard5_archive/
+gyb --email testoffboard5@yourdomain.com --action backup --local-folder ./offboarding_backups/mailboxes/testoffboard5_archive/
 ```
 
 **Important:** GYB requires the user to NOT be suspended. If you have already
@@ -420,9 +440,7 @@ rclone size workspace: --drive-impersonate testoffboard5@yourdomain.com
 The script does this automatically when you pass `--backup-drive`:
 
 ```bash
-python offboard_user.py --doit --force \
-    --user testoffboard5@yourdomain.com \
-    --backup-drive
+python3 offboard_user.py --doit --force --user testoffboard5@yourdomain.com --backup-drive
 ```
 
 Files are saved to `./offboarding_backups/drive/<email>_<date>/`.
@@ -431,12 +449,7 @@ If you want to test rclone manually first:
 
 ```bash
 mkdir -p ./offboarding_backups/drive/testoffboard5/
-
-rclone sync \
-    workspace: ./offboarding_backups/drive/testoffboard5/ \
-    --drive-impersonate testoffboard5@yourdomain.com \
-    --drive-export-formats docx,xlsx,pptx,pdf \
-    -P --fast-list --transfers=4
+rclone sync workspace: ./offboarding_backups/drive/testoffboard5/ --drive-impersonate testoffboard5@yourdomain.com --drive-export-formats docx,xlsx,pptx,pdf -P --fast-list --transfers=4
 ```
 
 **Export formats explained:** Google Docs, Sheets, and Slides are not real
@@ -483,13 +496,13 @@ suspend**.
 ### Dry run (safest, always start here)
 
 ```bash
-python offboard_user.py --user testoffboard5@yourdomain.com
+python3 offboard_user.py --user testoffboard5@yourdomain.com
 ```
 
 ### Full live run with all prompts
 
 ```bash
-python offboard_user.py --doit --user testoffboard5@yourdomain.com
+python3 offboard_user.py --doit --user testoffboard5@yourdomain.com
 ```
 
 ### Transfer destination flags — how to think about them
@@ -523,87 +536,62 @@ falls back to an interactive prompt at runtime (current behaviour preserved).
 ### Fully scripted (no prompts, single destination for everything)
 
 ```bash
-python offboard_user.py --doit --force \
-    --user testoffboard5@yourdomain.com \
-    --all-transfer-to testoffboard.dest@yourdomain.com
+python3 offboard_user.py --doit --force --user testoffboard5@yourdomain.com --all-transfer-to testoffboard.dest@yourdomain.com
 ```
 
 ### Split routing (Drive to one person, everything else to another)
 
 ```bash
 # Drive ownership goes to the manager; mail/aliases/calendar/forward go to a team alias.
-python offboard_user.py --doit --force \
-    --user testoffboard5@yourdomain.com \
-    --all-transfer-to testoffboard.team@yourdomain.com \
-    --drive-to testoffboard.manager@yourdomain.com
+python3 offboard_user.py --doit --force --user testoffboard5@yourdomain.com --all-transfer-to testoffboard.team@yourdomain.com --drive-to testoffboard.manager@yourdomain.com
 ```
 
 ### Fully per-phase routing (no global default)
 
 ```bash
 # Every non-skipped phase must specify its own destination. Skipped phases need --no-*.
-python offboard_user.py --doit --force \
-    --user testoffboard5@yourdomain.com \
-    --drive-to testoffboard.manager@yourdomain.com \
-    --email-to testoffboard.ops@yourdomain.com \
-    --no-alias --no-calendar --no-forward
+python3 offboard_user.py --doit --force --user testoffboard5@yourdomain.com --drive-to testoffboard.manager@yourdomain.com --email-to testoffboard.ops@yourdomain.com --no-alias --no-calendar --no-forward
 ```
 
 ### Selective run (skip heavy operations)
 
 ```bash
-python offboard_user.py --doit --force \
-    --user testoffboard5@yourdomain.com \
-    --all-transfer-to testoffboard.dest@yourdomain.com \
-    --no-email --no-devices
+python3 offboard_user.py --doit --force --user testoffboard5@yourdomain.com --all-transfer-to testoffboard.dest@yourdomain.com --no-email --no-devices
 ```
 
 ### Backup Drive and email locally, then transfer
 
 ```bash
-python offboard_user.py --doit --force \
-    --user testoffboard5@yourdomain.com \
-    --all-transfer-to testoffboard.dest@yourdomain.com \
-    --backup-drive --backup-email
+python3 offboard_user.py --doit --force --user testoffboard5@yourdomain.com --all-transfer-to testoffboard.dest@yourdomain.com --backup-drive --backup-email
 ```
 
 ### Backup only, no transfers at all (archive mode)
 
 ```bash
-python offboard_user.py --doit --force \
-    --user testoffboard5@yourdomain.com \
-    --no-transfer --backup-drive --backup-email
+python3 offboard_user.py --doit --force --user testoffboard5@yourdomain.com --no-transfer --backup-drive --backup-email
 ```
 
 ### Backup email only, no restore (local archive)
 
 ```bash
-python offboard_user.py --doit --force \
-    --user testoffboard5@yourdomain.com \
-    --backup-email --no-email
+python3 offboard_user.py --doit --force --user testoffboard5@yourdomain.com --backup-email --no-email
 ```
 
 ### No-transfer mode (kill switch + suspend, nothing else)
 
 ```bash
-python offboard_user.py --doit --force \
-    --user testoffboard5@yourdomain.com \
-    --no-transfer
+python3 offboard_user.py --doit --force --user testoffboard5@yourdomain.com --no-transfer
 ```
 
 ### Transition mode (no suspension, keep account alive)
 
 ```bash
-python offboard_user.py --doit --force \
-    --user testoffboard5@yourdomain.com \
-    --all-transfer-to testoffboard.dest@yourdomain.com \
-    --no-suspend
+python3 offboard_user.py --doit --force --user testoffboard5@yourdomain.com --all-transfer-to testoffboard.dest@yourdomain.com --no-suspend
 ```
 
 ### Scorched earth (DELETE user permanently)
 
 ```bash
-python offboard_user.py --doit --force --scorched-earth \
-    --user testoffboard5@yourdomain.com
+python3 offboard_user.py --doit --force --scorched-earth --user testoffboard5@yourdomain.com
 # Even with --force, you must type the email to confirm deletion
 ```
