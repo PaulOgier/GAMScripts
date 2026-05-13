@@ -41,8 +41,8 @@ YOU ASSUME ALL RISK ASSOCIATED WITH THE USE OF THIS SOFTWARE.
 
 Author:       Paul Ogier
 Created:      2023-06-22
-Updated:      2026-05-07
-Version:      4.4.0
+Updated:      2026-05-13
+Version:      4.5.0
 Status:       Production
 Python:       3.8+
 Dependencies: GAM ADV X (GAM7), GYB (optional), rclone (optional), PyYAML (optional)
@@ -96,9 +96,23 @@ Example usage:
   python offboard_user.py --doit                                   # Execute
   python offboard_user.py --doit --backup-drive --backup-email     # Backup locally
   python offboard_user.py --doit --no-transfer --backup-drive      # Backup, no transfers
-  python offboard_user.py --doit --force --user user@co.za         # Non-interactive
+  python offboard_user.py --doit --force --user user@co.za \
+      --all-transfer-to successor@co.za                            # Non-interactive, one destination
+  python offboard_user.py --doit --force --user user@co.za \
+      --all-transfer-to team@co.za --drive-to manager@co.za        # Split: Drive -> manager, rest -> team
   python offboard_user.py --doit --force --scorched-earth          # DELETE user
   python offboard_user.py --help
+
+Transfer destination precedence (Drive, Email, Alias, Calendar, Forward):
+  1. Phase-specific flag (--drive-to, --email-to, --alias-to,
+     --calendar-to, --forward-to) -- highest priority
+  2. --all-transfer-to (fallback default for any unspecified phase)
+  3. Interactive prompt (only when --force is NOT set)
+
+  Under --force, every non-skipped transfer phase MUST resolve to a
+  destination via (1) or (2), or the run aborts before any change is
+  made. Use --no-drive / --no-email / --no-alias / --no-calendar /
+  --no-forward to opt phases out of the requirement.
 
 Cross-platform notes:
 - Windows: Colours auto-disabled on legacy CMD; works in Windows Terminal
@@ -132,14 +146,15 @@ Changelog
   2026-04-22 - v4.2.0 - Added rclone Drive backup (--backup-drive), already-suspended detection (--unsuspend), GYB backup-only mode (--backup-email).
   2026-05-06 - v4.3.0 - GYB restore applies Migrated/<source-user> label; mailbox/Drive backups moved to dedicated subdirs; fixed calendar ACL syntax (calendaracl -> calendaracls, user <email> -> user:<email>).
   2026-05-07 - v4.4.0 - Added startup version check against remote VERSION file (CHECK_FOR_UPDATES toggle, fail-silent); restored author/contact header with Outsource House copyright and three Udemy course links; aligned in-script licence reference with the repo LICENSE (Apache 2.0) and added a plain-English summary emphasising attribution retention.
+  2026-05-13 - v4.5.0 - BREAKING: renamed --transfer-to to --all-transfer-to. Added per-phase destination flags (--drive-to, --email-to, --alias-to, --calendar-to, --forward-to) that override the global default; precedence is phase-specific > --all-transfer-to > interactive prompt. Added upfront destination resolution and validation before any phase runs: under --force, any non-skipped phase without a resolvable destination aborts the run with a clear error instead of half-offboarding.
 
 Planned Features (not yet implemented)
   - Batch processing via CSV file: accept a list of users (e.g. --csv users.csv)
     and iterate the full offboarding flow per row, with per-user logs and a
     consolidated run summary.
   - --manager shortcut flag: auto-resolve the departing user's manager (from
-    the directory) as the default --transfer-to destination, so common cases
-    do not need an explicit address.
+    the directory) as the default --all-transfer-to destination, so common
+    cases do not need an explicit address.
   - --wipe-devices flag: opt-in automatic mobile account_wipe and ChromeOS
     deprovision_retiring_device actions, instead of only listing devices and
     printing manual guidance.
@@ -177,7 +192,7 @@ import shutil
 
 # [IMPORTANT] Current local script version. Bumped on each release.
 # Compared against the remote VERSION file to detect updates.
-SCRIPT_VERSION = "4.4.0"
+SCRIPT_VERSION = "4.5.0"
 
 # [OPTIONAL] Check for a newer script version on startup.
 # When True (default), the script makes a single 3-second HTTP request to
@@ -829,6 +844,66 @@ def check_dependencies(need_gyb: bool = False, need_rclone: bool = False,
 
 ###############################################################################
 # DESTINATION VALIDATION [IMPORTANT]
+def resolve_dest(specific: Optional[str], all_default: Optional[str]) -> Optional[str]:
+    """Return the per-phase destination if set, else the global default, else None.
+
+    Implements the precedence rule for transfer destinations:
+    phase-specific flag (--drive-to, etc.) > --all-transfer-to > unset.
+    """
+    return specific or all_default or None
+
+
+def preflight_destinations(args) -> Dict[str, Optional[str]]:
+    """Resolve destinations for every transfer phase and validate them up front.
+
+    Under --force, any non-skipped phase without a destination is a fatal error
+    (we cannot fall back to an interactive prompt in non-interactive mode and
+    silent skipping would leave the offboarding half-done). Every unique
+    resolved destination is checked against the directory via
+    validate_destination() so we fail before any destructive action.
+
+    Returns a dict mapping phase name to the resolved email (or None if the
+    phase has no destination and will be resolved interactively later).
+    """
+    phases = {
+        "drive":    (args.no_drive,    args.drive_to),
+        "email":    (args.no_email,    args.email_to),
+        "alias":    (args.no_alias,    args.alias_to),
+        "calendar": (args.no_calendar, args.calendar_to),
+        "forward":  (args.no_forward,  args.forward_to),
+    }
+
+    resolved: Dict[str, Optional[str]] = {}
+    missing: List[str] = []
+    for name, (skipped, specific) in phases.items():
+        if skipped:
+            resolved[name] = None
+            continue
+        dest = resolve_dest(specific, args.all_transfer_to)
+        resolved[name] = dest
+        if args.force and not dest:
+            missing.append(name)
+
+    if missing:
+        print_error("--force requires a destination for every non-skipped phase.")
+        print_error(f"Missing destinations for: {', '.join(missing)}")
+        print_error(
+            "Fix by adding --all-transfer-to <email>, a specific "
+            "--<phase>-to <email>, or skipping with --no-<phase>."
+        )
+        sys.exit(2)
+
+    unique_dests = {d for d in resolved.values() if d}
+    if unique_dests:
+        print_info("Validating transfer destinations...")
+        for dest in sorted(unique_dests):
+            if not validate_destination(dest):
+                print_error(f"Destination validation failed: {dest}")
+                sys.exit(2)
+
+    return resolved
+
+
 # Verifies that a destination user exists before attempting transfers.
 ###############################################################################
 
@@ -1892,8 +1967,25 @@ def parse_args():
             "  python offboard_user.py --doit                                   # Execute\n"
             "  python offboard_user.py --doit --backup-drive --backup-email     # Backup locally\n"
             "  python offboard_user.py --doit --no-transfer --backup-drive      # Backup, no transfers\n"
-            "  python offboard_user.py --doit --force --user user@co.za         # Non-interactive\n"
+            "  python offboard_user.py --doit --force --user u@co.za \\\n"
+            "      --all-transfer-to successor@co.za                            # All transfers -> one user\n"
+            "  python offboard_user.py --doit --force --user u@co.za \\\n"
+            "      --all-transfer-to team@co.za --drive-to manager@co.za       # Split: Drive -> manager, rest -> team\n"
+            "  python offboard_user.py --doit --force --user u@co.za \\\n"
+            "      --drive-to mgr@co.za --email-to ops@co.za --no-alias \\\n"
+            "      --no-calendar --no-forward                                    # Per-phase routing, no global default\n"
             "  python offboard_user.py --doit --force --scorched-earth          # DELETE user\n"
+            "\n"
+            "Transfer destination precedence (Drive, Email, Alias, Calendar, Forward):\n"
+            "  1. Phase-specific flag (--drive-to, --email-to, --alias-to,\n"
+            "     --calendar-to, --forward-to) -- always wins.\n"
+            "  2. --all-transfer-to -- fallback for any phase without a specific flag.\n"
+            "  3. Interactive prompt -- only when --force is NOT set.\n"
+            "\n"
+            "  With --force, every non-skipped transfer phase MUST resolve to a\n"
+            "  destination via (1) or (2), or the run aborts before any change\n"
+            "  is made. Skip a phase with --no-drive / --no-email / --no-alias /\n"
+            "  --no-calendar / --no-forward.\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -1958,8 +2050,26 @@ def parse_args():
     target_grp = parser.add_argument_group("Target options")
     target_grp.add_argument("--user", type=str,
                             help="Email of user to offboard")
-    target_grp.add_argument("--transfer-to", type=str,
-                            help="Default destination for all transfers")
+    target_grp.add_argument("--all-transfer-to", type=str,
+                            help="Default destination for ALL transfer phases "
+                                 "(Drive, Email, Alias, Calendar, Forward). "
+                                 "Overridden per-phase by --drive-to, --email-to, "
+                                 "--alias-to, --calendar-to, --forward-to.")
+    target_grp.add_argument("--drive-to", type=str,
+                            help="Destination for Drive transfer "
+                                 "(overrides --all-transfer-to for this phase).")
+    target_grp.add_argument("--email-to", type=str,
+                            help="Destination for email migration "
+                                 "(overrides --all-transfer-to for this phase).")
+    target_grp.add_argument("--alias-to", type=str,
+                            help="Destination for alias transfer "
+                                 "(overrides --all-transfer-to for this phase).")
+    target_grp.add_argument("--calendar-to", type=str,
+                            help="Destination for calendar access transfer "
+                                 "(overrides --all-transfer-to for this phase).")
+    target_grp.add_argument("--forward-to", type=str,
+                            help="Destination for email forwarding "
+                                 "(overrides --all-transfer-to for this phase).")
     target_grp.add_argument("--log-dir", type=str,
                             help="Directory for log files")
 
@@ -2118,8 +2228,9 @@ def main():
             print_info("Aborted by operator.")
             sys.exit(0)
 
-    # Default transfer destination
-    default_dest = args.transfer_to
+    # Resolve and validate transfer destinations up front so we fail fast
+    # before any destructive action if --force is missing destinations.
+    dest_map = preflight_destinations(args)
 
     # =========================================================================
     # PHASE 0: Pre-flight Snapshot
@@ -2261,7 +2372,7 @@ def main():
     if args.no_drive:
         summary_skip("Drive transfer (--no-drive)")
     elif prompt_yes_no("Transfer Drive files to another user?", force=args.force):
-        drive_dest = default_dest or prompt_email("Drive destination email")
+        drive_dest = dest_map["drive"] or prompt_email("Drive destination email")
         with PhaseTimer("Drive transfer"):
             try:
                 transfer_drive(user_email, drive_dest, dry_run)
@@ -2275,7 +2386,7 @@ def main():
     if args.no_email:
         summary_skip("Email migration (--no-email)")
     elif prompt_yes_no("Migrate email to another user (requires GYB)?", force=args.force):
-        email_dest = default_dest or prompt_email("Email migration destination email")
+        email_dest = dest_map["email"] or prompt_email("Email migration destination email")
         with PhaseTimer("Email migration"):
             try:
                 migrate_email(user_email, email_dest, dry_run)
@@ -2289,7 +2400,7 @@ def main():
     if args.no_alias:
         summary_skip("Alias transfer (--no-alias)")
     elif prompt_yes_no("Transfer aliases to another user?", force=args.force):
-        alias_dest = default_dest or prompt_email("Alias destination email")
+        alias_dest = dest_map["alias"] or prompt_email("Alias destination email")
         with PhaseTimer("Alias transfer"):
             try:
                 transfer_aliases(user_email, alias_dest, dry_run)
@@ -2303,7 +2414,7 @@ def main():
     if args.no_calendar:
         summary_skip("Calendar transfer (--no-calendar)")
     elif prompt_yes_no("Grant calendar access to another user?", force=args.force):
-        cal_dest = default_dest or prompt_email("Calendar access destination email")
+        cal_dest = dest_map["calendar"] or prompt_email("Calendar access destination email")
         with PhaseTimer("Calendar transfer"):
             try:
                 transfer_calendar(user_email, cal_dest, dry_run)
@@ -2323,7 +2434,7 @@ def main():
     if args.no_forward:
         summary_skip("Email forwarding (--no-forward)")
     elif prompt_yes_no("Set up email forwarding to a successor?", force=args.force):
-        fwd_dest = default_dest or prompt_email("Forward emails to")
+        fwd_dest = dest_map["forward"] or prompt_email("Forward emails to")
         with PhaseTimer("Email forwarding"):
             try:
                 setup_forwarding(user_email, fwd_dest, dry_run)

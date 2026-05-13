@@ -208,20 +208,30 @@ python3 offboard_user.py --doit --user testoffboard3@yourdomain.com
 # Test 4: Admin user (verify detection warning)
 python3 offboard_user.py --doit --user testoffboard4@yourdomain.com
 
-# Test 5: Data-heavy user, fully scripted (non-interactive)
-python3 offboard_user.py --doit --force --user testoffboard5@yourdomain.com --transfer-to testoffboard.dest@yourdomain.com
+# Test 5: Data-heavy user, fully scripted (non-interactive, one destination for everything)
+python3 offboard_user.py --doit --force --user testoffboard5@yourdomain.com --all-transfer-to testoffboard.dest@yourdomain.com
+
+# Test 5b: Split routing — Drive to manager, everything else to team inbox
+python3 offboard_user.py --doit --force --user testoffboard5@yourdomain.com --all-transfer-to testoffboard.team@yourdomain.com --drive-to testoffboard.manager@yourdomain.com
+
+# Test 5c: Per-phase routing with NO global default (every non-skipped phase needs its own flag)
+python3 offboard_user.py --doit --force --user testoffboard5@yourdomain.com --drive-to testoffboard.manager@yourdomain.com --email-to testoffboard.ops@yourdomain.com --no-alias --no-calendar --no-forward
+
+# Test 5d: --force without a destination should ABORT before any change (expected failure)
+python3 offboard_user.py --doit --force --user testoffboard5@yourdomain.com
+# Expect: exit code 2, message listing missing destinations for drive/email/alias/calendar/forward
 
 # Test 6: Data-heavy user with selective skips
-python3 offboard_user.py --doit --force --user testoffboard5@yourdomain.com --transfer-to testoffboard.dest@yourdomain.com --no-email --no-devices --no-suspend
+python3 offboard_user.py --doit --force --user testoffboard5@yourdomain.com --all-transfer-to testoffboard.dest@yourdomain.com --no-email --no-devices --no-suspend
 
 # Test 7: 2SV user (test turnoff2sv success or graceful failure)
 python3 offboard_user.py --doit --user testoffboard2@yourdomain.com
 
 # Test 8: Backup Drive locally via rclone, then transfer ownership
-python3 offboard_user.py --doit --force --user testoffboard5@yourdomain.com --transfer-to testoffboard.dest@yourdomain.com --backup-drive
+python3 offboard_user.py --doit --force --user testoffboard5@yourdomain.com --all-transfer-to testoffboard.dest@yourdomain.com --backup-drive
 
 # Test 9: Backup email locally only (no restore to another user)
-python3 offboard_user.py --doit --force --user testoffboard5@yourdomain.com --transfer-to testoffboard.dest@yourdomain.com --backup-email
+python3 offboard_user.py --doit --force --user testoffboard5@yourdomain.com --all-transfer-to testoffboard.dest@yourdomain.com --backup-email
 
 # Test 10: Backup both Drive and email locally, but do NOT transfer anything
 python3 offboard_user.py --doit --force --user testoffboard5@yourdomain.com --no-transfer --backup-drive --backup-email
@@ -469,12 +479,61 @@ python offboard_user.py --user testoffboard5@yourdomain.com
 python offboard_user.py --doit --user testoffboard5@yourdomain.com
 ```
 
-### Fully scripted (no prompts, single destination)
+### Transfer destination flags — how to think about them
+
+There are six flags that control where a departing user's data ends up. Use
+them in this order of thinking:
+
+1. **`--all-transfer-to <email>`** — the global default. If you set only this,
+   every non-skipped transfer phase (Drive, Email, Alias, Calendar, Forward)
+   goes to that one address. This is the common case.
+2. **Per-phase flags** override `--all-transfer-to` for a single phase:
+   - `--drive-to <email>` — Drive ownership transfer destination
+   - `--email-to <email>` — Mailbox migration target (via GYB)
+   - `--alias-to <email>` — Alias re-assignment target
+   - `--calendar-to <email>` — Calendar access grant target
+   - `--forward-to <email>` — Gmail forwarding destination
+3. **`--no-<phase>` skips** opt a phase out of the requirement entirely.
+
+**Precedence (highest wins):** per-phase flag → `--all-transfer-to` → interactive
+prompt (only when `--force` is **not** set).
+
+**Behaviour under `--force`:** the script resolves every non-skipped phase's
+destination up front and validates each address against the directory. If any
+phase has no resolvable destination, the run aborts with exit code 2 **before
+any destructive action**. This protects against half-offboarding from a typo
+or forgotten flag.
+
+**Behaviour without `--force`:** any phase without a flag-resolved destination
+falls back to an interactive prompt at runtime (current behaviour preserved).
+
+### Fully scripted (no prompts, single destination for everything)
 
 ```bash
 python offboard_user.py --doit --force \
     --user testoffboard5@yourdomain.com \
-    --transfer-to testoffboard.dest@yourdomain.com
+    --all-transfer-to testoffboard.dest@yourdomain.com
+```
+
+### Split routing (Drive to one person, everything else to another)
+
+```bash
+# Drive ownership goes to the manager; mail/aliases/calendar/forward go to a team alias.
+python offboard_user.py --doit --force \
+    --user testoffboard5@yourdomain.com \
+    --all-transfer-to testoffboard.team@yourdomain.com \
+    --drive-to testoffboard.manager@yourdomain.com
+```
+
+### Fully per-phase routing (no global default)
+
+```bash
+# Every non-skipped phase must specify its own destination. Skipped phases need --no-*.
+python offboard_user.py --doit --force \
+    --user testoffboard5@yourdomain.com \
+    --drive-to testoffboard.manager@yourdomain.com \
+    --email-to testoffboard.ops@yourdomain.com \
+    --no-alias --no-calendar --no-forward
 ```
 
 ### Selective run (skip heavy operations)
@@ -482,7 +541,7 @@ python offboard_user.py --doit --force \
 ```bash
 python offboard_user.py --doit --force \
     --user testoffboard5@yourdomain.com \
-    --transfer-to testoffboard.dest@yourdomain.com \
+    --all-transfer-to testoffboard.dest@yourdomain.com \
     --no-email --no-devices
 ```
 
@@ -491,7 +550,7 @@ python offboard_user.py --doit --force \
 ```bash
 python offboard_user.py --doit --force \
     --user testoffboard5@yourdomain.com \
-    --transfer-to testoffboard.dest@yourdomain.com \
+    --all-transfer-to testoffboard.dest@yourdomain.com \
     --backup-drive --backup-email
 ```
 
@@ -524,7 +583,7 @@ python offboard_user.py --doit --force \
 ```bash
 python offboard_user.py --doit --force \
     --user testoffboard5@yourdomain.com \
-    --transfer-to testoffboard.dest@yourdomain.com \
+    --all-transfer-to testoffboard.dest@yourdomain.com \
     --no-suspend
 ```
 
