@@ -96,10 +96,11 @@ Example usage:
   python offboard_user.py --doit                                   # Execute
   python offboard_user.py --doit --backup-drive --backup-email     # Backup locally
   python offboard_user.py --doit --no-transfer --backup-drive      # Backup, no transfers
-  python offboard_user.py --doit --force --user user@co.za \
-      --all-transfer-to successor@co.za                            # Non-interactive, one destination
-  python offboard_user.py --doit --force --user user@co.za \
-      --all-transfer-to team@co.za --drive-to manager@co.za        # Split: Drive -> manager, rest -> team
+  python offboard_user.py --doit --force --user leaver@yourdomain.com \
+      --all-transfer-to testoffboard.team@yourdomain.com                              # Non-interactive, one destination
+  python offboard_user.py --doit --force --user leaver@yourdomain.com \
+      --all-transfer-to testoffboard.team@yourdomain.com \
+      --drive-to testoffboard.manager@yourdomain.com                                  # Split: Drive -> manager, rest -> team
   python offboard_user.py --doit --force --scorched-earth          # DELETE user
   python offboard_user.py --help
 
@@ -148,17 +149,7 @@ Changelog
   2026-05-07 - v4.4.0 - Added startup version check against remote VERSION file (CHECK_FOR_UPDATES toggle, fail-silent); restored author/contact header with Outsource House copyright and three Udemy course links; aligned in-script licence reference with the repo LICENSE (Apache 2.0) and added a plain-English summary emphasising attribution retention.
   2026-05-13 - v4.5.0 - BREAKING: renamed --transfer-to to --all-transfer-to. Added per-phase destination flags (--drive-to, --email-to, --alias-to, --calendar-to, --forward-to) that override the global default; precedence is phase-specific > --all-transfer-to > interactive prompt. Added upfront destination resolution and validation before any phase runs: under --force, any non-skipped phase without a resolvable destination aborts the run with a clear error instead of half-offboarding.
   2026-05-14 - v4.6.0 - Added end-of-run MANUAL ACTION block surfacing admin-console instructions for durable mail capture (alias / recipient address map / group) since GAM cannot configure recipient address map and Gmail-level forwarding stops on suspension/deletion; new --forward-alias-to flag explicitly nominates the successor printed in the block (falls back to --forward-to then --all-transfer-to), no automated change is made. Guide gains a "Mail capture after suspension" section and the order-of-operations list flags forwarding's suspension limitation.
-  2026-05-14 - v4.5.10 - Group preview still empty in v4.5.8 because the print-groups call captured stderr too, letting GAM's "Getting Groups for ..." progress lines slip into the CSV stream and confuse DictReader. Now passes stdout_only=True like the other GAM `print` callsites (mobile / cros / aliases). Also added a row-level diagnostic: when group_count > 0 but no names were extracted, logs the headers, the chosen column, and the first row's contents to the log file so the next iteration can be coded from real data rather than guesses.
-  2026-05-14 - v4.5.9 - Accessibility: terminal colours switched from the standard 30-37 ANSI codes to the bright/high-intensity 91-96 variants in bold. The previous dark navy blue (used for `===` headers) and dark cyan (used for `[INFO]` lines) were hard to read on dark terminal backgrounds. The bright equivalents preserve the same colour identity (red/green/yellow/blue/cyan) at much higher contrast.
-  2026-05-14 - v4.5.8 - Group preview was still empty in v4.5.7 because GAM merges a "Getting N Groups for ..." progress line onto stdout that DictReader was treating as the CSV header. Hardened the parser to (a) strip leading non-CSV lines until a row with commas is found, (b) match the group-address column by substring ("group" anywhere in the field name) instead of exact name, (c) fall back to "first email-looking column that isn't the queried user's own address" when no group-named column exists, and (d) log the observed CSV headers when no column can be matched so a future GAM format change is debuggable from the log file.
-  2026-05-14 - v4.5.7 - Two polish fixes from a v4.5.6 dry run: (1) Group preview was showing `Found N group membership(s):` with no names because the parser assumed the group column was at fixed CSV index 1, but GAM's `print groups` output uses a different column order (often Email,Domain,Group). Switched to csv.DictReader and a prioritised header lookup (Group/GroupEmail/group/groupEmail) so group names render regardless of GAM version. (2) Suppressed-summary probe failures (e.g. validate_destination's user-then-group probe for forwarding destinations) no longer print red [ERROR] lines to the console; they are demoted to info-level log entries since the caller has a working fallback. The expected GAM "Type not supported: userKey" response no longer alarms the operator.
-  2026-05-14 - v4.5.6 - When the offboarding-OU dependency check fails, the script now prints concrete remediation steps inline (green lines) instead of a generic error: the exact `gam create org ...` command, the Admin Console URL with the orgunits path, and a reminder that OFFBOARDING_OU can be retargeted. Reduces back-and-forth to docs when first-time admins hit this.
-  2026-05-14 - v4.5.5 - Two fixes from real-run review: (1) Dependency check now verifies the offboarding OU exists via `gam info org <OFFBOARDING_OU>` and aborts upfront if missing, instead of failing the kill-switch's OU-move step mid-run and leaving the user in their original OU (which cascades into 2SV/deprovision failures when the original OU enforces 2SV). (2) Destination validation no longer pollutes the final error summary when a group fallback succeeds: added a `suppress_summary_error` flag to run_gam(); validate_destination() uses it on the user-probe and group-probe attempts, then records a single `summary_error("Destination not found: ...")` only when both probes fail. Previously every group-destination forwarding setup would show two spurious "Failed: gam info user ..." entries in the run summary.
-  2026-05-14 - v4.5.4 - Visibility batch across four phases: (1) rclone Drive backup now streams its `-P` summary line live (Transferred / %, MiB/s, ETA), throttled to 1 log line/sec, instead of capturing the whole transcript and grepping for "transferred" at the end. (2) Delegate cleanup logs each removal as "[i/N] Removing delegate: addr" so users can see progress through long delegate lists. (3) Licence removal now reports human-readable SKU display names (e.g. "Google Workspace Business Plus") in info/summary lines instead of opaque skuId hex strings, by reading both Licenses and LicensesDisplay columns from `gam print licenses`. (4) Group removal now parses the membership list, reports a count and up-to-5-name preview before the bulk delete, and surfaces "Removed from N group(s)" or a not-a-member short-circuit instead of an unconditional "Removed from all groups".
-  2026-05-14 - v4.5.3 - GYB backup/restore progress now surfaces live: run_gyb() reads stdout in chunks and treats carriage returns as line separators so tqdm progress bars (e.g. " 42%|####  | 1234/2950") are logged as they update, throttled to one log line per second per bar to avoid log spam. Sets PYTHONUNBUFFERED=1 on the child so GYB flushes promptly. Removed the 600s timeout from run_gyb (large mailbox migrations can legitimately take hours). Added an on-screen hint before the backup phase explaining the live progress bar format.
-  2026-05-14 - v4.5.2 - Drive transfer now streams GAM's per-file progress live to the log (line-buffered Popen) instead of buffering until completion, so long transfers no longer look frozen. Removed the 600s timeout (large drives can legitimately run for hours). Added an on-screen hint pointing to Admin Console Drive audit log and the destination user's "Shared with me" view as out-of-band progress signals.
-  2026-05-13 - v4.5.1 - Email migration default changed: GYB restore now passes --strip-labels, discarding original Gmail labels (including INBOX) so migrated mail is archived under a single Migrated/<source-user> label. Added --strip-labels / --keep-labels mutually exclusive flags and an interactive prompt (default=strip) when neither is set. Pass --keep-labels to preserve the previous behaviour (INBOX + custom labels retained with the migration label on top). Reliability fixes: forwarding setup now polls show forwardingaddresses for verificationStatus=accepted (up to 60s) before activating, replacing the unreliable 3s sleep that caused "Invalid forwarding address" failures; activation success is now reflected accurately in the summary instead of being claimed unconditionally. Licence print timeouts raised (snapshot 30s -> 180s, removal 120s -> 180s) since the licensing API consistently takes 20-30s; a failed/timed-out licence query is now reported as an error with manual-cleanup instructions instead of silently claiming "No licences found".
-
+  
 Planned Features (not yet implemented)
   - Batch processing via CSV file: accept a list of users (e.g. --csv users.csv)
     and iterate the full offboarding flow per row, with per-user logs and a
@@ -2467,13 +2458,15 @@ def parse_args():
             "  python offboard_user.py --doit                                   # Execute\n"
             "  python offboard_user.py --doit --backup-drive --backup-email     # Backup locally\n"
             "  python offboard_user.py --doit --no-transfer --backup-drive      # Backup, no transfers\n"
-            "  python offboard_user.py --doit --force --user u@co.za \\\n"
-            "      --all-transfer-to successor@co.za                            # All transfers -> one user\n"
-            "  python offboard_user.py --doit --force --user u@co.za \\\n"
-            "      --all-transfer-to team@co.za --drive-to manager@co.za       # Split: Drive -> manager, rest -> team\n"
-            "  python offboard_user.py --doit --force --user u@co.za \\\n"
-            "      --drive-to mgr@co.za --email-to ops@co.za --no-alias \\\n"
-            "      --no-calendar --no-forward                                    # Per-phase routing, no global default\n"
+            "  python offboard_user.py --doit --force --user leaver@yourdomain.com \\\n"
+            "      --all-transfer-to testoffboard.team@yourdomain.com                              # All transfers -> one user\n"
+            "  python offboard_user.py --doit --force --user leaver@yourdomain.com \\\n"
+            "      --all-transfer-to testoffboard.team@yourdomain.com \\\n"
+            "      --drive-to testoffboard.manager@yourdomain.com                                  # Split: Drive -> manager, rest -> team\n"
+            "  python offboard_user.py --doit --force --user leaver@yourdomain.com \\\n"
+            "      --drive-to testoffboard.manager@yourdomain.com \\\n"
+            "      --email-to testoffboard.ops@yourdomain.com --no-alias \\\n"
+            "      --no-calendar --no-forward                                                       # Per-phase routing, no global default\n"
             "  python offboard_user.py --doit --force --scorched-earth          # DELETE user\n"
             "\n"
             "Transfer destination precedence (Drive, Email, Alias, Calendar, Forward):\n"
