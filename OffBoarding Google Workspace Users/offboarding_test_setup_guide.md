@@ -14,8 +14,20 @@ rules — keep them in mind if you adapt the commands:
   quotes prevent shell interpretation on every platform. Double quotes break
   on zsh whenever the string contains `!` (history expansion).
 - **`python3`**, never bare `python`. Modern macOS no longer ships Python 2
-  and `python` is unavailable; `python3` works on macOS, Linux, and Windows
-  (Windows users may also use `py -3`).
+  and `python` is unavailable; `python3` is the universal command on
+  macOS and Linux.
+
+  **Windows note:** the python.org installer does *not* create a
+  `python3.exe` — only `python.exe` and the `py` launcher. To keep this
+  guide's `python3 ...` examples working unchanged on Windows, follow
+  `installation_windows.md` (the *Python prerequisite → "Create a
+  `python3.cmd` shim"* block). It creates a one-line `python3.cmd`
+  wrapper on PATH that forwards to `py -3`. With the shim in place,
+  every `python3 offboard_user.py ...` example in this guide runs
+  identically on every admin's machine — macOS, Linux, and Windows —
+  with no command translation. If you skip the shim, Windows admins
+  must manually translate every `python3` to `py -3` (or `python`)
+  on the fly.
 - **File-creation patterns are platform-specific.** `echo > /tmp/file` is
   POSIX-only; Windows uses `%TEMP%\file` (cmd) or `$env:TEMP\file`
   (PowerShell). Where this appears, the guide shows separate blocks.
@@ -539,11 +551,15 @@ This is the recommended sequence when you need both backups and transfers:
 3. **GAM7 Drive transfer** (ownership changes in Google)
 4. **GYB email restore** (copy mailbox to destination user)
 5. **GAM7 alias transfer** (redirect incoming mail)
-6. **GAM7 forwarding setup** (catch new incoming mail)
+6. **GAM7 forwarding setup** (catch new incoming mail — Gmail-level,
+   stops working once the user is suspended/deleted)
 7. **Suspension** (lock the account)
+8. **Manual mail capture** (after the run — see the MANUAL ACTION block
+   printed at the end of the summary, or the section below)
 
 The key principle is: **back up before you transfer, transfer before you
-suspend**.
+suspend**. For durable mail capture beyond suspension, see the **Mail
+capture after suspension** section below.
 
 ---
 
@@ -588,6 +604,34 @@ or forgotten flag.
 
 **Behaviour without `--force`:** any phase without a flag-resolved destination
 falls back to an interactive prompt at runtime (current behaviour preserved).
+
+### Mail capture after suspension (manual step)
+
+`--forward-to` configures **Gmail-level forwarding**, which only works while
+the source account is active. Once the user is suspended or deleted, Gmail
+forwarding stops — inbound mail to their address bounces. GAM cannot
+configure the **"Recipient address map"** routing feature that would solve
+this, so the script handles it as a documented manual step instead.
+
+At the very end of every run that knows a successor address, the script
+prints a **MANUAL ACTION REQUIRED** block to both the console and the log
+file. The block lists three admin-console options for durable mail capture:
+
+1. **Add as alias on the successor** — simplest, single recipient. Requires
+   the offboarded address to be released first (delete or rename the user).
+2. **Recipient address map** (Admin console → Apps → Google Workspace →
+   Gmail → Default routing) — works even while the offboarded user still
+   exists. Rewrites the envelope recipient on inbound mail.
+3. **Convert to a Group** — supports multiple recipients.
+
+The successor printed in the block is resolved in this order:
+
+1. `--forward-alias-to <email>` — explicit override for this block only.
+2. `--forward-to <email>` — falls back to the Gmail-forwarding destination.
+3. `--all-transfer-to <email>` — falls back to the global default.
+
+If none of these are set, the block is suppressed. No automated change is
+made for this — the script only surfaces the checklist.
 
 ### Fully scripted (no prompts, single destination for everything)
 

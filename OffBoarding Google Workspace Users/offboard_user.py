@@ -147,6 +147,16 @@ Changelog
   2026-05-06 - v4.3.0 - GYB restore applies Migrated/<source-user> label; mailbox/Drive backups moved to dedicated subdirs; fixed calendar ACL syntax (calendaracl -> calendaracls, user <email> -> user:<email>).
   2026-05-07 - v4.4.0 - Added startup version check against remote VERSION file (CHECK_FOR_UPDATES toggle, fail-silent); restored author/contact header with Outsource House copyright and three Udemy course links; aligned in-script licence reference with the repo LICENSE (Apache 2.0) and added a plain-English summary emphasising attribution retention.
   2026-05-13 - v4.5.0 - BREAKING: renamed --transfer-to to --all-transfer-to. Added per-phase destination flags (--drive-to, --email-to, --alias-to, --calendar-to, --forward-to) that override the global default; precedence is phase-specific > --all-transfer-to > interactive prompt. Added upfront destination resolution and validation before any phase runs: under --force, any non-skipped phase without a resolvable destination aborts the run with a clear error instead of half-offboarding.
+  2026-05-14 - v4.6.0 - Added end-of-run MANUAL ACTION block surfacing admin-console instructions for durable mail capture (alias / recipient address map / group) since GAM cannot configure recipient address map and Gmail-level forwarding stops on suspension/deletion; new --forward-alias-to flag explicitly nominates the successor printed in the block (falls back to --forward-to then --all-transfer-to), no automated change is made. Guide gains a "Mail capture after suspension" section and the order-of-operations list flags forwarding's suspension limitation.
+  2026-05-14 - v4.5.10 - Group preview still empty in v4.5.8 because the print-groups call captured stderr too, letting GAM's "Getting Groups for ..." progress lines slip into the CSV stream and confuse DictReader. Now passes stdout_only=True like the other GAM `print` callsites (mobile / cros / aliases). Also added a row-level diagnostic: when group_count > 0 but no names were extracted, logs the headers, the chosen column, and the first row's contents to the log file so the next iteration can be coded from real data rather than guesses.
+  2026-05-14 - v4.5.9 - Accessibility: terminal colours switched from the standard 30-37 ANSI codes to the bright/high-intensity 91-96 variants in bold. The previous dark navy blue (used for `===` headers) and dark cyan (used for `[INFO]` lines) were hard to read on dark terminal backgrounds. The bright equivalents preserve the same colour identity (red/green/yellow/blue/cyan) at much higher contrast.
+  2026-05-14 - v4.5.8 - Group preview was still empty in v4.5.7 because GAM merges a "Getting N Groups for ..." progress line onto stdout that DictReader was treating as the CSV header. Hardened the parser to (a) strip leading non-CSV lines until a row with commas is found, (b) match the group-address column by substring ("group" anywhere in the field name) instead of exact name, (c) fall back to "first email-looking column that isn't the queried user's own address" when no group-named column exists, and (d) log the observed CSV headers when no column can be matched so a future GAM format change is debuggable from the log file.
+  2026-05-14 - v4.5.7 - Two polish fixes from a v4.5.6 dry run: (1) Group preview was showing `Found N group membership(s):` with no names because the parser assumed the group column was at fixed CSV index 1, but GAM's `print groups` output uses a different column order (often Email,Domain,Group). Switched to csv.DictReader and a prioritised header lookup (Group/GroupEmail/group/groupEmail) so group names render regardless of GAM version. (2) Suppressed-summary probe failures (e.g. validate_destination's user-then-group probe for forwarding destinations) no longer print red [ERROR] lines to the console; they are demoted to info-level log entries since the caller has a working fallback. The expected GAM "Type not supported: userKey" response no longer alarms the operator.
+  2026-05-14 - v4.5.6 - When the offboarding-OU dependency check fails, the script now prints concrete remediation steps inline (green lines) instead of a generic error: the exact `gam create org ...` command, the Admin Console URL with the orgunits path, and a reminder that OFFBOARDING_OU can be retargeted. Reduces back-and-forth to docs when first-time admins hit this.
+  2026-05-14 - v4.5.5 - Two fixes from real-run review: (1) Dependency check now verifies the offboarding OU exists via `gam info org <OFFBOARDING_OU>` and aborts upfront if missing, instead of failing the kill-switch's OU-move step mid-run and leaving the user in their original OU (which cascades into 2SV/deprovision failures when the original OU enforces 2SV). (2) Destination validation no longer pollutes the final error summary when a group fallback succeeds: added a `suppress_summary_error` flag to run_gam(); validate_destination() uses it on the user-probe and group-probe attempts, then records a single `summary_error("Destination not found: ...")` only when both probes fail. Previously every group-destination forwarding setup would show two spurious "Failed: gam info user ..." entries in the run summary.
+  2026-05-14 - v4.5.4 - Visibility batch across four phases: (1) rclone Drive backup now streams its `-P` summary line live (Transferred / %, MiB/s, ETA), throttled to 1 log line/sec, instead of capturing the whole transcript and grepping for "transferred" at the end. (2) Delegate cleanup logs each removal as "[i/N] Removing delegate: addr" so users can see progress through long delegate lists. (3) Licence removal now reports human-readable SKU display names (e.g. "Google Workspace Business Plus") in info/summary lines instead of opaque skuId hex strings, by reading both Licenses and LicensesDisplay columns from `gam print licenses`. (4) Group removal now parses the membership list, reports a count and up-to-5-name preview before the bulk delete, and surfaces "Removed from N group(s)" or a not-a-member short-circuit instead of an unconditional "Removed from all groups".
+  2026-05-14 - v4.5.3 - GYB backup/restore progress now surfaces live: run_gyb() reads stdout in chunks and treats carriage returns as line separators so tqdm progress bars (e.g. " 42%|####  | 1234/2950") are logged as they update, throttled to one log line per second per bar to avoid log spam. Sets PYTHONUNBUFFERED=1 on the child so GYB flushes promptly. Removed the 600s timeout from run_gyb (large mailbox migrations can legitimately take hours). Added an on-screen hint before the backup phase explaining the live progress bar format.
+  2026-05-14 - v4.5.2 - Drive transfer now streams GAM's per-file progress live to the log (line-buffered Popen) instead of buffering until completion, so long transfers no longer look frozen. Removed the 600s timeout (large drives can legitimately run for hours). Added an on-screen hint pointing to Admin Console Drive audit log and the destination user's "Shared with me" view as out-of-band progress signals.
   2026-05-13 - v4.5.1 - Email migration default changed: GYB restore now passes --strip-labels, discarding original Gmail labels (including INBOX) so migrated mail is archived under a single Migrated/<source-user> label. Added --strip-labels / --keep-labels mutually exclusive flags and an interactive prompt (default=strip) when neither is set. Pass --keep-labels to preserve the previous behaviour (INBOX + custom labels retained with the migration label on top). Reliability fixes: forwarding setup now polls show forwardingaddresses for verificationStatus=accepted (up to 60s) before activating, replacing the unreliable 3s sleep that caused "Invalid forwarding address" failures; activation success is now reflected accurately in the summary instead of being claimed unconditionally. Licence print timeouts raised (snapshot 30s -> 180s, removal 120s -> 180s) since the licensing API consistently takes 20-30s; a failed/timed-out licence query is now reported as an error with manual-cleanup instructions instead of silently claiming "No licences found".
 
 Planned Features (not yet implemented)
@@ -172,6 +182,8 @@ Planned Features (not yet implemented)
 """
 
 import argparse
+import csv
+import io
 import subprocess
 import sys
 import os
@@ -193,7 +205,7 @@ import shutil
 
 # [IMPORTANT] Current local script version. Bumped on each release.
 # Compared against the remote VERSION file to detect updates.
-SCRIPT_VERSION = "4.5.1"
+SCRIPT_VERSION = "4.6.0"
 
 # [OPTIONAL] Check for a newer script version on startup.
 # When True (default), the script makes a single 3-second HTTP request to
@@ -260,13 +272,19 @@ RCLONE_EXPORT_FORMATS = "docx,xlsx,pptx,pdf"
 ###############################################################################
 
 class Colours:
-    """ANSI colour codes for terminal output."""
-    RED = '\033[0;31m'
-    GREEN = '\033[0;32m'
-    YELLOW = '\033[1;33m'
-    BLUE = '\033[0;34m'
-    MAGENTA = '\033[0;35m'
-    CYAN = '\033[0;36m'
+    """ANSI colour codes for terminal output.
+
+    Uses bright (high-intensity, 90-97) variants in bold for better
+    contrast on dark terminal backgrounds. The standard codes (30-37)
+    render as dark navy / muddy green on most dark themes and are hard
+    to read; the bright variants are the standard accessibility fix.
+    """
+    RED = '\033[1;91m'      # bright red, bold
+    GREEN = '\033[1;92m'    # bright green, bold
+    YELLOW = '\033[1;93m'   # bright yellow, bold
+    BLUE = '\033[1;94m'     # bright blue, bold — readable on dark bg
+    MAGENTA = '\033[1;95m'  # bright magenta, bold
+    CYAN = '\033[1;96m'     # bright cyan, bold — readable [INFO] colour
     RESET = '\033[0m'
     BOLD = '\033[1m'
 
@@ -284,11 +302,36 @@ class Colours:
 
 
 # [IMPORTANT] Auto-detect terminal colour support.
-# Windows Terminal (WT_SESSION) and modern PowerShell support ANSI.
-# Legacy CMD does not, so we disable colours there.
-# On macOS/Linux, colours are always supported if stdout is a TTY.
+# Windows 10+ cmd.exe supports ANSI once virtual-terminal processing is
+# enabled via SetConsoleMode; Windows Terminal and modern PowerShell have
+# it on by default. On macOS/Linux, colours work whenever stdout is a TTY.
+def _enable_windows_ansi() -> bool:
+    """Enable ANSI escape processing on the current Windows console.
+
+    Returns True if VT processing is active (or was already), False on
+    older Windows where the call fails. Safe to call on non-Windows.
+    """
+    if os.name != 'nt':
+        return True
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        # STD_OUTPUT_HANDLE = -11; ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
+        handle = kernel32.GetStdHandle(-11)
+        mode = ctypes.c_ulong()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return False
+        return bool(kernel32.SetConsoleMode(handle, mode.value | 0x0004))
+    except Exception:
+        return False
+
+
 if os.name == 'nt':
-    if not os.environ.get('WT_SESSION') and not os.environ.get('TERM_PROGRAM'):
+    if not (
+        os.environ.get('WT_SESSION')
+        or os.environ.get('TERM_PROGRAM')
+        or _enable_windows_ansi()
+    ):
         Colours.strip_colours()
 elif not sys.stdout.isatty():
     Colours.strip_colours()
@@ -520,7 +563,8 @@ def run_gam(args: List[str], dry_run: bool = True,
             capture_output: bool = False,
             timeout: int = 300,
             non_fatal_patterns: Optional[List[str]] = None,
-            stdout_only: bool = False) -> Tuple[bool, str]:
+            stdout_only: bool = False,
+            suppress_summary_error: bool = False) -> Tuple[bool, str]:
     """
     Execute a GAM command with full logging and dry-run support.
 
@@ -531,6 +575,10 @@ def run_gam(args: List[str], dry_run: bool = True,
         timeout: Seconds before the command is killed (default 300)
         non_fatal_patterns: Additional output substrings that should NOT be
             treated as errors (e.g. ["auto-assigned"]). Matched case-insensitively.
+        suppress_summary_error: If True, a failed call does NOT record a
+            summary_error entry. Use when the caller has a fallback path
+            (e.g. probe-as-user, then fall back to probe-as-group) so the
+            final summary doesn't list the probe failure as a real error.
 
     Returns:
         Tuple of (success: bool, output: str). Returns (True, output) when a
@@ -573,15 +621,26 @@ def run_gam(args: List[str], dry_run: bool = True,
             all_non_fatal = base_non_fatal + (non_fatal_patterns or [])
             if any(p.lower() in lower for p in all_non_fatal):
                 return True, output
-            print_error(f"Command failed (exit {result.returncode}): {cmd_str}")
-            if output:
-                print_error(output)
-            summary_error(f"Failed: {cmd_str}")
+            if suppress_summary_error:
+                # Caller flagged this call as a probe with a fallback path
+                # (e.g. validate_destination's user-then-group probe), so
+                # downgrade the red [ERROR] lines to info to avoid alarming
+                # the user about an expected failure. The output is still
+                # logged so a real problem remains debuggable.
+                logger.info(f"Probe failed (exit {result.returncode}): {cmd_str}")
+                if output:
+                    logger.info(output)
+            else:
+                print_error(f"Command failed (exit {result.returncode}): {cmd_str}")
+                if output:
+                    print_error(output)
+                summary_error(f"Failed: {cmd_str}")
             return False, output
 
     except subprocess.TimeoutExpired:
         print_error(f"Command timed out after {timeout}s: {cmd_str}")
-        summary_error(f"Timeout: {cmd_str}")
+        if not suppress_summary_error:
+            summary_error(f"Timeout: {cmd_str}")
         return False, "Timeout"
     except FileNotFoundError:
         print_error(
@@ -647,11 +706,20 @@ def run_shell_pipe(cmd_str: str, dry_run: bool = True,
 
 def run_gyb(args: List[str], dry_run: bool = True) -> Tuple[bool, str]:
     """
-    Execute a GYB command, streaming output line-by-line to the log.
+    Execute a GYB command, streaming output to the log including tqdm
+    progress bars.
 
-    Uses Popen instead of run() so progress lines appear in real-time
-    rather than being buffered until completion. stdin is closed so GYB
-    never silently hangs waiting for interactive input.
+    GYB uses tqdm for progress, which writes \\r (carriage return) to
+    overwrite the same line. A naive line iterator only yields on \\n,
+    so progress updates would stay invisible until GYB prints a real
+    newline at phase completion. We read in small chunks and treat both
+    \\r and \\n as line separators, then throttle identical-prefix
+    progress lines to at most one log entry per second so the log file
+    isn't flooded with thousands of bar-redraw frames.
+
+    No overall timeout: a real mailbox backup/restore can legitimately
+    run for hours. stdin is closed so GYB never silently hangs waiting
+    for interactive input.
     """
     if shutdown_requested:
         return False, "Shutdown requested"
@@ -666,27 +734,72 @@ def run_gyb(args: List[str], dry_run: bool = True) -> Tuple[bool, str]:
     logger.info(f"Executing: {cmd_str}")
 
     try:
+        # PYTHONUNBUFFERED=1 nudges GYB's child Python to flush stdout
+        # promptly so progress updates aren't held in a 4KB block buffer.
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+
         proc = subprocess.Popen(
             full_cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
-            text=True
+            text=True,
+            bufsize=1,
+            env=env,
         )
 
         collected: List[str] = []
-        start = time.time()
+        buffer = ""
+        # Throttle repeated progress lines: only log a redraw of the
+        # same bar if >=1s has passed since the last identical-prefix
+        # line. A bar's "prefix" is the text up to the percentage.
+        last_progress_log = 0.0
+        last_progress_prefix = ""
 
-        for line in proc.stdout:  # type: ignore[union-attr]
-            if time.time() - start > 600:
-                proc.kill()
-                print_error(f"GYB timed out after 600s: {cmd_str}")
-                summary_error(f"GYB timeout: {cmd_str}")
-                return False, "Timeout"
+        def emit(line: str):
+            nonlocal last_progress_log, last_progress_prefix
             line = line.rstrip()
-            if line:
-                logger.info(line)
-                collected.append(line)
+            if not line:
+                return
+            # Is this a tqdm-style progress line? They typically contain
+            # "%|" or a fraction like " 123/4567 ".
+            is_progress = "%|" in line or "it/s" in line
+            if is_progress:
+                # Prefix = everything before the first digit-percent, used
+                # to detect "same bar being redrawn".
+                prefix = line.split("%", 1)[0][:40]
+                now = time.time()
+                if prefix == last_progress_prefix and now - last_progress_log < 1.0:
+                    return
+                last_progress_prefix = prefix
+                last_progress_log = now
+            logger.info(line)
+            collected.append(line)
+
+        assert proc.stdout is not None
+        while True:
+            if shutdown_requested:
+                proc.terminate()
+                break
+            chunk = proc.stdout.read(256)
+            if not chunk:
+                break
+            buffer += chunk
+            # Split on either CR or LF so tqdm redraws surface as lines.
+            while True:
+                idx = -1
+                for sep in ("\r", "\n"):
+                    i = buffer.find(sep)
+                    if i != -1 and (idx == -1 or i < idx):
+                        idx = i
+                if idx == -1:
+                    break
+                emit(buffer[:idx])
+                buffer = buffer[idx + 1:]
+
+        if buffer:
+            emit(buffer)
 
         proc.wait()
         output = "\n".join(collected)
@@ -767,6 +880,42 @@ def check_dependencies(need_gyb: bool = False, need_rclone: bool = False,
         print_error(f"Python 3.7+ required. Current: {sys.version}")
         return False
     print_success(f"Python: {sys.version.split()[0]}")
+
+    # Verify the offboarding OU exists. Without this, the kill-switch phase
+    # silently degrades: GAM rejects `update user ... org /Offboarding`
+    # with "Invalid Organizational Unit", the user is never moved into
+    # containment, and subsequent OU-dependent steps (e.g. relaxed 2SV
+    # enforcement in the offboarding OU) also fail. Catching it here lets
+    # the admin create the OU or update OFFBOARDING_OU before any change.
+    ou_ok, ou_output = run_gam(
+        ["info", "org", OFFBOARDING_OU],
+        dry_run=False,
+        capture_output=True,
+        timeout=30,
+        suppress_summary_error=True,
+    )
+    if ou_ok:
+        print_success(f"Offboarding OU exists: {OFFBOARDING_OU}")
+    else:
+        print_error(
+            f"Offboarding OU '{OFFBOARDING_OU}' does not exist or is not "
+            f"accessible. GAM output: "
+            f"{ou_output.splitlines()[0] if ou_output else 'no output'}"
+        )
+        # Show concrete remediation steps so the admin doesn't have to
+        # leave the terminal to fix this. Green = actionable next steps.
+        ou_name = OFFBOARDING_OU.lstrip("/")
+        print_success("To create the offboarding OU, choose one of:")
+        print_success(f"  [GAM]  gam create org \"{ou_name}\" "
+                      f"description \"Offboarded users\" parent /")
+        print_success("  [Admin Console]  https://admin.google.com/ac/orgunits  "
+                      "-> Create organizational unit -> "
+                      f"Name: \"{ou_name}\", Parent: /")
+        print_success(
+            f"Alternatively, edit OFFBOARDING_OU near the top of "
+            f"offboard_user.py to point at an existing OU."
+        )
+        return False
 
     # Check GYB if needed
     if need_gyb:
@@ -894,13 +1043,23 @@ def preflight_destinations(args) -> Dict[str, Optional[str]]:
         )
         sys.exit(2)
 
-    unique_dests = {d for d in resolved.values() if d}
-    if unique_dests:
+    # Only the forward phase may target a group address; all other phases
+    # require a real user account (Drive/Email/Alias/Calendar transfers
+    # cannot be received by a group).
+    if resolved:
         print_info("Validating transfer destinations...")
-        for dest in sorted(unique_dests):
-            if not validate_destination(dest):
+        seen: Dict[str, bool] = {}
+        for name, dest in resolved.items():
+            if not dest:
+                continue
+            allow_group = (name == "forward")
+            cache_key = f"{dest}|{allow_group}"
+            if cache_key in seen:
+                continue
+            if not validate_destination(dest, allow_group=allow_group):
                 print_error(f"Destination validation failed: {dest}")
                 sys.exit(2)
+            seen[cache_key] = True
 
     return resolved
 
@@ -908,30 +1067,47 @@ def preflight_destinations(args) -> Dict[str, Optional[str]]:
 # Verifies that a destination user exists before attempting transfers.
 ###############################################################################
 
-def validate_destination(email: str) -> bool:
+def validate_destination(email: str, allow_group: bool = False) -> bool:
     """
-    [IMPORTANT] Check that a destination user exists and is active.
+    Check that a destination exists and is active.
 
-    EDGE CASE: If the destination user is suspended or doesn't exist,
-    transfer operations will fail silently or with confusing errors.
+    When allow_group is True, a Google Group address is also accepted
+    (used for email-forwarding destinations, which Gmail allows to point
+    at a same-domain group).
     """
+    # Probe as user first. Suppress summary_error so a not-a-user response
+    # doesn't surface as a real error when the group fallback succeeds, or
+    # when the caller is just probing.
     success, output = run_gam(
         ["info", "user", email, "quick"],
         dry_run=False,
         capture_output=True,
-        timeout=30
+        timeout=30,
+        suppress_summary_error=True,
     )
-    if not success:
-        print_error(f"Destination user not found: {email}")
-        return False
+    if success:
+        for line in output.splitlines():
+            if "suspended" in line.lower() and "true" in line.lower():
+                print_warning(f"Destination user {email} is SUSPENDED. Transfers may fail.")
+                return False
+        return True
 
-    # Check if suspended
-    for line in output.splitlines():
-        if "suspended" in line.lower() and "true" in line.lower():
-            print_warning(f"Destination user {email} is SUSPENDED. Transfers may fail.")
-            return False
+    if allow_group:
+        ok_group, _ = run_gam(
+            ["info", "group", email],
+            dry_run=False,
+            capture_output=True,
+            timeout=30,
+            suppress_summary_error=True,
+        )
+        if ok_group:
+            print_info(f"Destination {email} is a group — accepted for forwarding.")
+            return True
 
-    return True
+    # No fallback worked — this is now a genuine error worth reporting.
+    print_error(f"Destination user not found: {email}")
+    summary_error(f"Destination not found: {email}")
+    return False
 
 
 ###############################################################################
@@ -1046,7 +1222,7 @@ def prompt_email(question: str, force_value: Optional[str] = None) -> str:
 # This is your audit trail and rollback reference.
 ###############################################################################
 
-def preflight_snapshot(email: str, dry_run: bool, timestamp: str = "") -> Optional[Path]:
+def preflight_snapshot(email: str, dry_run: bool, timestamp: str = "") -> Tuple[Optional[Path], Optional[str]]:
     """
     [RECOMMENDED] Export user state to a JSON file before making changes.
 
@@ -1054,6 +1230,10 @@ def preflight_snapshot(email: str, dry_run: bool, timestamp: str = "") -> Option
     forwarding settings, licences, and Drive file counts.
 
     This runs even in dry-run mode because it is read-only.
+
+    Returns (snapshot_file_path, licences_csv_output) so callers can
+    reuse the licences output in Phase 5 without re-running the slow
+    `gam print licenses` query.
     """
     print_header("PHASE 0: PRE-FLIGHT SNAPSHOT")
 
@@ -1133,8 +1313,10 @@ def preflight_snapshot(email: str, dry_run: bool, timestamp: str = "") -> Option
         timeout=180,
         stdout_only=True
     )
+    licences_output: Optional[str] = None
     if success:
         snapshot["data"]["licenses"] = output
+        licences_output = output
 
     # Send-as addresses
     print_info("Capturing send-as addresses...")
@@ -1157,11 +1339,11 @@ def preflight_snapshot(email: str, dry_run: bool, timestamp: str = "") -> Option
             json.dump(snapshot, f, indent=2, default=str)
         print_success(f"Snapshot saved: {snapshot_file}")
         summary_action(f"Pre-flight snapshot saved to {snapshot_file}")
-        return snapshot_file
+        return snapshot_file, licences_output
     except Exception as e:
         print_error(f"Failed to save snapshot: {e}")
         summary_error(f"Snapshot save failed: {e}")
-        return None
+        return None, licences_output
 
 
 ###############################################################################
@@ -1348,16 +1530,92 @@ def remove_groups(email: str, dry_run: bool):
     """
     print_header("PHASE 3: GROUP REMOVAL")
 
-    print_info("Listing current group memberships (for the log)...")
-    run_gam(
+    print_info("Listing current group memberships...")
+    # stdout_only=True: keep stderr out of the captured CSV so GAM's
+    # "Getting Groups for user@..." / "Got N Groups" progress lines
+    # can't be mistaken for CSV rows by DictReader.
+    success, output = run_gam(
         ["user", email, "print", "groups"],
         dry_run=False,
-        capture_output=True
+        capture_output=True,
+        stdout_only=True,
     )
 
-    print_info("Removing from all groups...")
-    run_gam(["user", email, "delete", "groups"], dry_run=dry_run)
-    summary_action("Removed from all groups")
+    group_count = 0
+    group_names: List[str] = []
+    if success and output.strip():
+        # GAM's `print groups` CSV column ordering and naming varies by
+        # version, and GAM sometimes prepends a "Getting N Groups for
+        # user@..." info line on stderr that run_gam merges into stdout.
+        # Strip any leading non-CSV lines (no comma) before parsing, and
+        # match the group-address column by a substring search rather
+        # than exact name so we tolerate "Group", "GroupEmail", "group
+        # Email", "groupKey" etc.
+        all_lines = output.strip().splitlines()
+        # Drop leading info lines until we find one that looks like CSV.
+        csv_lines = list(all_lines)
+        while csv_lines and "," not in csv_lines[0]:
+            csv_lines.pop(0)
+
+        if csv_lines:
+            try:
+                reader = csv.DictReader(io.StringIO("\n".join(csv_lines)))
+                rows = list(reader)
+                group_count = len(rows)
+                fieldnames = [f for f in (reader.fieldnames or []) if f]
+                # Prefer a column with "group" in the name; otherwise
+                # take the first column that holds an email-looking value
+                # that ISN'T the queried user's own address.
+                group_col = next(
+                    (f for f in fieldnames if "group" in f.lower()),
+                    None,
+                )
+                if not group_col and rows:
+                    for f in fieldnames:
+                        v = (rows[0].get(f) or "").strip()
+                        if "@" in v and v.lower() != email.lower():
+                            group_col = f
+                            break
+                if group_col:
+                    for row in rows:
+                        v = (row.get(group_col) or "").strip()
+                        if v:
+                            group_names.append(v)
+
+                # Diagnostic: if we counted rows but couldn't extract any
+                # names, dump headers + first row so the GAM output format
+                # is debuggable straight from the log file without a re-run.
+                if group_count > 0 and not group_names:
+                    first_row = rows[0] if rows else {}
+                    logger.info(
+                        f"Group preview empty despite {group_count} row(s). "
+                        f"Headers: {fieldnames}. Chose column: {group_col!r}. "
+                        f"First row: {dict(first_row)!r}"
+                    )
+            except csv.Error:
+                group_count = max(0, len(csv_lines) - 1)
+
+    if group_count == 0:
+        print_success("User is not a member of any groups.")
+        summary_action("No group memberships to remove")
+        return
+
+    preview = ", ".join(group_names[:5])
+    if len(group_names) > 5:
+        preview += f", ... (+{len(group_names) - 5} more)"
+    print_info(f"Found {group_count} group membership(s): {preview}")
+
+    if dry_run:
+        run_gam(["user", email, "delete", "groups"], dry_run=True)
+        summary_action(f"Would remove {group_count} group membership(s)")
+        return
+
+    print_info(f"Removing from {group_count} group(s)...")
+    ok, _ = run_gam(["user", email, "delete", "groups"], dry_run=False)
+    if ok:
+        summary_action(f"Removed from {group_count} group(s)")
+    else:
+        summary_error(f"Group removal failed (was member of {group_count} group(s))")
 
 
 ###############################################################################
@@ -1401,14 +1659,21 @@ def cleanup_delegates(email: str, dry_run: bool):
         # Parse delegate addresses from output
         delegates = re.findall(r'Delegate:\s+(\S+@\S+)', output, re.IGNORECASE)
         if delegates:
-            print_info(f"Found {len(delegates)} delegate(s) with access to this mailbox.")
-            for delegate in delegates:
-                print_info(f"  Removing delegate: {delegate}")
-                run_gam(
+            total = len(delegates)
+            print_info(f"Found {total} delegate(s) with access to this mailbox.")
+            removed = 0
+            for i, delegate in enumerate(delegates, 1):
+                print_info(f"  [{i}/{total}] Removing delegate: {delegate}")
+                ok, _ = run_gam(
                     ["user", email, "delete", "delegate", delegate],
                     dry_run=dry_run
                 )
-            summary_action(f"Removed {len(delegates)} inbound delegate(s)")
+                if ok:
+                    removed += 1
+            if dry_run:
+                summary_action(f"Would remove {total} inbound delegate(s)")
+            else:
+                summary_action(f"Removed {removed}/{total} inbound delegate(s)")
         else:
             print_success("No inbound delegates found.")
             summary_action("No inbound delegates to remove")
@@ -1429,7 +1694,7 @@ def cleanup_delegates(email: str, dry_run: bool):
 # PHASE 5: LICENCE REMOVAL [RECOMMENDED]
 ###############################################################################
 
-def remove_licences(email: str, dry_run: bool):
+def remove_licences(email: str, dry_run: bool, cached_output: Optional[str] = None):
     """
     [RECOMMENDED] Remove all licences from the user to free up seats.
 
@@ -1437,19 +1702,27 @@ def remove_licences(email: str, dry_run: bool):
     which outputs per-SKU rows (User, productId, skuId, skuDisplayName),
     then deletes each licence individually. Avoids the shell pipe pattern
     whose CSV headers differ from the per-user summary command.
+
+    If `cached_output` is supplied (typically the licences CSV captured
+    during the pre-flight snapshot), it is reused instead of re-running
+    the slow `gam print licenses` query.
     """
     print_header("PHASE 5: LICENCE REMOVAL")
 
     # gam user <email> print licenses outputs a summary row:
     #   primaryEmail,LicensesCount,Licenses,LicensesDisplay
     # where Licenses is a space-separated list of skuIds.
-    print_info("Querying assigned licences...")
-    success, output = run_gam(
-        ["user", email, "print", "licenses"],
-        dry_run=False,
-        capture_output=True,
-        timeout=180
-    )
+    if cached_output is not None:
+        print_info("Reusing licence list from pre-flight snapshot...")
+        success, output = True, cached_output
+    else:
+        print_info("Querying assigned licences...")
+        success, output = run_gam(
+            ["user", email, "print", "licenses"],
+            dry_run=False,
+            capture_output=True,
+            timeout=180
+        )
 
     if not success:
         # Timeout or API failure — do NOT claim there are no licences,
@@ -1466,8 +1739,11 @@ def remove_licences(email: str, dry_run: bool):
         summary_action("No licences found")
         return
 
-    # Parse the Licenses column (space-separated skuIds) from the summary row
-    sku_ids = []
+    # Parse the Licenses (skuIds) and LicensesDisplay (human names) columns
+    # from the summary row. We zip them so error/summary messages can show
+    # display names instead of opaque skuIds.
+    sku_ids: List[str] = []
+    sku_names: List[str] = []
     lines = output.strip().splitlines()
     if len(lines) > 1:
         headers = [h.strip() for h in lines[0].split(',')]
@@ -1478,58 +1754,73 @@ def remove_licences(email: str, dry_run: bool):
             print_error(f"Unexpected licence output format — headers: {lines[0]}")
             summary_error(f"Licence removal issue: unexpected CSV headers: {lines[0]}")
             return
+        display_idx = headers.index('LicensesDisplay') if 'LicensesDisplay' in headers else None
         data = [v.strip() for v in lines[1].split(',')]
         count = int(data[count_idx]) if data[count_idx].isdigit() else 0
         if count > 0 and len(data) > lic_idx and data[lic_idx]:
             sku_ids = data[lic_idx].split()
+            if display_idx is not None and len(data) > display_idx and data[display_idx]:
+                sku_names = data[display_idx].split()
+            # Pad names to match ids in case the display column is shorter.
+            while len(sku_names) < len(sku_ids):
+                sku_names.append(sku_ids[len(sku_names)])
 
     if not sku_ids:
         print_success("No licences to remove")
         summary_action("No licences found")
         return
 
-    print_info(f"Found {len(sku_ids)} licence(s): {', '.join(sku_ids)}")
+    def label(i: int) -> str:
+        """Human-readable licence label, falling back to skuId when no name."""
+        name = sku_names[i] if i < len(sku_names) else sku_ids[i]
+        if name and name != sku_ids[i]:
+            return f"{name} ({sku_ids[i]})"
+        return sku_ids[i]
+
+    labels = [label(i) for i in range(len(sku_ids))]
+    print_info(f"Found {len(sku_ids)} licence(s): {', '.join(labels)}")
 
     if dry_run:
         for sku_id in sku_ids:
             run_gam(["user", email, "delete", "license", sku_id], dry_run=True)
-        summary_action(f"Licences listed (dry run): {', '.join(sku_ids)}")
+        summary_action(f"Licences listed (dry run): {', '.join(labels)}")
         return
 
-    removed, auto_assigned, failed = [], [], []
-    for sku_id in sku_ids:
-        print_info(f"Removing licence: {sku_id}")
-        ok, output = run_gam(
+    removed_labels, auto_assigned_labels, failed_labels = [], [], []
+    for i, sku_id in enumerate(sku_ids):
+        lbl = labels[i]
+        print_info(f"  [{i + 1}/{len(sku_ids)}] Removing licence: {lbl}")
+        ok, delete_output = run_gam(
             ["user", email, "delete", "license", sku_id],
             dry_run=False,
             capture_output=True,
             non_fatal_patterns=["auto-assigned"]
         )
-        if "auto-assigned" in output.lower():
-            auto_assigned.append(sku_id)
+        if "auto-assigned" in delete_output.lower():
+            auto_assigned_labels.append(lbl)
         elif ok:
-            removed.append(sku_id)
+            removed_labels.append(lbl)
         else:
-            failed.append(sku_id)
+            failed_labels.append(lbl)
 
-    if removed:
-        print_success(f"Removed {len(removed)} licence(s): {', '.join(removed)}")
-        summary_action(f"Removed {len(removed)} licence(s): {', '.join(removed)}")
-    if auto_assigned:
+    if removed_labels:
+        print_success(f"Removed {len(removed_labels)} licence(s): {', '.join(removed_labels)}")
+        summary_action(f"Removed {len(removed_labels)} licence(s): {', '.join(removed_labels)}")
+    if auto_assigned_labels:
         print_warning(
-            f"Licence(s) {', '.join(auto_assigned)} have auto-assignment enabled and "
-            f"cannot be removed via API. Remove manually in Admin Console > "
-            f"Billing > Subscriptions."
+            f"Licence(s) {', '.join(auto_assigned_labels)} have auto-assignment "
+            f"enabled and cannot be removed via API. Remove manually in Admin "
+            f"Console > Billing > Subscriptions."
         )
         summary_warning(
-            f"Licence(s) {', '.join(auto_assigned)} are auto-assigned; "
+            f"Licence(s) {', '.join(auto_assigned_labels)} are auto-assigned; "
             f"manual removal required in Admin Console"
         )
-    if not removed and not auto_assigned and not failed:
+    if not removed_labels and not auto_assigned_labels and not failed_labels:
         print_success("No licences to remove")
         summary_action("No licences found")
-    if failed:
-        summary_error(f"Licence removal failed for: {', '.join(failed)}")
+    if failed_labels:
+        summary_error(f"Licence removal failed for: {', '.join(failed_labels)}")
 
 
 ###############################################################################
@@ -1539,6 +1830,11 @@ def remove_licences(email: str, dry_run: bool):
 def transfer_drive(source: str, destination: str, dry_run: bool):
     """
     [IMPORTANT] Transfer Drive file ownership.
+
+    Streams GAM's per-file progress to the log instead of buffering it,
+    so the user can see "Got N files" / "Transferring file X of Y" while
+    the transfer is in flight. Uses no overall timeout because large
+    drives can legitimately take hours.
 
     GAM7 wiki (Users-Drive-Transfer):
       gam user <source> transfer drive <destination> [keepuser]
@@ -1550,12 +1846,56 @@ def transfer_drive(source: str, destination: str, dry_run: bool):
         return
 
     print_info(f"Transferring Drive files: {source} -> {destination}")
-    run_gam(
-        ["user", source, "transfer", "drive", destination, "keepuser"],
-        dry_run=dry_run,
-        timeout=600  # Drive transfers can be slow
+    print_info(
+        "Progress is also visible in Admin Console -> Reporting -> Audit "
+        "and investigation -> Drive log events (filter Actor=source user, "
+        f"Event=Change owner), or in {destination}'s Drive UI under "
+        "'Shared with me'."
     )
-    summary_action(f"Drive transferred to {destination}")
+
+    full_cmd = [GAM_COMMAND, "user", source, "transfer", "drive",
+                destination, "keepuser"]
+    cmd_str = " ".join(full_cmd)
+
+    if dry_run:
+        print_info(f"DRY RUN: {cmd_str}")
+        summary_action(f"Drive transfer planned to {destination}")
+        return
+
+    logger.info(f"Executing: {cmd_str}")
+
+    try:
+        proc = subprocess.Popen(
+            full_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            text=True,
+            bufsize=1,  # line-buffered so progress appears live
+        )
+
+        for line in proc.stdout:  # type: ignore[union-attr]
+            if shutdown_requested:
+                proc.terminate()
+                break
+            line = line.rstrip()
+            if line:
+                logger.info(line)
+
+        proc.wait()
+
+        if proc.returncode == 0:
+            summary_action(f"Drive transferred to {destination}")
+        else:
+            print_error(f"Drive transfer failed (exit {proc.returncode}): {cmd_str}")
+            summary_error(f"Drive transfer failed: {source} -> {destination}")
+
+    except FileNotFoundError:
+        print_error(f"GAM command not found: {GAM_COMMAND}")
+        summary_error("GAM7 not found in PATH")
+    except Exception as e:
+        print_error(f"Drive transfer exception: {e}")
+        summary_error(f"Drive transfer exception: {e}")
 
 
 def transfer_aliases(source: str, destination: str, dry_run: bool):
@@ -1624,6 +1964,10 @@ def migrate_email(source: str, destination: str, dry_run: bool, strip_labels: bo
 
     # Backup
     print_info(f"Backing up email to: {backup_path}")
+    print_info(
+        "GYB will print a live progress bar (e.g. ' 42%|####  | 1234/2950 [01:23<02:45]'). "
+        "For large mailboxes this phase can run for tens of minutes."
+    )
     success, _ = run_gyb(
         ["--email", source, "--action", "backup", "--local-folder", str(backup_path)],
         dry_run=dry_run
@@ -1699,7 +2043,7 @@ def setup_forwarding(email: str, forward_to: str, dry_run: bool):
     """
     print_header("EMAIL FORWARDING SETUP")
 
-    if not validate_destination(forward_to):
+    if not validate_destination(forward_to, allow_group=True):
         summary_error(f"Forwarding skipped: destination {forward_to} invalid")
         return
 
@@ -1809,38 +2153,80 @@ def backup_drive_rclone(email: str, dry_run: bool) -> bool:
         return True
 
     print_info(f"Backing up Drive to: {backup_path}")
-    print_info("This may take a while for large drives...")
+    print_info(
+        "rclone -P prints a live transfer summary (Transferred: X / Y, N%, "
+        "MiB/s, ETA). Updates are throttled to one log line per second."
+    )
 
     try:
-        result = subprocess.run(
+        # rclone -P repaints its summary using \r; we treat \r and \n as
+        # line separators and throttle identical-prefix progress redraws
+        # to one log entry per second to keep the log file manageable.
+        proc = subprocess.Popen(
             rclone_args,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
             text=True,
-            timeout=7200  # 2-hour timeout
+            bufsize=1,
         )
-        output = (result.stdout + "\n" + result.stderr).strip()
 
-        if result.returncode == 0:
+        last_progress_log = 0.0
+        last_summary_line = ""
+        buffer = ""
+
+        def emit(line: str):
+            nonlocal last_progress_log, last_summary_line
+            line = line.rstrip()
+            if not line:
+                return
+            is_progress = line.startswith("Transferred:") or "ETA" in line or "%" in line
+            if is_progress:
+                now = time.time()
+                if now - last_progress_log < 1.0:
+                    return
+                last_progress_log = now
+                last_summary_line = line
+            logger.info(line)
+
+        assert proc.stdout is not None
+        while True:
+            if shutdown_requested:
+                proc.terminate()
+                break
+            chunk = proc.stdout.read(256)
+            if not chunk:
+                break
+            buffer += chunk
+            while True:
+                idx = -1
+                for sep in ("\r", "\n"):
+                    i = buffer.find(sep)
+                    if i != -1 and (idx == -1 or i < idx):
+                        idx = i
+                if idx == -1:
+                    break
+                emit(buffer[:idx])
+                buffer = buffer[idx + 1:]
+        if buffer:
+            emit(buffer)
+
+        proc.wait()
+
+        if proc.returncode == 0:
             print_success(f"Drive backed up to: {backup_path}")
-            for line in output.splitlines():
-                if "transferred" in line.lower():
-                    print_info(f"  {line.strip()}")
+            if last_summary_line:
+                print_info(f"  {last_summary_line}")
             summary_action(f"Drive backed up via rclone to {backup_path}")
             return True
         else:
-            print_error(f"rclone failed (exit {result.returncode})")
-            if output:
-                print_error(output[:500])
-            summary_error(f"rclone backup failed: {output[:200]}")
+            print_error(f"rclone failed (exit {proc.returncode})")
+            summary_error(f"rclone backup failed (exit {proc.returncode})")
             return False
 
     except FileNotFoundError:
         print_error(f"rclone not found: {RCLONE_COMMAND}")
         summary_error("rclone not found in PATH")
-        return False
-    except subprocess.TimeoutExpired:
-        print_error("rclone timed out after 2 hours")
-        summary_error("rclone timeout (2h)")
         return False
     except Exception as e:
         print_error(f"rclone exception: {e}")
@@ -2016,6 +2402,58 @@ def print_summary(dry_run: bool):
     print_info(f"Log file: {LOG_FILENAME}")
 
 
+def print_mail_capture_instructions(offboarded_email: str, successor_email: str):
+    """
+    Print the end-of-run MANUAL ACTION block with three admin-console options
+    for capturing mail to the offboarded address after suspension/deletion.
+
+    Surfaced because GAM cannot configure the "Recipient address map" Gmail
+    routing feature directly, and Gmail user-level forwarding stops once the
+    source account is suspended/deleted. This block tells the admin what to
+    do in the console.
+    """
+    width = 70
+    bar = "=" * width
+    logger.info("")
+    logger.info(f"{Colours.YELLOW}{bar}")
+    logger.info(f"  MANUAL ACTION REQUIRED — Mail capture for {offboarded_email}")
+    logger.info(f"{bar}{Colours.RESET}")
+    lines = [
+        "",
+        "Once the offboarded user is suspended or deleted, Gmail-level",
+        "forwarding stops. To keep capturing mail sent to",
+        f"  {offboarded_email}",
+        "choose ONE of the following in the Admin console:",
+        "",
+        "OPTION 1 — Add as alias on the successor (simplest, single recipient)",
+        f"  1. Admin console -> Directory -> Users -> {successor_email}",
+        "  2. User information -> Email aliases -> ADD AN ALIAS",
+        f"  3. Alias: {offboarded_email.split('@')[0]}",
+        "  4. SAVE",
+        "  Note: requires the offboarded address to be released. If the user",
+        "  was only suspended, delete them first OR rename them.",
+        "",
+        "OPTION 2 — Recipient address map (works while user still exists)",
+        "  1. Admin console -> Apps -> Google Workspace -> Gmail",
+        "     -> Default routing",
+        "  2. ADD ANOTHER RULE",
+        f"  3. Single recipient: {offboarded_email}",
+        f"  4. Action: Change envelope recipient -> {successor_email}",
+        "  5. SAVE — takes effect within ~1 hour",
+        "",
+        "OPTION 3 — Convert to a Group (multiple recipients)",
+        "  1. Admin console -> Directory -> Groups -> CREATE GROUP",
+        f"  2. Group email: {offboarded_email}",
+        f"  3. Add {successor_email} (and any others) as members",
+        "  Note: same address-release requirement as Option 1.",
+        "",
+        f"Successor on record: {successor_email}",
+    ]
+    for line in lines:
+        logger.info(line)
+    logger.info(f"{Colours.YELLOW}{bar}{Colours.RESET}")
+
+
 ###############################################################################
 # ARGUMENT PARSING [IMPORTANT]
 ###############################################################################
@@ -2144,6 +2582,14 @@ def parse_args():
     target_grp.add_argument("--forward-to", type=str,
                             help="Destination for email forwarding "
                                  "(overrides --all-transfer-to for this phase).")
+    target_grp.add_argument("--forward-alias-to", type=str,
+                            help="Successor address to surface in the end-of-run "
+                                 "MANUAL ACTION block, with admin-console "
+                                 "instructions for capturing mail to the "
+                                 "offboarded address after suspension/deletion "
+                                 "(alias / recipient address map / group). "
+                                 "If omitted, falls back to --forward-to then "
+                                 "--all-transfer-to. No automated change is made.")
     target_grp.add_argument("--log-dir", type=str,
                             help="Directory for log files")
 
@@ -2252,6 +2698,8 @@ def main():
         sys.exit(2)
 
     is_suspended = user_info.get('_is_suspended', 'False') == 'True'
+    originally_suspended = is_suspended
+    temp_unsuspended = False
     is_2sv_enrolled = user_info.get('2-step enrolled', 'false').lower() == 'true'
 
     # --- Temporarily unsuspend if requested ---
@@ -2270,6 +2718,7 @@ def main():
             )
             if success:
                 is_suspended = False
+                temp_unsuspended = True
                 print_success("User unsuspended. Will be re-suspended at the end.")
                 summary_action("Temporarily unsuspended for offboarding")
             else:
@@ -2309,12 +2758,15 @@ def main():
     # =========================================================================
     # PHASE 0: Pre-flight Snapshot
     # =========================================================================
+    cached_licences_output: Optional[str] = None
     if args.no_snapshot:
         summary_skip("Pre-flight snapshot (--no-snapshot)")
     else:
         with PhaseTimer("Pre-flight snapshot"):
             try:
-                preflight_snapshot(user_email, dry_run, run_timestamp)
+                _, cached_licences_output = preflight_snapshot(
+                    user_email, dry_run, run_timestamp
+                )
             except Exception as e:
                 print_error(f"Snapshot phase failed: {e}")
                 summary_error(f"Snapshot exception: {e}")
@@ -2547,7 +2999,7 @@ def main():
     # =========================================================================
     with PhaseTimer("Licence removal"):
         try:
-            remove_licences(user_email, dry_run)
+            remove_licences(user_email, dry_run, cached_output=cached_licences_output)
         except Exception as e:
             print_error(f"Licence removal failed: {e}")
             summary_error(f"Licence exception: {e}")
@@ -2555,7 +3007,37 @@ def main():
     # =========================================================================
     # PHASE 9: Suspend (always last)
     # =========================================================================
-    if args.no_suspend:
+    # If we temporarily unsuspended an already-suspended user at the start of
+    # the run, we promised to re-suspend at the end. Honour that contract:
+    # skip the prompt and force suspension so the account never ends in a
+    # less-restricted state than it started in. --no-suspend still wins, but
+    # we make a lot of noise about it.
+    if temp_unsuspended:
+        if args.no_suspend:
+            summary_skip("Suspension (--no-suspend)")
+            summary_warning(
+                "CONTRACT VIOLATION: User was suspended at start of run, "
+                "temporarily unsuspended, and --no-suspend prevented "
+                "re-suspension. Account is now ACTIVE — suspend manually "
+                "immediately."
+            )
+            print_error(
+                "WARNING: account started suspended and is now ACTIVE due "
+                "to --no-suspend. Suspend manually."
+            )
+        else:
+            print_info(
+                "Re-suspending: account was suspended at start of run "
+                "(temporary unsuspend honoured)."
+            )
+            with PhaseTimer("Suspension"):
+                try:
+                    suspend_user(user_email, dry_run)
+                    summary_action("Re-suspended (restored original state)")
+                except Exception as e:
+                    print_error(f"Suspension failed: {e}")
+                    summary_error(f"Suspension exception: {e}")
+    elif args.no_suspend:
         summary_skip("Suspension (--no-suspend)")
         summary_warning(
             "User was NOT suspended. Remember to suspend manually when "
@@ -2575,6 +3057,17 @@ def main():
     # Summary
     # =========================================================================
     print_summary(dry_run)
+
+    # End-of-run MANUAL ACTION block for mail capture. GAM cannot configure
+    # the "Recipient address map" routing feature, and Gmail user-level
+    # forwarding stops once the source account is suspended/deleted — so
+    # surface admin-console instructions whenever a successor was specified.
+    mail_capture_successor = (
+        args.forward_alias_to or args.forward_to or args.all_transfer_to
+    )
+    if mail_capture_successor:
+        print_mail_capture_instructions(user_email, mail_capture_successor)
+
     sys.exit(exit_code)
 
 

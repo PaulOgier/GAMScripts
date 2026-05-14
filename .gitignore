@@ -1,7 +1,11 @@
 .DS_Store
 .obsidian/
+.claude/
+**/__pycache__/
 OffBoarding Google Workspace Users/logs/
 OffBoarding Google Workspace Users/offboarding_backups/
+OffBoarding Google Workspace Users/chart.mmd
+OffBoarding Google Workspace Users/chart.png
 
 # Local-only tooling and dev artifacts (intentionally NOT on GitHub).
 # regen-dev-guide.sh: substitutes dev.osh.co.za into the test guide.
