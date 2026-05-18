@@ -83,6 +83,7 @@
   .check input, .radio input { margin-top: 3px; cursor: pointer; }
   .check label, .radio label { cursor: pointer; user-select: none; }
   .check-desc { display: block; color: var(--muted); font-size: 12px; margin-top: 1px; }
+  .field-hint { display: block; color: var(--muted); font-size: 12px; margin-top: 4px; }
 
   .mode-radios { display: flex; gap: 18px; flex-wrap: wrap; }
   .mode-radios .radio { padding: 6px 0; }
@@ -171,6 +172,16 @@
   @keyframes fadein { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
   @keyframes fadeout { from { opacity: 1; } to { opacity: 0; } }
 
+  .page-footer {
+    margin-top: 28px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+    padding-bottom: 10px;
+  }
+  .page-footer a { color: var(--accent); text-decoration: none; }
+  .page-footer a:hover { text-decoration: underline; }
+
   @media (max-width: 640px) {
     .row, .row-3, .mode-radios { display: flex; flex-direction: column; gap: 6px; }
     .profile-row { flex-direction: column; align-items: stretch; }
@@ -196,6 +207,7 @@
     <div class="field">
       <label class="field-label" for="user">Target user email <span class="hint">— required, sent as <code>--user</code></span></label>
       <input type="email" id="user" placeholder="exiting.employee@yourdomain.com" autocomplete="off" required>
+      <span class="field-hint">The full Google Workspace email of the account being offboarded. Check the spelling carefully — most operations can't be undone once the script runs.</span>
     </div>
   </div>
 
@@ -205,22 +217,22 @@
     <div class="mode-radios">
       <div class="radio">
         <input type="radio" name="mode" id="mode-dry" value="dry" checked>
-        <label for="mode-dry"><strong>Dry run</strong><span class="check-desc">Default. No changes made. No flags added — script's built-in safe mode.</span></label>
+        <label for="mode-dry"><strong>Dry run</strong><span class="check-desc">Default. No changes are made — the script reports what it would do without touching anything. Always worth a dry run first to catch missing destinations.</span></label>
       </div>
       <div class="radio">
         <input type="radio" name="mode" id="mode-exec" value="exec">
-        <label for="mode-exec"><strong>Execute</strong><span class="check-desc">Adds <code>--doit</code>. Changes are made for real.</span></label>
+        <label for="mode-exec"><strong>Execute</strong><span class="check-desc">Adds <code>--doit</code>. Changes are made for real. Run a dry run first if you haven't already.</span></label>
       </div>
       <div class="radio">
         <input type="radio" name="mode" id="mode-scorched" value="scorched">
-        <label for="mode-scorched" style="color:var(--bad)"><strong>Scorched earth</strong><span class="check-desc">DESTRUCTIVE: deletes the user. Requires confirmation.</span></label>
+        <label for="mode-scorched" style="color:var(--bad)"><strong>Scorched earth</strong><span class="check-desc">DESTRUCTIVE: permanently deletes the Google account. No recovery. Only use this when you're certain the user and all their data are no longer needed.</span></label>
       </div>
     </div>
 
     <div id="exec-extras" style="display:none; margin-top:10px;">
       <div class="check">
         <input type="checkbox" id="force">
-        <label for="force"><strong>--force</strong> — skip all interactive prompts (auto-yes). When set, you must provide destinations for every non-skipped transfer phase.</label>
+        <label for="force"><strong>--force</strong> — skip all interactive prompts (auto-yes).<span class="check-desc">When set, every non-skipped transfer phase must have a destination — the builder validates this for you. Useful for automation or unattended runs.</span></label>
       </div>
     </div>
 
@@ -241,11 +253,11 @@
     <div class="row">
       <div class="check">
         <input type="checkbox" id="no-transfer">
-        <label for="no-transfer"><strong>--no-transfer</strong><span class="check-desc">Skip ALL transfers, forwarding, aliases, calendar, delegates and auto-reply. Only kill switch, devices, groups, licences, backups and suspension run.</span></label>
+        <label for="no-transfer"><strong>--no-transfer</strong><span class="check-desc">Skip ALL transfers, forwarding, aliases, calendar, delegates and auto-reply. Only kill switch, devices, groups, licences, backups and suspension run. Good for accounts that are already empty, or where data retention isn't required.</span></label>
       </div>
       <div class="check">
         <input type="checkbox" id="unsuspend">
-        <label for="unsuspend"><strong>--unsuspend</strong><span class="check-desc">Temporarily unsuspend an already-suspended user so offboarding can complete. The script re-suspends at the end.</span></label>
+        <label for="unsuspend"><strong>--unsuspend</strong><span class="check-desc">Temporarily unsuspend an already-suspended user so offboarding can complete. The script re-suspends at the end. Without this flag the script will abort early if the account is already suspended.</span></label>
       </div>
     </div>
   </div>
@@ -256,31 +268,38 @@
     <div class="field">
       <label class="field-label" for="all-to">Default destination for all transfers <span class="hint">— <code>--all-transfer-to</code>. Overridden per-phase below.</span></label>
       <input type="email" id="all-to" placeholder="manager@yourdomain.com" autocomplete="off">
+      <span class="field-hint">Where Drive files, emails, aliases, and calendar access go when no per-phase override is set. Usually the departing user's manager. Leave blank only if you're setting individual destinations for every active phase.</span>
     </div>
     <div class="row">
       <div class="field">
         <label class="field-label" for="drive-to">Drive override <span class="hint">— <code>--drive-to</code></span></label>
         <input type="email" id="drive-to" placeholder="leave blank to use default" autocomplete="off">
+        <span class="field-hint">Override the Drive destination. Useful if legal or IT should receive the files rather than the manager.</span>
       </div>
       <div class="field">
         <label class="field-label" for="email-to">Email override <span class="hint">— <code>--email-to</code></span></label>
         <input type="email" id="email-to" placeholder="leave blank to use default" autocomplete="off">
+        <span class="field-hint">Override the email migration destination. Requires GYB configured on both source and destination accounts.</span>
       </div>
       <div class="field">
         <label class="field-label" for="alias-to">Alias override <span class="hint">— <code>--alias-to</code></span></label>
         <input type="email" id="alias-to" placeholder="leave blank to use default" autocomplete="off">
+        <span class="field-hint">Override the alias destination. The receiving account must be in the same Google Workspace domain as the alias being transferred.</span>
       </div>
       <div class="field">
         <label class="field-label" for="calendar-to">Calendar override <span class="hint">— <code>--calendar-to</code></span></label>
         <input type="email" id="calendar-to" placeholder="leave blank to use default" autocomplete="off">
+        <span class="field-hint">Override the calendar access destination. This shares the calendar — it does not transfer ownership.</span>
       </div>
       <div class="field">
         <label class="field-label" for="forward-to">Forwarding override <span class="hint">— <code>--forward-to</code>. Group address allowed.</span></label>
         <input type="email" id="forward-to" placeholder="user or group address" autocomplete="off">
+        <span class="field-hint">Set up Gmail forwarding to this address. Can be a group. Only catches new mail — messages that arrived while the account was suspended are not forwarded retroactively.</span>
       </div>
       <div class="field">
         <label class="field-label" for="forward-alias-to">Successor for end-of-run notice <span class="hint">— <code>--forward-alias-to</code>. Group allowed.</span></label>
         <input type="email" id="forward-alias-to" placeholder="user, group, or leave blank" autocomplete="off">
+        <span class="field-hint">Sends a summary notice to this address after the script finishes. Can be a group or the manager. Leave blank to skip the end-of-run email.</span>
       </div>
     </div>
   </div>
@@ -291,11 +310,11 @@
     <div class="row">
       <div class="check">
         <input type="checkbox" id="backup-drive">
-        <label for="backup-drive"><strong>--backup-drive</strong><span class="check-desc">Local Drive backup via <code>rclone</code> BEFORE transfer. Requires rclone with a configured Google Drive remote.</span></label>
+        <label for="backup-drive"><strong>--backup-drive</strong><span class="check-desc">Local Drive backup via <code>rclone</code> BEFORE the transfer happens. Requires rclone with a configured Google Drive remote. Can be slow for large drives — allow extra time.</span></label>
       </div>
       <div class="check">
         <input type="checkbox" id="backup-email">
-        <label for="backup-email"><strong>--backup-email</strong><span class="check-desc">Local email backup via <code>GYB</code> (no restore). Requires GYB.</span></label>
+        <label for="backup-email"><strong>--backup-email</strong><span class="check-desc">Local email backup via <code>GYB</code> before migration. This is a raw archive — you can't restore from it directly without additional steps. Requires GYB installed and authorised.</span></label>
       </div>
     </div>
   </div>
@@ -304,16 +323,16 @@
   <div id="section-skip" class="section">
     <h2>6. Skip phases</h2>
     <div class="row-3">
-      <div class="check"><input type="checkbox" id="no-snapshot"><label for="no-snapshot"><strong>--no-snapshot</strong><span class="check-desc">Skip pre-flight JSON snapshot of user state.</span></label></div>
-      <div class="check"><input type="checkbox" id="no-devices"><label for="no-devices"><strong>--no-devices</strong><span class="check-desc">Skip mobile/ChromeOS device listing.</span></label></div>
-      <div class="check"><input type="checkbox" id="no-drive"><label for="no-drive"><strong>--no-drive</strong><span class="check-desc">Skip Drive ownership transfer.</span></label></div>
-      <div class="check"><input type="checkbox" id="no-email"><label for="no-email"><strong>--no-email</strong><span class="check-desc">Skip email migration (GYB backup+restore).</span></label></div>
-      <div class="check"><input type="checkbox" id="no-alias"><label for="no-alias"><strong>--no-alias</strong><span class="check-desc">Skip alias transfer.</span></label></div>
-      <div class="check"><input type="checkbox" id="no-calendar"><label for="no-calendar"><strong>--no-calendar</strong><span class="check-desc">Skip calendar access transfer.</span></label></div>
-      <div class="check"><input type="checkbox" id="no-forward"><label for="no-forward"><strong>--no-forward</strong><span class="check-desc">Skip Gmail-level forwarding setup.</span></label></div>
-      <div class="check"><input type="checkbox" id="no-auto-reply"><label for="no-auto-reply"><strong>--no-auto-reply</strong><span class="check-desc">Skip vacation auto-reply.</span></label></div>
-      <div class="check"><input type="checkbox" id="no-delegates"><label for="no-delegates"><strong>--no-delegates</strong><span class="check-desc">Skip delegate cleanup.</span></label></div>
-      <div class="check"><input type="checkbox" id="no-suspend"><label for="no-suspend"><strong>--no-suspend</strong><span class="check-desc">Skip the final account suspension.</span></label></div>
+      <div class="check"><input type="checkbox" id="no-snapshot"><label for="no-snapshot"><strong>--no-snapshot</strong><span class="check-desc">Skip the pre-flight JSON snapshot of the user's current state. Handy for audits and rollback reference — only skip it if you're re-running and already have one.</span></label></div>
+      <div class="check"><input type="checkbox" id="no-devices"><label for="no-devices"><strong>--no-devices</strong><span class="check-desc">Skip mobile/ChromeOS device listing. The script only reports devices — it doesn't wipe them. Skip if device tracking isn't required for this offboarding.</span></label></div>
+      <div class="check"><input type="checkbox" id="no-drive"><label for="no-drive"><strong>--no-drive</strong><span class="check-desc">Skip Drive ownership transfer. Use when the user has no Drive files, or if you've already handled it separately.</span></label></div>
+      <div class="check"><input type="checkbox" id="no-email"><label for="no-email"><strong>--no-email</strong><span class="check-desc">Skip GYB email migration. Use when email doesn't need to be transferred, or if GYB isn't set up.</span></label></div>
+      <div class="check"><input type="checkbox" id="no-alias"><label for="no-alias"><strong>--no-alias</strong><span class="check-desc">Skip alias transfer. Aliases will remain on the departing account until manually removed — they won't be deleted or reassigned automatically.</span></label></div>
+      <div class="check"><input type="checkbox" id="no-calendar"><label for="no-calendar"><strong>--no-calendar</strong><span class="check-desc">Skip calendar access transfer. Use when the user had no shared calendars worth preserving.</span></label></div>
+      <div class="check"><input type="checkbox" id="no-forward"><label for="no-forward"><strong>--no-forward</strong><span class="check-desc">Skip Gmail forwarding setup. New mail to the old address will go undelivered after suspension unless a group alias handles it.</span></label></div>
+      <div class="check"><input type="checkbox" id="no-auto-reply"><label for="no-auto-reply"><strong>--no-auto-reply</strong><span class="check-desc">Skip the out-of-office auto-reply. Only skip this if forwarding alone is enough, or if someone will set the reply manually.</span></label></div>
+      <div class="check"><input type="checkbox" id="no-delegates"><label for="no-delegates"><strong>--no-delegates</strong><span class="check-desc">Skip delegate cleanup. Delegates are accounts that had access to this inbox — the script removes that access. Skip only if you've handled this manually.</span></label></div>
+      <div class="check"><input type="checkbox" id="no-suspend"><label for="no-suspend"><strong>--no-suspend</strong><span class="check-desc">Skip the final account suspension. The user's account will remain active after the script finishes. Only use this if suspension will happen separately.</span></label></div>
     </div>
   </div>
 
@@ -323,15 +342,15 @@
     <div class="row-3">
       <div class="radio">
         <input type="radio" name="labels" id="labels-ask" value="ask" checked>
-        <label for="labels-ask"><strong>Let the script ask</strong><span class="check-desc">Omits both flags. The script prompts (or defaults to strip under --force).</span></label>
+        <label for="labels-ask"><strong>Let the script ask</strong><span class="check-desc">Omits both flags. The script will prompt you interactively at runtime, or default to strip if <code>--force</code> is set.</span></label>
       </div>
       <div class="radio">
         <input type="radio" name="labels" id="labels-strip" value="strip">
-        <label for="labels-strip"><strong>--strip-labels</strong><span class="check-desc">Drop all original labels; restored mail sits under <code>Migrated/&lt;user&gt;</code>.</span></label>
+        <label for="labels-strip"><strong>--strip-labels</strong><span class="check-desc">Removes all original Gmail labels from migrated mail. All messages land under <code>Migrated/&lt;user&gt;</code>. Cleaner for the recipient but loses the original folder structure.</span></label>
       </div>
       <div class="radio">
         <input type="radio" name="labels" id="labels-keep" value="keep">
-        <label for="labels-keep"><strong>--keep-labels</strong><span class="check-desc">Preserve original Gmail labels; <code>Migrated/&lt;user&gt;</code> is added on top.</span></label>
+        <label for="labels-keep"><strong>--keep-labels</strong><span class="check-desc">Preserves the original Gmail label structure. <code>Migrated/&lt;user&gt;</code> is added on top. Better for audits or when the recipient wants to browse the old inbox as it was.</span></label>
       </div>
     </div>
   </div>
@@ -342,12 +361,14 @@
     <div class="field" style="margin-top:10px;">
       <label class="field-label" for="log-dir">Log directory <span class="hint">— <code>--log-dir</code>. Default <code>./logs</code>.</span></label>
       <input type="text" id="log-dir" placeholder="./logs" autocomplete="off">
+      <span class="field-hint">Where the script writes its log file. Defaults to <code>./logs</code> relative to where the script is run. Use an absolute path if you run the script from different directories to avoid logs scattering across your filesystem.</span>
     </div>
   </details>
 
   <!-- ============== PROFILES ============== -->
   <div class="section">
     <h2>9. Profiles <span class="hint">— saved in your browser only</span></h2>
+    <p style="font-size:13px; color:var(--muted); margin: 0 0 10px;">Profiles store your current settings by name in browser localStorage — nothing is sent anywhere. Useful if you regularly offboard to the same destinations. Profiles are browser-specific and won't carry over to a different browser or machine.</p>
     <div class="profile-row">
       <select id="profile-select">
         <option value="">— select a saved profile —</option>
@@ -376,10 +397,15 @@
         Use <code>python</code> instead of <code>python3</code>
       </label>
     </div>
+    <span class="field-hint" style="margin-top:6px;">Only tick "Use python" if your system's <code>python</code> command points to Python 3. On most modern systems <code>python</code> is Python 2 or absent — use <code>python3</code> unless you know otherwise.</span>
   </div>
 </div>
 
 <div id="toast" class="toast">Command copied</div>
+
+<footer class="page-footer">
+  Part of <a href="https://github.com/PaulOgier/GAMScripts" target="_blank" rel="noopener">GAMScripts</a> by <a href="https://osh.co.za" target="_blank" rel="noopener">Outsource House</a>
+</footer>
 
 <script>
 (() => {
