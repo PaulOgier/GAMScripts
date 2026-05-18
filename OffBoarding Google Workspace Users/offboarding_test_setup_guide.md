@@ -531,6 +531,8 @@ formats using `--drive-export-formats`. The setting `docx,xlsx,pptx,pdf` means:
 
 ### Recommended backup strategy for offboarding
 
+**rclone and GAM7 do different jobs — they are not alternatives.** rclone (`--backup-drive`) downloads the user's Drive to **local disk** as an offline archive. GAM7's Drive transfer (default, controlled by `--drive-to` / `--all-transfer-to`) reassigns **ownership inside Google Workspace** to another user; the files stay in the cloud. Use rclone when you want a copy that survives the source/destination accounts being deleted or that includes exported Office-format versions of Google-native files. Use GAM7 transfer when you want a teammate (e.g. the leaver's manager) to take over the files. You can use either, both, or neither — they are independent flags.
+
 | Data type | Tool | Flag | What it does |
 |-----------|------|------|-------------|
 | Email (archive) | GYB | `--backup-email` | Downloads mailbox to local disk, no restore |
