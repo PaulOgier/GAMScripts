@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Offboarding Command Builder</title>
+<style>
+  :root {
+    --bg: #f4f7f6;
+    --panel: #ffffff;
+    --ink: #2c3e50;
+    --muted: #7f8c8d;
+    --accent: #2980b9;
+    --accent-strong: #1f6391;
+    --line: #e5e9ec;
+    --ok: #27ae60;
+    --warn: #e67e22;
+    --bad: #c0392b;
+    --bad-bg: #fdecea;
+    --bad-border: #e6b0aa;
+    --code-bg: #1e272e;
+    --code-fg: #0be881;
+    --code-fg-bad: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    max-width: 980px;
+    margin: 32px auto;
+    padding: 0 20px 60px;
+    line-height: 1.45;
+  }
+  h1 { color: var(--ink); border-bottom: 2px solid var(--accent); padding-bottom: 10px; margin-bottom: 6px; }
+  .lede { color: var(--muted); margin-top: 0; }
+  .container { background: var(--panel); padding: 24px 28px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+
+  .banner {
+    background: #fef9e7;
+    border-left: 4px solid #f4d03f;
+    padding: 10px 14px;
+    border-radius: 4px;
+    margin: 14px 0 22px;
+    font-size: 14px;
+  }
+  .banner strong { color: #7d6608; }
+
+  .section { margin-top: 26px; }
+  .section h2 {
+    font-size: 16px;
+    color: var(--accent);
+    margin: 0 0 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--line);
+    font-weight: 600;
+  }
+  .section.disabled { opacity: 0.45; pointer-events: none; }
+
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .row-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .field { margin-bottom: 12px; }
+  label.field-label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  .hint { font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 4px; }
+  input[type="email"], input[type="text"] {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #cfd6db;
+    border-radius: 4px;
+    font: inherit;
+    font-size: 14px;
+  }
+  input[type="email"]:focus, input[type="text"]:focus { outline: 2px solid var(--accent); border-color: var(--accent); }
+  input.invalid { border-color: var(--bad); background: #fef5f4; }
+
+  .check, .radio {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 14px;
+    padding: 4px 0;
+  }
+  .check input, .radio input { margin-top: 3px; cursor: pointer; }
+  .check label, .radio label { cursor: pointer; user-select: none; }
+  .check-desc { display: block; color: var(--muted); font-size: 12px; margin-top: 1px; }
+
+  .mode-radios { display: flex; gap: 18px; flex-wrap: wrap; }
+  .mode-radios .radio { padding: 6px 0; }
+
+  .scorched-panel {
+    margin-top: 14px;
+    background: var(--bad-bg);
+    border: 1px solid var(--bad-border);
+    border-left: 4px solid var(--bad);
+    padding: 14px 16px;
+    border-radius: 4px;
+  }
+  .scorched-panel h3 { color: var(--bad); margin: 0 0 8px; font-size: 15px; }
+  .scorched-panel p { margin: 6px 0; font-size: 13px; }
+
+  .validation {
+    margin-top: 22px;
+    padding: 12px 14px;
+    border-radius: 4px;
+    font-size: 13px;
+    border: 1px solid transparent;
+  }
+  .validation.ok { background: #eafaf1; border-color: #abebc6; color: #186a3b; }
+  .validation.bad { background: var(--bad-bg); border-color: var(--bad-border); color: #922b21; }
+  .validation ul { margin: 6px 0 0 18px; padding: 0; }
+  .validation li { margin: 2px 0; }
+
+  .output-wrap { margin-top: 18px; }
+  textarea {
+    width: 100%;
+    height: 110px;
+    padding: 14px;
+    font-family: 'Courier New', Courier, monospace;
+    background: var(--code-bg);
+    color: var(--code-fg);
+    border: none;
+    border-radius: 4px;
+    resize: vertical;
+    font-size: 14px;
+  }
+  textarea.danger { color: var(--code-fg-bad); }
+
+  .button-row { margin-top: 12px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 9px 18px;
+    font-size: 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background 0.15s;
+  }
+  button:hover:not(:disabled) { background: var(--accent-strong); }
+  button:disabled { background: #b0bec5; cursor: not-allowed; opacity: 0.8; }
+  button.secondary { background: #ecf0f1; color: var(--ink); }
+  button.secondary:hover:not(:disabled) { background: #d9e0e3; }
+  button.danger { background: var(--bad); }
+  button.danger:hover:not(:disabled) { background: #962a1f; }
+
+  .toggle-inline { font-size: 13px; display: flex; align-items: center; gap: 6px; margin-left: auto; }
+
+  .profile-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .profile-row select, .profile-row input[type="text"] { padding: 7px 9px; font-size: 13px; border: 1px solid #cfd6db; border-radius: 4px; }
+  .profile-row select { min-width: 220px; }
+
+  details { margin-top: 12px; }
+  details summary { cursor: pointer; font-weight: 600; color: var(--accent); font-size: 14px; padding: 4px 0; }
+
+  .toast {
+    visibility: hidden;
+    position: fixed;
+    left: 50%;
+    bottom: 30px;
+    transform: translateX(-50%);
+    background: var(--ok);
+    color: white;
+    padding: 10px 18px;
+    border-radius: 4px;
+    font-size: 14px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+    z-index: 100;
+  }
+  .toast.show { visibility: visible; animation: fadein 0.25s, fadeout 0.4s 2.2s; }
+  @keyframes fadein { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+  @keyframes fadeout { from { opacity: 1; } to { opacity: 0; } }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <h1>Offboarding Command Builder</h1>
+  <p class="lede">Build a valid <code>python3 offboard_user.py</code> command without reading the source. Cross-platform — open this file in any browser.</p>
+
+  <div class="banner">
+    <strong>Dry-run is the default.</strong> The script makes no changes unless you select <em>Execute</em> mode (which adds <code>--doit</code>). The Copy button stays disabled until the command is valid.
+  </div>
+
+  <!-- ============== TARGET ============== -->
+  <div class="section">
+    <h2>1. User to offboard</h2>
+    <div class="field">
+      <label class="field-label" for="user">Target user email <span class="hint">— required, sent as <code>--user</code></span></label>
+      <input type="email" id="user" placeholder="exiting.employee@yourdomain.com" autocomplete="off" required>
+    </div>
+  </div>
+
+  <!-- ============== EXECUTION MODE ============== -->
+  <div class="section">
+    <h2>2. Execution mode</h2>
+    <div class="mode-radios">
+      <div class="radio">
+        <input type="radio" name="mode" id="mode-dry" value="dry" checked>
+        <label for="mode-dry"><strong>Dry run</strong><span class="check-desc">Default. No changes made. No flags added — script's built-in safe mode.</span></label>
+      </div>
+      <div class="radio">
+        <input type="radio" name="mode" id="mode-exec" value="exec">
+        <label for="mode-exec"><strong>Execute</strong><span class="check-desc">Adds <code>--doit</code>. Changes are made for real.</span></label>
+      </div>
+      <div class="radio">
+        <input type="radio" name="mode" id="mode-scorched" value="scorched">
+        <label for="mode-scorched" style="color:var(--bad)"><strong>Scorched earth</strong><span class="check-desc">DESTRUCTIVE: deletes the user. Requires confirmation.</span></label>
+      </div>
+    </div>
+
+    <div id="exec-extras" style="display:none; margin-top:10px;">
+      <div class="check">
+        <input type="checkbox" id="force">
+        <label for="force"><strong>--force</strong> — skip all interactive prompts (auto-yes). When set, you must provide destinations for every non-skipped transfer phase.</label>
+      </div>
+    </div>
+
+    <div id="scorched-panel" class="scorched-panel" style="display:none;">
+      <h3>⚠ Scorched earth — permanent deletion</h3>
+      <p>This permanently <strong>DELETES</strong> the user after killing access, removing groups/licences, and suspending. No backups, no transfers — even if you set them. <code>--no-snapshot</code> is forced on by the script.</p>
+      <p>The script requires <code>--doit</code> and <code>--force</code> (added automatically) and a typed-email confirmation at runtime. This builder also requires you to re-type the email below.</p>
+      <div class="field" style="margin-top:10px;">
+        <label class="field-label" for="scorched-confirm">Re-type the target email to enable the Copy button:</label>
+        <input type="email" id="scorched-confirm" placeholder="must match the email in section 1" autocomplete="off">
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== OPERATION MODE ============== -->
+  <div id="section-opmode" class="section">
+    <h2>3. Operation mode</h2>
+    <div class="row">
+      <div class="check">
+        <input type="checkbox" id="no-transfer">
+        <label for="no-transfer"><strong>--no-transfer</strong><span class="check-desc">Skip ALL transfers, forwarding, aliases, calendar, delegates and auto-reply. Only kill switch, devices, groups, licences, backups and suspension run.</span></label>
+      </div>
+      <div class="check">
+        <input type="checkbox" id="unsuspend">
+        <label for="unsuspend"><strong>--unsuspend</strong><span class="check-desc">Temporarily unsuspend an already-suspended user so offboarding can complete. The script re-suspends at the end.</span></label>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== DESTINATIONS ============== -->
+  <div id="section-dest" class="section">
+    <h2>4. Transfer destinations</h2>
+    <div class="field">
+      <label class="field-label" for="all-to">Default destination for all transfers <span class="hint">— <code>--all-transfer-to</code>. Overridden per-phase below.</span></label>
+      <input type="email" id="all-to" placeholder="manager@yourdomain.com" autocomplete="off">
+    </div>
+    <div class="row">
+      <div class="field">
+        <label class="field-label" for="drive-to">Drive override <span class="hint">— <code>--drive-to</code></span></label>
+        <input type="email" id="drive-to" placeholder="leave blank to use default" autocomplete="off">
+      </div>
+      <div class="field">
+        <label class="field-label" for="email-to">Email override <span class="hint">— <code>--email-to</code></span></label>
+        <input type="email" id="email-to" placeholder="leave blank to use default" autocomplete="off">
+      </div>
+      <div class="field">
+        <label class="field-label" for="alias-to">Alias override <span class="hint">— <code>--alias-to</code></span></label>
+        <input type="email" id="alias-to" placeholder="leave blank to use default" autocomplete="off">
+      </div>
+      <div class="field">
+        <label class="field-label" for="calendar-to">Calendar override <span class="hint">— <code>--calendar-to</code></span></label>
+        <input type="email" id="calendar-to" placeholder="leave blank to use default" autocomplete="off">
+      </div>
+      <div class="field">
+        <label class="field-label" for="forward-to">Forwarding override <span class="hint">— <code>--forward-to</code>. Group address allowed.</span></label>
+        <input type="email" id="forward-to" placeholder="user or group address" autocomplete="off">
+      </div>
+      <div class="field">
+        <label class="field-label" for="forward-alias-to">Successor for end-of-run notice <span class="hint">— <code>--forward-alias-to</code>. Group allowed.</span></label>
+        <input type="email" id="forward-alias-to" placeholder="user, group, or leave blank" autocomplete="off">
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== BACKUPS ============== -->
+  <div id="section-backup" class="section">
+    <h2>5. External backups</h2>
+    <div class="row">
+      <div class="check">
+        <input type="checkbox" id="backup-drive">
+        <label for="backup-drive"><strong>--backup-drive</strong><span class="check-desc">Local Drive backup via <code>rclone</code> BEFORE transfer. Requires rclone with a configured Google Drive remote.</span></label>
+      </div>
+      <div class="check">
+        <input type="checkbox" id="backup-email">
+        <label for="backup-email"><strong>--backup-email</strong><span class="check-desc">Local email backup via <code>GYB</code> (no restore). Requires GYB.</span></label>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== SKIP PHASES ============== -->
+  <div id="section-skip" class="section">
+    <h2>6. Skip phases</h2>
+    <div class="row-3">
+      <div class="check"><input type="checkbox" id="no-snapshot"><label for="no-snapshot"><strong>--no-snapshot</strong><span class="check-desc">Skip pre-flight JSON snapshot of user state.</span></label></div>
+      <div class="check"><input type="checkbox" id="no-devices"><label for="no-devices"><strong>--no-devices</strong><span class="check-desc">Skip mobile/ChromeOS device listing.</span></label></div>
+      <div class="check"><input type="checkbox" id="no-drive"><label for="no-drive"><strong>--no-drive</strong><span class="check-desc">Skip Drive ownership transfer.</span></label></div>
+      <div class="check"><input type="checkbox" id="no-email"><label for="no-email"><strong>--no-email</strong><span class="check-desc">Skip email migration (GYB backup+restore).</span></label></div>
+      <div class="check"><input type="checkbox" id="no-alias"><label for="no-alias"><strong>--no-alias</strong><span class="check-desc">Skip alias transfer.</span></label></div>
+      <div class="check"><input type="checkbox" id="no-calendar"><label for="no-calendar"><strong>--no-calendar</strong><span class="check-desc">Skip calendar access transfer.</span></label></div>
+      <div class="check"><input type="checkbox" id="no-forward"><label for="no-forward"><strong>--no-forward</strong><span class="check-desc">Skip Gmail-level forwarding setup.</span></label></div>
+      <div class="check"><input type="checkbox" id="no-auto-reply"><label for="no-auto-reply"><strong>--no-auto-reply</strong><span class="check-desc">Skip vacation auto-reply.</span></label></div>
+      <div class="check"><input type="checkbox" id="no-delegates"><label for="no-delegates"><strong>--no-delegates</strong><span class="check-desc">Skip delegate cleanup.</span></label></div>
+      <div class="check"><input type="checkbox" id="no-suspend"><label for="no-suspend"><strong>--no-suspend</strong><span class="check-desc">Skip the final account suspension.</span></label></div>
+    </div>
+  </div>
+
+  <!-- ============== EMAIL LABELS ============== -->
+  <div id="section-labels" class="section">
+    <h2>7. Email label handling</h2>
+    <div class="row-3">
+      <div class="radio">
+        <input type="radio" name="labels" id="labels-ask" value="ask" checked>
+        <label for="labels-ask"><strong>Let the script ask</strong><span class="check-desc">Omits both flags. The script prompts (or defaults to strip under --force).</span></label>
+      </div>
+      <div class="radio">
+        <input type="radio" name="labels" id="labels-strip" value="strip">
+        <label for="labels-strip"><strong>--strip-labels</strong><span class="check-desc">Drop all original labels; restored mail sits under <code>Migrated/&lt;user&gt;</code>.</span></label>
+      </div>
+      <div class="radio">
+        <input type="radio" name="labels" id="labels-keep" value="keep">
+        <label for="labels-keep"><strong>--keep-labels</strong><span class="check-desc">Preserve original Gmail labels; <code>Migrated/&lt;user&gt;</code> is added on top.</span></label>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== ADVANCED ============== -->
+  <details>
+    <summary>8. Advanced</summary>
+    <div class="field" style="margin-top:10px;">
+      <label class="field-label" for="log-dir">Log directory <span class="hint">— <code>--log-dir</code>. Default <code>./logs</code>.</span></label>
+      <input type="text" id="log-dir" placeholder="./logs" autocomplete="off">
+    </div>
+  </details>
+
+  <!-- ============== PROFILES ============== -->
+  <div class="section">
+    <h2>9. Profiles <span class="hint">— saved in your browser only</span></h2>
+    <div class="profile-row">
+      <select id="profile-select">
+        <option value="">— select a saved profile —</option>
+      </select>
+      <button type="button" class="secondary" id="profile-load">Load</button>
+      <button type="button" class="secondary" id="profile-delete">Delete</button>
+      <input type="text" id="profile-name" placeholder="profile name to save as">
+      <button type="button" class="secondary" id="profile-save">Save</button>
+    </div>
+  </div>
+
+  <!-- ============== VALIDATION ============== -->
+  <div id="validation" class="validation ok" role="status" aria-live="polite">
+    Ready.
+  </div>
+
+  <!-- ============== OUTPUT ============== -->
+  <div class="output-wrap">
+    <label class="field-label" for="out">Generated command</label>
+    <textarea id="out" readonly></textarea>
+    <div class="button-row">
+      <button type="button" id="copy" disabled>Copy command</button>
+      <button type="button" class="secondary" id="reset">Reset form</button>
+      <label class="toggle-inline">
+        <input type="checkbox" id="use-python2">
+        Use <code>python</code> instead of <code>python3</code>
+      </label>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast">Command copied</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const PROFILE_KEY = 'offboarding_builder_profiles_v1';
+
+  const SKIP_FLAGS = [
+    'no-snapshot','no-devices','no-drive','no-email','no-alias',
+    'no-calendar','no-forward','no-auto-reply','no-delegates','no-suspend'
+  ];
+
+  const $ = (id) => document.getElementById(id);
+
+  // Map a skip flag id -> the transfer phase it disables, so we know which
+  // destination overrides are still required. Snapshot/devices/delegates/
+  // suspend/forward-auto-reply have no per-phase destination requirement
+  // (forward falls back to --all-transfer-to which we still check globally).
+  const PHASE_DEST = [
+    { phase: 'Drive',    skipId: 'no-drive',    overrideId: 'drive-to'    },
+    { phase: 'Email',    skipId: 'no-email',    overrideId: 'email-to'    },
+    { phase: 'Alias',    skipId: 'no-alias',    overrideId: 'alias-to'    },
+    { phase: 'Calendar', skipId: 'no-calendar', overrideId: 'calendar-to' },
+    { phase: 'Forward',  skipId: 'no-forward',  overrideId: 'forward-to'  },
+  ];
+
+  const out = $('out');
+  const copyBtn = $('copy');
+  const validationEl = $('validation');
+  const scorchedPanel = $('scorched-panel');
+  const execExtras = $('exec-extras');
+  const destSection = $('section-dest');
+  const skipSection = $('section-skip');
+  const opmodeSection = $('section-opmode');
+  const backupSection = $('section-backup');
+  const labelsSection = $('section-labels');
+
+  function getMode() {
+    return document.querySelector('input[name="mode"]:checked').value;
+  }
+  function getLabelMode() {
+    return document.querySelector('input[name="labels"]:checked').value;
+  }
+  function trimmed(id) { return $(id).value.trim(); }
+
+  function validEmailOrEmpty(id) {
+    const v = trimmed(id);
+    return v === '' || EMAIL_RE.test(v);
+  }
+
+  function refreshFieldStyles() {
+    ['user','all-to','drive-to','email-to','alias-to','calendar-to',
+     'forward-to','forward-alias-to','scorched-confirm'].forEach(id => {
+      const el = $(id);
+      if (!el) return;
+      const v = el.value.trim();
+      if (v === '') { el.classList.remove('invalid'); return; }
+      el.classList.toggle('invalid', !EMAIL_RE.test(v));
+    });
+  }
+
+  function applyModeUI() {
+    const mode = getMode();
+    execExtras.style.display = (mode === 'exec') ? 'block' : 'none';
+    scorchedPanel.style.display = (mode === 'scorched') ? 'block' : 'none';
+    // Scorched earth makes destinations/skip/backup/labels meaningless
+    const scorched = (mode === 'scorched');
+    destSection.classList.toggle('disabled', scorched || $('no-transfer').checked);
+    skipSection.classList.toggle('disabled', scorched);
+    backupSection.classList.toggle('disabled', scorched);
+    labelsSection.classList.toggle('disabled', scorched);
+    opmodeSection.classList.toggle('disabled', scorched);
+  }
+
+  function destinationFor(phase) {
+    // Returns the effective destination for a phase, considering per-phase
+    // override falling back to --all-transfer-to.
+    const overrideId = PHASE_DEST.find(p => p.phase === phase).overrideId;
+    return trimmed(overrideId) || trimmed('all-to');
+  }
+
+  function validate() {
+    const errors = [];
+    const mode = getMode();
+    const userVal = trimmed('user');
+
+    // Always required
+    if (!userVal) {
+      errors.push('Target user email is required (--user).');
+    } else if (!EMAIL_RE.test(userVal)) {
+      errors.push('Target user email is not a valid email address.');
+    }
+
+    // Validate all email fields' format (if not empty)
+    [
+      ['all-to', '--all-transfer-to'],
+      ['drive-to', '--drive-to'],
+      ['email-to', '--email-to'],
+      ['alias-to', '--alias-to'],
+      ['calendar-to', '--calendar-to'],
+      ['forward-to', '--forward-to'],
+      ['forward-alias-to', '--forward-alias-to'],
+    ].forEach(([id, flag]) => {
+      if (!validEmailOrEmpty(id)) errors.push(`${flag} is not a valid email address.`);
+    });
+
+    // Label radio mutual exclusion is enforced by radio inputs; nothing to check.
+
+    if (mode === 'exec') {
+      const forced = $('force').checked;
+      const noTransfer = $('no-transfer').checked;
+      if (forced && !noTransfer) {
+        // Mirror the script's preflight_destinations() — every non-skipped
+        // transfer phase must have a resolvable destination.
+        PHASE_DEST.forEach(({ phase, skipId }) => {
+          if ($(skipId).checked) return;
+          if (!destinationFor(phase)) {
+            errors.push(`--force is set but no destination resolves for the ${phase} phase. Set --${PHASE_DEST.find(p=>p.phase===phase).overrideId} or --all-transfer-to.`);
+          }
+        });
+      }
+    } else if (mode === 'scorched') {
+      const confirmVal = trimmed('scorched-confirm');
+      if (!userVal) {
+        // Already reported above.
+      } else if (confirmVal !== userVal) {
+        errors.push('Scorched-earth confirmation does not match the target email yet.');
+      }
+    }
+
+    return errors;
+  }
+
+  function buildCommand() {
+    const parts = [];
+    parts.push($('use-python2').checked ? 'python' : 'python3');
+    parts.push('offboard_user.py');
+
+    const userVal = trimmed('user');
+    if (userVal) parts.push('--user', userVal);
+
+    const mode = getMode();
+    if (mode === 'exec') {
+      parts.push('--doit');
+      if ($('force').checked) parts.push('--force');
+    } else if (mode === 'scorched') {
+      parts.push('--doit', '--force', '--scorched-earth');
+    }
+
+    if (mode !== 'scorched') {
+      if ($('no-transfer').checked) parts.push('--no-transfer');
+      if ($('unsuspend').checked) parts.push('--unsuspend');
+
+      // Destinations only meaningful outside scorched-earth and (mostly)
+      // outside --no-transfer; the script still accepts them but they're
+      // ignored under --no-transfer, so we omit them for cleanliness.
+      if (!$('no-transfer').checked) {
+        const destMap = [
+          ['all-to', '--all-transfer-to'],
+          ['drive-to', '--drive-to'],
+          ['email-to', '--email-to'],
+          ['alias-to', '--alias-to'],
+          ['calendar-to', '--calendar-to'],
+          ['forward-to', '--forward-to'],
+        ];
+        destMap.forEach(([id, flag]) => {
+          const v = trimmed(id);
+          if (v && EMAIL_RE.test(v)) parts.push(flag, v);
+        });
+      }
+      // --forward-alias-to is end-of-run guidance; safe regardless of --no-transfer.
+      const fwdAlias = trimmed('forward-alias-to');
+      if (fwdAlias && EMAIL_RE.test(fwdAlias)) parts.push('--forward-alias-to', fwdAlias);
+
+      if ($('backup-drive').checked) parts.push('--backup-drive');
+      if ($('backup-email').checked) parts.push('--backup-email');
+
+      SKIP_FLAGS.forEach(id => {
+        if ($(id).checked) parts.push('--' + id);
+      });
+
+      const labelMode = getLabelMode();
+      if (labelMode === 'strip') parts.push('--strip-labels');
+      else if (labelMode === 'keep') parts.push('--keep-labels');
+    }
+
+    const logDir = trimmed('log-dir');
+    if (logDir) {
+      const needsQuotes = /\s/.test(logDir);
+      parts.push('--log-dir', needsQuotes ? `"${logDir}"` : logDir);
+    }
+
+    return parts.join(' ');
+  }
+
+  function render() {
+    refreshFieldStyles();
+    applyModeUI();
+
+    const errors = validate();
+    const cmd = buildCommand();
+    out.value = cmd;
+
+    const scorched = (getMode() === 'scorched');
+    out.classList.toggle('danger', scorched);
+
+    if (errors.length === 0) {
+      validationEl.className = 'validation ok';
+      validationEl.textContent = scorched
+        ? 'Confirmed. This command will permanently delete the user.'
+        : 'Ready — command is valid.';
+      copyBtn.disabled = false;
+    } else {
+      validationEl.className = 'validation bad';
+      validationEl.innerHTML =
+        '<strong>The command is not ready:</strong><ul>' +
+        errors.map(e => `<li>${e.replace(/</g,'&lt;')}</li>`).join('') +
+        '</ul>';
+      copyBtn.disabled = true;
+    }
+  }
+
+  // ===== Profiles =====
+  function loadProfiles() {
+    try { return JSON.parse(localStorage.getItem(PROFILE_KEY) || '{}'); }
+    catch { return {}; }
+  }
+  function saveProfiles(p) {
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(p));
+  }
+  function refreshProfileSelect() {
+    const sel = $('profile-select');
+    const current = sel.value;
+    const profiles = loadProfiles();
+    sel.innerHTML = '<option value="">— select a saved profile —</option>';
+    Object.keys(profiles).sort().forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    });
+    if (current && profiles[current]) sel.value = current;
+  }
+
+  function snapshotForm() {
+    const snap = {
+      mode: getMode(),
+      labels: getLabelMode(),
+      force: $('force').checked,
+      use_python2: $('use-python2').checked,
+      text: {},
+      bool: {},
+    };
+    [
+      'user','all-to','drive-to','email-to','alias-to','calendar-to',
+      'forward-to','forward-alias-to','log-dir'
+    ].forEach(id => { snap.text[id] = $(id).value; });
+    ['no-transfer','unsuspend','backup-drive','backup-email', ...SKIP_FLAGS]
+      .forEach(id => { snap.bool[id] = $(id).checked; });
+    return snap;
+  }
+  function restoreForm(snap) {
+    if (!snap) return;
+    document.querySelector(`input[name="mode"][value="${snap.mode || 'dry'}"]`).checked = true;
+    document.querySelector(`input[name="labels"][value="${snap.labels || 'ask'}"]`).checked = true;
+    $('force').checked = !!snap.force;
+    $('use-python2').checked = !!snap.use_python2;
+    Object.entries(snap.text || {}).forEach(([id, v]) => { if ($(id)) $(id).value = v; });
+    Object.entries(snap.bool || {}).forEach(([id, v]) => { if ($(id)) $(id).checked = !!v; });
+    // Clear the scorched-earth confirm field — never restore it.
+    $('scorched-confirm').value = '';
+  }
+
+  function showToast(msg) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.className = 'toast show';
+    setTimeout(() => { t.className = 'toast'; }, 2600);
+  }
+
+  // ===== Event wiring =====
+  document.addEventListener('input', render);
+  document.addEventListener('change', render);
+
+  $('copy').addEventListener('click', async () => {
+    if (copyBtn.disabled) return;
+    try {
+      await navigator.clipboard.writeText(out.value);
+      showToast('Command copied');
+    } catch {
+      out.select();
+      document.execCommand('copy');
+      showToast('Command copied');
+    }
+  });
+
+  $('reset').addEventListener('click', () => {
+    if (!confirm('Reset all fields to defaults?')) return;
+    document.querySelectorAll('input[type="email"], input[type="text"]').forEach(el => el.value = '');
+    document.querySelectorAll('input[type="checkbox"]').forEach(el => el.checked = false);
+    document.querySelector('input[name="mode"][value="dry"]').checked = true;
+    document.querySelector('input[name="labels"][value="ask"]').checked = true;
+    render();
+  });
+
+  $('profile-save').addEventListener('click', () => {
+    const name = trimmed('profile-name');
+    if (!name) { alert('Enter a profile name first.'); return; }
+    const profiles = loadProfiles();
+    if (profiles[name] && !confirm(`Overwrite existing profile "${name}"?`)) return;
+    profiles[name] = snapshotForm();
+    saveProfiles(profiles);
+    $('profile-name').value = '';
+    refreshProfileSelect();
+    $('profile-select').value = name;
+    showToast(`Profile "${name}" saved`);
+  });
+
+  $('profile-load').addEventListener('click', () => {
+    const name = $('profile-select').value;
+    if (!name) { alert('Select a profile to load.'); return; }
+    const profiles = loadProfiles();
+    if (!profiles[name]) { alert(`Profile "${name}" not found.`); return; }
+    restoreForm(profiles[name]);
+    render();
+    showToast(`Profile "${name}" loaded`);
+  });
+
+  $('profile-delete').addEventListener('click', () => {
+    const name = $('profile-select').value;
+    if (!name) { alert('Select a profile to delete.'); return; }
+    if (!confirm(`Delete profile "${name}"?`)) return;
+    const profiles = loadProfiles();
+    delete profiles[name];
+    saveProfiles(profiles);
+    refreshProfileSelect();
+    showToast(`Profile "${name}" deleted`);
+  });
+
+  // Initial paint
+  refreshProfileSelect();
+  render();
+})();
+</script>
+</body>
+</html>
