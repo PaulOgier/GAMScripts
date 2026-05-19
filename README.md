@@ -61,7 +61,8 @@ Here is a breakdown of the available scripts. Each script is designed to solve a
     # Custom log directory
     python3 offboard_user.py --doit --log-dir /var/log/offboarding
     ```
-* **Additional Requirements**: GYB (optional, for email migration only). See `offboarding_test_setup_guide.md` for a full test environment setup guide.
+* **Command builder (no-code helper)**: If you don't want to hand-craft the command line, open `OffBoarding Google Workspace Users/offboarding_command_builder.html` in any browser. It is a single self-contained HTML page (no server, no install, works offline) that turns every flag into a form field, with inline help text for each one. Fill in the leaving user, successor, domain, and any phase toggles, and the page renders the exact `python3 offboard_user.py ...` command for you to copy. Useful for admins who only run an offboarding occasionally and don't want to re-read the flag list every time.
+* **Additional Requirements**: GYB (optional, for email migration only). See `offboarding_test_setup_guide.md` for a full test environment setup guide, and `installation_macos.md` / `installation_windows.md` for the one-time GAM7 + GYB + rclone install.
 
 <br>
 
