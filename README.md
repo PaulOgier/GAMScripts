@@ -88,11 +88,17 @@ Here is a breakdown of the available scripts. Each script is designed to solve a
 
 Contributions are what make the open-source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
 
+> ⚠️ **Safety first.** These scripts perform destructive admin actions — suspending and deleting users, transferring data, and running bulk operations against a live Google Workspace tenant. **Always test your changes against a non-production / test domain before opening a PR. Never test against a live tenant.**
+
+**Before you start:** Make sure you have the [Prerequisites](#-prerequisites) in place — Python 3.6+ and a configured, authorized GAM7 / GAMADV-XTD3 install. For significant changes, please open an issue first so we can discuss the approach before you sink time into a PR.
+
 1.  Fork the Project
 2.  Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
 3.  Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
 4.  Push to the Branch (`git push origin feature/AmazingFeature`)
 5.  Open a Pull Request
+
+Please keep new scripts consistent with the existing style: PEP 8, a clear header comment explaining what the script does, and a **dry-run / safe default** (like `offboard_user.py`'s `--doit` flag) for anything that makes changes.
 
 ---
 
