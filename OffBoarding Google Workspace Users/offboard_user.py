@@ -149,7 +149,8 @@ Changelog
   2026-05-07 - v4.4.0 - Added startup version check against remote VERSION file (CHECK_FOR_UPDATES toggle, fail-silent); restored author/contact header with Outsource House copyright and three Udemy course links; aligned in-script licence reference with the repo LICENSE (Apache 2.0) and added a plain-English summary emphasising attribution retention.
   2026-05-13 - v4.5.0 - BREAKING: renamed --transfer-to to --all-transfer-to. Added per-phase destination flags (--drive-to, --email-to, --alias-to, --calendar-to, --forward-to) that override the global default; precedence is phase-specific > --all-transfer-to > interactive prompt. Added upfront destination resolution and validation before any phase runs: under --force, any non-skipped phase without a resolvable destination aborts the run with a clear error instead of half-offboarding.
   2026-05-14 - v4.6.0 - Added end-of-run MANUAL ACTION block surfacing admin-console instructions for durable mail capture (alias / recipient address map / group) since GAM cannot configure recipient address map and Gmail-level forwarding stops on suspension/deletion; new --forward-alias-to flag explicitly nominates the successor printed in the block (falls back to --forward-to then --all-transfer-to), no automated change is made. Guide gains a "Mail capture after suspension" section and the order-of-operations list flags forwarding's suspension limitation.
-  
+  2026-07-07 - v4.7.0 - Email migration hardened against AV-quarantined messages: a malicious email in the source mailbox can be quarantined on local disk by endpoint antivirus after GYB writes it during backup, and GYB's restore crashes on the unreadable file. A pre-restore scan now probes every backed-up .eml and moves unreadable ones to a sibling <backup>_quarantined/ folder so GYB's own missing-file handling skips them; skipped messages are listed (Gmail message ID + date) in <backup>_skipped-messages.csv next to the backup and flagged in the run summary. Also fixed the restore result being ignored: a failed restore now reports an error with the retained backup path instead of logging "Email migrated".
+
 Planned Features (not yet implemented)
   - Batch processing via CSV file: accept a list of users (e.g. --csv users.csv)
     and iterate the full offboarding flow per row, with per-user logs and a
@@ -182,6 +183,7 @@ import re
 import json
 import logging
 import signal
+import sqlite3
 import time
 from datetime import datetime
 from pathlib import Path
@@ -196,7 +198,7 @@ import shutil
 
 # [IMPORTANT] Current local script version. Bumped on each release.
 # Compared against the remote VERSION file to detect updates.
-SCRIPT_VERSION = "4.6.0"
+SCRIPT_VERSION = "4.7.0"
 
 # [OPTIONAL] Check for a newer script version on startup.
 # When True (default), the script makes a single 3-second HTTP request to
@@ -507,8 +509,10 @@ def check_for_updates():
                 f"(you are running v{SCRIPT_VERSION})"
             )
             print_warning(
-                "Update with: git pull   "
-                "(or set CHECK_FOR_UPDATES = False to silence this check)"
+                "What changed + download: "
+                "https://github.com/PaulOgier/GAMScripts/releases   "
+                "(git pull if you cloned; set CHECK_FOR_UPDATES = False to "
+                "silence this check)"
             )
         elif remote_tuple < local_tuple:
             print_info(
@@ -1928,6 +1932,114 @@ def transfer_aliases(source: str, destination: str, dry_run: bool):
         summary_error(f"Alias transfer issue: {output[:200]}")
 
 
+def quarantine_unreadable_messages(backup_path: Path) -> List[str]:
+    """
+    Move unreadable .eml files out of the GYB backup folder so the restore
+    skips them instead of crashing, and write a skipped-messages CSV.
+
+    Why: endpoint antivirus can quarantine a message file in place right
+    after GYB writes it during backup (a genuinely malicious email that was
+    sitting in the source mailbox). The file still exists on disk but every
+    read raises PermissionError, and GYB's restore has no per-message
+    read-error handling, so one locked file kills the whole restore mid-run.
+    GYB DOES skip a file that is absent (its own os.path.isfile() check), so
+    the portable fix is to make the bad file absent: probe each .eml with a
+    one-byte read and move any unreadable one to a sibling
+    <backup>_quarantined/ folder, outside --local-folder. Moving works even
+    while reading is blocked, because a rename is a directory metadata
+    operation, not a file read. Nothing is deleted.
+
+    Each skipped file is reported by its basename, which is the Gmail
+    immutable message ID: admins can look the message up in their AV
+    quarantine log, Google Vault, or the Security Investigation Tool. The
+    message date is pulled from GYB's msg-db.sqlite (read-only) when
+    available. A CSV of skipped messages is written next to the backup
+    folder.
+
+    Never raises: any unexpected condition degrades to a loud warning so the
+    pre-scan can slow a run down but cannot break one. Side benefit: reading
+    every file here provokes on-access AV to flag bad files BEFORE the
+    restore starts rather than partway through it.
+    """
+    skipped: List[str] = []
+    moved_to: Dict[str, Path] = {}
+    try:
+        quarantine_dir = backup_path.parent / f"{backup_path.name}_quarantined"
+        for eml in sorted(backup_path.rglob("*.eml")):
+            try:
+                with open(eml, "rb") as fh:
+                    fh.read(1)
+            except OSError as read_err:
+                target = quarantine_dir / eml.relative_to(backup_path)
+                try:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(eml), str(target))
+                except OSError as move_err:
+                    print_warning(
+                        f"Unreadable message {eml.name} could not be moved aside "
+                        f"({move_err}); the GYB restore may crash on it. "
+                        f"Move or delete it manually, then re-run."
+                    )
+                    continue
+                print_warning(
+                    f"Skipping unreadable message {eml.stem} ({read_err}); "
+                    f"moved to {target}"
+                )
+                skipped.append(eml.stem)
+                moved_to[eml.stem] = target
+
+        if skipped:
+            # Message dates from GYB's own catalogue (read-only; we never
+            # write to any GYB sqlite file). Basename match avoids the
+            # Windows/POSIX path-separator difference in stored filenames.
+            dates: Dict[str, str] = {}
+            try:
+                with sqlite3.connect(backup_path / "msg-db.sqlite") as db:
+                    for msg_id in skipped:
+                        row = db.execute(
+                            "SELECT message_internaldate FROM messages "
+                            "WHERE message_filename LIKE ?",
+                            (f"%{msg_id}%",),
+                        ).fetchone()
+                        if row:
+                            dates[msg_id] = str(row[0])
+            except (sqlite3.Error, OSError) as db_err:
+                print_warning(f"Could not read message dates from msg-db.sqlite: {db_err}")
+
+            csv_path = backup_path.parent / f"{backup_path.name}_skipped-messages.csv"
+            with open(csv_path, "w", newline="", encoding="utf-8") as fh:
+                writer = csv.writer(fh)
+                writer.writerow(["gmail_message_id", "message_date", "quarantined_file", "note"])
+                for msg_id in skipped:
+                    writer.writerow([
+                        msg_id,
+                        dates.get(msg_id, "unknown"),
+                        str(moved_to[msg_id]),
+                        "Unreadable on disk (likely quarantined by local antivirus). "
+                        "NOT restored to the destination mailbox. Look it up by "
+                        "message ID in your AV quarantine log, Google Vault, or the "
+                        "Security Investigation Tool.",
+                    ])
+            # Enumerated in red so the skipped mail cannot be missed in the
+            # scroll-back or the end-of-run summary.
+            skipped_list = ", ".join(
+                f"{msg_id} (dated {dates.get(msg_id, 'unknown')})" for msg_id in skipped
+            )
+            print_warning(
+                f"{Colours.RED}{len(skipped)} unreadable message(s) moved to "
+                f"{quarantine_dir} and excluded from the restore: {skipped_list}. "
+                f"Details: {csv_path}{Colours.RESET}"
+            )
+            summary_warning(
+                f"{Colours.RED}{len(skipped)} email message(s) skipped as "
+                f"unreadable/AV-quarantined (not migrated): {skipped_list}; "
+                f"see {csv_path}{Colours.RESET}"
+            )
+    except Exception as scan_err:  # pre-scan must never break an offboarding run
+        print_warning(f"Backup pre-scan for unreadable messages failed: {scan_err}")
+    return skipped
+
+
 def migrate_email(source: str, destination: str, dry_run: bool, strip_labels: bool = True):
     """
     [OPTIONAL] Back up and restore email using GYB.
@@ -1968,6 +2080,13 @@ def migrate_email(source: str, destination: str, dry_run: bool, strip_labels: bo
         summary_error("Email backup failed")
         return
 
+    # Pre-scan: move any unreadable (AV-quarantined) messages aside so the
+    # restore cannot crash on them. See quarantine_unreadable_messages().
+    skipped: List[str] = []
+    if not dry_run:
+        print_info("Scanning backup for unreadable (AV-quarantined) messages...")
+        skipped = quarantine_unreadable_messages(backup_path)
+
     # Restore
     migration_label = f"Migrated/{source}"
     mode_desc = "archived under single label" if strip_labels else "original labels preserved + migration label"
@@ -1977,8 +2096,19 @@ def migrate_email(source: str, destination: str, dry_run: bool, strip_labels: bo
                     "--label-restored", migration_label]
     if strip_labels:
         restore_args.append("--strip-labels")
-    run_gyb(restore_args, dry_run=dry_run)
-    summary_action(f"Email migrated to {destination} under label '{migration_label}' ({mode_desc})")
+    success, _ = run_gyb(restore_args, dry_run=dry_run)
+    if not success and not dry_run:
+        print_error(f"Email restore failed; backup retained at {backup_path}")
+        summary_error(
+            f"Email restore to {destination} FAILED partway; backup retained at "
+            f"{backup_path}. Re-run the same gyb restore command (resume is on "
+            f"by default) or re-run this script."
+        )
+        return
+    migrated_desc = f"Email migrated to {destination} under label '{migration_label}' ({mode_desc})"
+    if skipped:
+        migrated_desc += f", excluding {len(skipped)} unreadable/AV-quarantined message(s)"
+    summary_action(migrated_desc)
 
 
 def transfer_calendar(source: str, destination: str, dry_run: bool):

@@ -452,6 +452,31 @@ gyb --email testoffboard5@yourdomain.com --action backup --local-folder ./offboa
 suspended the user, you need to unsuspend them first, run the backup, then
 re-suspend.
 
+### What happens if antivirus quarantines a backed-up message?
+
+If the source mailbox contains a malicious email, your endpoint antivirus may
+quarantine the corresponding `.eml` file on local disk right after GYB writes
+it during the backup. The file still exists but cannot be read, and GYB's
+restore would crash on it partway through.
+
+As of v4.7.0 the script handles this automatically. Between backup and
+restore it probes every backed-up `.eml` file; any unreadable file is moved to
+a sibling folder next to the backup:
+
+```
+offboarding_backups/mailboxes/user@domain.com_20260330/              <- backup (GYB reads this)
+offboarding_backups/mailboxes/user@domain.com_20260330_quarantined/  <- unreadable files moved here
+offboarding_backups/mailboxes/user@domain.com_20260330_skipped-messages.csv
+```
+
+GYB then skips the missing files and the restore completes in one pass. The
+CSV lists each skipped message's Gmail message ID (the `.eml` filename), its
+date, and where the file was moved. Those messages are intentionally NOT
+restored to the destination mailbox — they are the flagged mail. To see what
+each one was, search by message ID in your antivirus quarantine log, Google
+Vault, or the Security Investigation Tool. The run summary also flags the
+skip count.
+
 ### Does the script back up Drive files with rclone?
 
 **Yes, when you use `--backup-drive`.** The v4.3 script has rclone support
