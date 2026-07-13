@@ -41,8 +41,8 @@ YOU ASSUME ALL RISK ASSOCIATED WITH THE USE OF THIS SOFTWARE.
 
 Author:       Paul Ogier
 Created:      2023-06-22
-Updated:      2026-05-13
-Version:      4.5.0
+Updated:      2026-07-13
+Version:      5.0.0
 Status:       Production
 Python:       3.8+
 Dependencies: GAM ADV X (GAM7), GYB (optional), rclone (optional), PyYAML (optional)
@@ -149,6 +149,50 @@ Changelog
   2026-05-07 - v4.4.0 - Added startup version check against remote VERSION file (CHECK_FOR_UPDATES toggle, fail-silent); restored author/contact header with Outsource House copyright and three Udemy course links; aligned in-script licence reference with the repo LICENSE (Apache 2.0) and added a plain-English summary emphasising attribution retention.
   2026-05-13 - v4.5.0 - BREAKING: renamed --transfer-to to --all-transfer-to. Added per-phase destination flags (--drive-to, --email-to, --alias-to, --calendar-to, --forward-to) that override the global default; precedence is phase-specific > --all-transfer-to > interactive prompt. Added upfront destination resolution and validation before any phase runs: under --force, any non-skipped phase without a resolvable destination aborts the run with a clear error instead of half-offboarding.
   2026-05-14 - v4.6.0 - Added end-of-run MANUAL ACTION block surfacing admin-console instructions for durable mail capture (alias / recipient address map / group) since GAM cannot configure recipient address map and Gmail-level forwarding stops on suspension/deletion; new --forward-alias-to flag explicitly nominates the successor printed in the block (falls back to --forward-to then --all-transfer-to), no automated change is made. Guide gains a "Mail capture after suspension" section and the order-of-operations list flags forwarding's suspension limitation.
+  2026-07-13 - v5.0.0 - Reporting/verification hardening (11 findings, all fixed and
+                        regression-tested; every phase live-verified on a dev tenant, with a
+                        permanent offline unit-test suite in test_offboard_user.py).
+                        BEHAVIOUR CHANGE: --force no longer implies --unsuspend (see below).
+                        Failed GAM commands are no longer reported as completed actions:
+                        suspend_user, delete_user, kill-switch steps 2/4/6/7 (recovery-info
+                        wipe, signout, password scramble, GAL hide), transfer_calendar and
+                        set_auto_reply now check the command result before recording success
+                        (same bug class as the v4.7.0 migrate_email fix, applied to all
+                        remaining callers). Forwarding-address verification now matches the
+                        'accepted' status on the target address's own output line, so an
+                        unrelated already-accepted forwarding address can no longer
+                        false-positive the check; poll failures no longer add one summary
+                        error per attempt. --force no longer implies --unsuspend: an
+                        already-suspended user is only temporarily unsuspended when the
+                        explicit --unsuspend flag is given (interactive prompt unchanged
+                        without --force). Fixed pre-logging crash when stdin is closed at
+                        the initial user prompt (clean exit 2 instead of a traceback).
+                        Licence labels no longer whitespace-split multi-word display names
+                        ("Cloud Identity" was rendered as "Cloud (skuId)"); with multiple
+                        licences the labels fall back to skuIds. Dry runs no longer create
+                        backup directories. Snapshot embeds SCRIPT_VERSION instead of a
+                        hardcoded version string. ALIAS DATA-LOSS FIX (found live on the
+                        dev tenant): the alias transfer previously piped `gam print aliases`
+                        into `gam csv - gam update alias ~Alias user <dest>`; GAM's update
+                        alias is delete-then-insert and the insert can race Directory API
+                        propagation, failing with "Duplicate" and destroying the alias,
+                        while `gam csv` swallows the failure so the run reported success.
+                        Aliases are now transferred one-by-one (delete, then create on the
+                        destination with retry while the deletion propagates) and reported
+                        per alias; any alias that cannot be recreated is a loud error with
+                        the manual recovery command. Deprovision drops the popimap token
+                        for mailbox-less users (Cloud Identity / Gmail-off), whose POP/IMAP
+                        toggle otherwise fails the whole deprovision with exit 73. Suspension
+                        is verified by read-back: GAM's 'Updated' response was observed
+                        (live, dev tenant) reporting success for a suspension-state change
+                        that did not take effect, so the final suspend now re-reads the
+                        account state (with retries) and raises a critical error if the
+                        account still reads active. Kill-switch step 5 is verify-first:
+                        after deprovision already carried turnoff2sv, the explicit
+                        turnoff2sv only fires if 2SV still reads enrolled (re-firing on an
+                        unenrolled user produced an exit-50 false error in successful
+                        runs). The dependency check's 'gam info domain' probe no longer
+                        leaks transient failures into the end-of-run error list.
   2026-07-07 - v4.7.0 - Email migration hardened against AV-quarantined messages: a malicious email in the source mailbox can be quarantined on local disk by endpoint antivirus after GYB writes it during backup, and GYB's restore crashes on the unreadable file. A pre-restore scan now probes every backed-up .eml and moves unreadable ones to a sibling <backup>_quarantined/ folder so GYB's own missing-file handling skips them; skipped messages are listed (Gmail message ID + date) in <backup>_skipped-messages.csv next to the backup and flagged in the run summary. Also fixed the restore result being ignored: a failed restore now reports an error with the retained backup path instead of logging "Email migrated".
 
 Planned Features (not yet implemented)
@@ -198,7 +242,7 @@ import shutil
 
 # [IMPORTANT] Current local script version. Bumped on each release.
 # Compared against the remote VERSION file to detect updates.
-SCRIPT_VERSION = "4.7.0"
+SCRIPT_VERSION = "5.0.0"
 
 # [OPTIONAL] Check for a newer script version on startup.
 # When True (default), the script makes a single 3-second HTTP request to
@@ -437,28 +481,41 @@ def summary_warning(msg: str):
 # DISPLAY HELPERS [OPTIONAL]
 ###############################################################################
 
+def _emit(level: str, text: str):
+    """Route display output through the logger, or plain print before
+    setup_logging() has run (e.g. an error at the very first user prompt)."""
+    if logger is None:
+        print(text)
+    elif level == 'error':
+        logger.error(text)
+    elif level == 'warning':
+        logger.warning(text)
+    else:
+        logger.info(text)
+
+
 def print_header(title: str):
     width = 60
-    logger.info("")
-    logger.info(f"{Colours.BLUE}{'=' * width}")
-    logger.info(f"  {title}")
-    logger.info(f"{'=' * width}{Colours.RESET}")
+    _emit('info', "")
+    _emit('info', f"{Colours.BLUE}{'=' * width}")
+    _emit('info', f"  {title}")
+    _emit('info', f"{'=' * width}{Colours.RESET}")
 
 
 def print_success(msg: str):
-    logger.info(f"{Colours.GREEN}[OK] {msg}{Colours.RESET}")
+    _emit('info', f"{Colours.GREEN}[OK] {msg}{Colours.RESET}")
 
 
 def print_warning(msg: str):
-    logger.warning(f"{Colours.YELLOW}[WARN] {msg}{Colours.RESET}")
+    _emit('warning', f"{Colours.YELLOW}[WARN] {msg}{Colours.RESET}")
 
 
 def print_error(msg: str):
-    logger.error(f"{Colours.RED}[ERROR] {msg}{Colours.RESET}")
+    _emit('error', f"{Colours.RED}[ERROR] {msg}{Colours.RESET}")
 
 
 def print_info(msg: str):
-    logger.info(f"{Colours.CYAN}[INFO] {msg}{Colours.RESET}")
+    _emit('info', f"{Colours.CYAN}[INFO] {msg}{Colours.RESET}")
 
 
 ###############################################################################
@@ -854,11 +911,15 @@ def check_dependencies(need_gyb: bool = False, need_rclone: bool = False,
             print_info(f"GAM7 version output: {output.splitlines()[0]}")
 
     # EDGE CASE: Check GAM7 is actually authorised
+    # suppress_summary_error: this probe's failure is handled right here
+    # (abort on auth errors, warn-and-continue on transient ones), so it
+    # must not also land in the end-of-run error list.
     success, output = run_gam(
         ["info", "domain"],
         dry_run=False,
         capture_output=True,
-        timeout=30
+        timeout=30,
+        suppress_summary_error=True
     )
     if not success:
         if "oauth" in output.lower() or "unauthorized" in output.lower() or "credentials" in output.lower():
@@ -1196,6 +1257,20 @@ def prompt_yes_no(question: str, default: bool = False, force: bool = False) -> 
         print("Please enter 'y' or 'n'.")
 
 
+def decide_unsuspend(force: bool, unsuspend_flag: bool, prompt_fn) -> bool:
+    """Decide whether to temporarily unsuspend an already-suspended user.
+
+    Under --force the explicit --unsuspend flag is the ONLY way to opt in:
+    a non-interactive run must never silently reactivate a suspended
+    account (the account then continues through limited offboarding, with
+    suspension-dependent steps failing loudly). Without --force, the flag
+    short-circuits and otherwise the operator is asked via prompt_fn.
+    """
+    if force:
+        return unsuspend_flag
+    return unsuspend_flag or prompt_fn()
+
+
 def prompt_email(question: str, force_value: Optional[str] = None) -> str:
     """Ask for an email address with basic validation."""
     if force_value:
@@ -1236,7 +1311,7 @@ def preflight_snapshot(email: str, dry_run: bool, timestamp: str = "") -> Tuple[
         "timestamp": datetime.now().isoformat(),
         "user": email,
         "dry_run": dry_run,
-        "script_version": "4.3",
+        "script_version": SCRIPT_VERSION,
         "data": {}
     }
 
@@ -1345,8 +1420,28 @@ def preflight_snapshot(email: str, dry_run: bool, timestamp: str = "") -> Tuple[
 # PHASE 1: KILL SWITCH [CRITICAL]
 ###############################################################################
 
+def _read_2sv_enrolled(email: str) -> Optional[bool]:
+    """Read the user's actual 2SV enrollment state; None if the read fails."""
+    ok, output = run_gam(
+        ["info", "user", email, "quick"],
+        dry_run=False,
+        capture_output=True,
+        timeout=30,
+        suppress_summary_error=True
+    )
+    if not ok:
+        return None
+    for line in output.splitlines():
+        lower = line.lower()
+        if "2-step enrolled" in lower:
+            return "true" in lower
+    return None
+
+
+
 def execute_kill_switch(email: str, dry_run: bool, is_suspended: bool,
-                        is_2sv_enrolled: bool = True):
+                        is_2sv_enrolled: bool = True,
+                        has_mailbox: bool = True):
     """
     [CRITICAL] Immediate containment of the user account.
 
@@ -1387,11 +1482,12 @@ def execute_kill_switch(email: str, dry_run: bool, is_suspended: bool,
 
     # Step 2: Wipe recovery info [CRITICAL]
     print_info("Step 2/7: Wiping recovery email and phone...")
-    run_gam(
+    ok, _ = run_gam(
         ["update", "user", email, "recoveryemail", "", "recoveryphone", ""],
         dry_run=dry_run
     )
-    summary_action("Wiped recovery email and phone")
+    if ok:
+        summary_action("Wiped recovery email and phone")
 
     # Step 3: Deprovision [CRITICAL]
     # GAM7 wiki (Users-Deprovision):
@@ -1404,10 +1500,19 @@ def execute_kill_switch(email: str, dry_run: bool, is_suspended: bool,
     # NOTE: Will partially fail on suspended users (backup codes).
     # NOTE: Only include turnoff2sv if the user is actually enrolled, otherwise
     #       GAM exits with code 50 which pollutes the error summary.
-    deprov_args = ["user", email, "deprovision", "popimap", "signout"]
+    # NOTE: Only include popimap if the user has a mailbox — disabling
+    #       POP/IMAP on a Gmail-less user (e.g. Cloud Identity licence)
+    #       fails the whole deprovision with exit 73 even though ASPs,
+    #       codes, tokens and signout all succeeded (observed live on
+    #       dev tenant 2026-07-13).
+    deprov_args = ["user", email, "deprovision", "signout"]
+    if has_mailbox:
+        deprov_args.insert(3, "popimap")
     if is_2sv_enrolled:
         deprov_args.append("turnoff2sv")
-    label = "ASPs, backup codes, tokens, POP/IMAP, signout" + (", 2SV" if is_2sv_enrolled else "")
+    label = ("ASPs, backup codes, tokens, signout"
+             + (", POP/IMAP" if has_mailbox else "")
+             + (", 2SV" if is_2sv_enrolled else ""))
     print_info(f"Step 3/7: Deprovisioning ({label})...")
     success, output = run_gam(deprov_args, dry_run=dry_run, capture_output=True)
     if success:
@@ -1421,47 +1526,71 @@ def execute_kill_switch(email: str, dry_run: bool, is_suspended: bool,
     # GAM7 wiki (Users-Signout-Turnoff2SV):
     #   gam <UserTypeEntity> signout
     print_info("Step 4/7: Forcing sign-out from all sessions...")
-    run_gam(["user", email, "signout"], dry_run=dry_run)
-    summary_action("Forced sign-out")
+    ok, _ = run_gam(["user", email, "signout"], dry_run=dry_run)
+    if ok:
+        summary_action("Forced sign-out")
 
     # Step 5: Turn off 2SV [RECOMMENDED]
     # GAM7 wiki (Users-Signout-Turnoff2SV):
     #   gam <UserTypeEntity> turnoff2sv
     # Will fail if: suspended, not enrolled, OU enforces 2SV, or Advanced Protection
     # Skipped entirely if not enrolled to avoid spurious GAM exit-50 errors.
+    #
+    # Verify-first: when deprovision (step 3) carried the turnoff2sv token
+    # and succeeded, 2SV is already off here, and re-firing turnoff2sv on an
+    # unenrolled user fails with exit 50 — a false error in the summary of a
+    # successful run (observed live on dev 2026-07-13). So read the actual
+    # enrollment state and only fire the explicit command if still enrolled.
     if not is_2sv_enrolled:
         print_info("Step 5/7: Skipping turnoff2sv (user not enrolled in 2SV).")
         summary_warning("turnoff2sv skipped (user not enrolled in 2SV)")
-    else:
+    elif dry_run:
         print_info("Step 5/7: Turning off 2-Step Verification...")
-        success, output = run_gam(
-            ["user", email, "turnoff2sv"],
-            dry_run=dry_run,
-            capture_output=True
-        )
-        if success:
-            summary_action("Turned off 2SV")
-        elif output and ("not enrolled" in output.lower() or "suspended" in output.lower()):
-            print_warning(f"turnoff2sv skipped: {output.splitlines()[0] if output else 'unknown reason'}")
-            summary_warning("turnoff2sv skipped (user not enrolled or suspended)")
+        run_gam(["user", email, "turnoff2sv"], dry_run=True)
+        summary_action("Turned off 2SV")
+    else:
+        print_info("Step 5/7: Verifying 2-Step Verification is off...")
+        if _read_2sv_enrolled(email) is False:
+            print_success("2SV is off (deprovision's turnoff2sv took effect).")
+            summary_action("2SV off (verified by read-back)")
+        else:
+            success, output = run_gam(
+                ["user", email, "turnoff2sv"],
+                dry_run=False,
+                capture_output=True,
+                suppress_summary_error=True
+            )
+            if success or _read_2sv_enrolled(email) is False:
+                summary_action("Turned off 2SV")
+            elif output and ("not enrolled" in output.lower() or "suspended" in output.lower()):
+                print_warning(f"turnoff2sv skipped: {output.splitlines()[0] if output else 'unknown reason'}")
+                summary_warning("turnoff2sv skipped (user not enrolled or suspended)")
+            else:
+                print_error(f"turnoff2sv failed and 2SV still reads enrolled for {email}. "
+                            f"Retry manually: gam user {email} turnoff2sv")
+                summary_error(f"turnoff2sv failed — 2SV may still be enrolled for {email}")
 
     # Step 6: Scramble password [CRITICAL]
     # GAM7 wiki (Users): gam update user <email> password random
     print_info("Step 6/7: Scrambling password...")
-    run_gam(
+    ok, _ = run_gam(
         ["update", "user", email, "password", "random", "changepassword", "on"],
         dry_run=dry_run
     )
-    summary_action("Password scrambled and forced change on next login")
+    if ok:
+        summary_action("Password scrambled and forced change on next login")
+    else:
+        print_error("CRITICAL: Password scramble failed — the user can still log in.")
 
     # Step 7: Hide from GAL [IMPORTANT]
     # GAM7 wiki (Users): gam update user <email> gal off
     print_info("Step 7/7: Hiding from Global Address List...")
-    run_gam(
+    ok, _ = run_gam(
         ["update", "user", email, "gal", "off"],
         dry_run=dry_run
     )
-    summary_action("Hidden from GAL")
+    if ok:
+        summary_action("Hidden from GAL")
 
 
 ###############################################################################
@@ -1712,11 +1841,14 @@ def remove_licences(email: str, dry_run: bool, cached_output: Optional[str] = No
         success, output = True, cached_output
     else:
         print_info("Querying assigned licences...")
+        # stdout_only: keep GAM's per-SKU "Got N Licenses for..." stderr
+        # progress lines out of the captured CSV.
         success, output = run_gam(
             ["user", email, "print", "licenses"],
             dry_run=False,
             capture_output=True,
-            timeout=180
+            timeout=180,
+            stdout_only=True
         )
 
     if not success:
@@ -1734,14 +1866,23 @@ def remove_licences(email: str, dry_run: bool, cached_output: Optional[str] = No
         summary_action("No licences found")
         return
 
-    # Parse the Licenses (skuIds) and LicensesDisplay (human names) columns
-    # from the summary row. We zip them so error/summary messages can show
-    # display names instead of opaque skuIds.
+    # Parse the Licenses (skuIds) column from the summary row, using the
+    # csv module so quoted fields survive. LicensesDisplay space-joins the
+    # human names ("Cloud Identity Google Workspace..."), so multi-word
+    # names cannot be split back per-SKU: use the display name only when
+    # exactly one licence is assigned, otherwise label by skuId.
+    # ponytail: skuId labels for >1 licence; a static skuId->name map is
+    # the upgrade path if friendlier multi-licence labels matter.
     sku_ids: List[str] = []
-    sku_names: List[str] = []
+    display_name = ""
     lines = output.strip().splitlines()
     if len(lines) > 1:
-        headers = [h.strip() for h in lines[0].split(',')]
+        try:
+            rows = list(csv.reader(lines[:2]))
+            headers = [h.strip() for h in rows[0]]
+            data = [v.strip() for v in rows[1]]
+        except (csv.Error, IndexError):
+            headers, data = [], []
         try:
             lic_idx = headers.index('Licenses')
             count_idx = headers.index('LicensesCount')
@@ -1750,15 +1891,12 @@ def remove_licences(email: str, dry_run: bool, cached_output: Optional[str] = No
             summary_error(f"Licence removal issue: unexpected CSV headers: {lines[0]}")
             return
         display_idx = headers.index('LicensesDisplay') if 'LicensesDisplay' in headers else None
-        data = [v.strip() for v in lines[1].split(',')]
         count = int(data[count_idx]) if data[count_idx].isdigit() else 0
         if count > 0 and len(data) > lic_idx and data[lic_idx]:
             sku_ids = data[lic_idx].split()
-            if display_idx is not None and len(data) > display_idx and data[display_idx]:
-                sku_names = data[display_idx].split()
-            # Pad names to match ids in case the display column is shorter.
-            while len(sku_names) < len(sku_ids):
-                sku_names.append(sku_ids[len(sku_names)])
+            if (len(sku_ids) == 1 and display_idx is not None
+                    and len(data) > display_idx and data[display_idx]):
+                display_name = data[display_idx]
 
     if not sku_ids:
         print_success("No licences to remove")
@@ -1767,9 +1905,8 @@ def remove_licences(email: str, dry_run: bool, cached_output: Optional[str] = No
 
     def label(i: int) -> str:
         """Human-readable licence label, falling back to skuId when no name."""
-        name = sku_names[i] if i < len(sku_names) else sku_ids[i]
-        if name and name != sku_ids[i]:
-            return f"{name} ({sku_ids[i]})"
+        if display_name:
+            return f"{display_name} ({sku_ids[i]})"
         return sku_ids[i]
 
     labels = [label(i) for i in range(len(sku_ids))]
@@ -1893,13 +2030,38 @@ def transfer_drive(source: str, destination: str, dry_run: bool):
         summary_error(f"Drive transfer exception: {e}")
 
 
+def _list_aliases(source: str) -> List[str]:
+    """Return the source user's alias addresses from GAM's aliases CSV."""
+    success, output = run_gam(
+        ["print", "aliases", "user", source],
+        dry_run=False,
+        capture_output=True,
+        timeout=60,
+        stdout_only=True
+    )
+    aliases: List[str] = []
+    if success and output.strip():
+        reader = csv.DictReader(io.StringIO(output.strip()))
+        for row in reader:
+            value = (row.get("Alias") or "").strip()
+            if value:
+                aliases.append(value)
+    return aliases
+
+
 def transfer_aliases(source: str, destination: str, dry_run: bool):
     """
-    [RECOMMENDED] Transfer email aliases.
+    [RECOMMENDED] Transfer email aliases, one delete + create per alias.
 
-    Uses CSV pipe pattern:
-      gam print aliases user <source> |
-      gam csv - gam update alias ~alias user <destination>
+    Deliberately NOT `gam update alias` or the csv pipe pattern: update
+    alias is delete-then-insert under the hood, and the insert can race
+    Directory API propagation of its own delete, failing with "Duplicate"
+    and leaving the alias DESTROYED (deleted, never recreated) — while
+    `gam csv` swallows the child's exit code so the pipe still exits 0.
+    Observed live on dev.osh.co.za 2026-07-13 (evan.legacy lost, run
+    reported success). Instead: delete the alias, then create it on the
+    destination, retrying the create for up to ~60s while the deletion
+    propagates. Each alias is reported individually.
     """
     print_header("ALIAS TRANSFER")
 
@@ -1907,29 +2069,65 @@ def transfer_aliases(source: str, destination: str, dry_run: bool):
         summary_error(f"Alias transfer skipped: destination {destination} invalid")
         return
 
-    print_info(f"Transferring aliases: {source} -> {destination}")
-
-    if dry_run:
-        run_gam(
-            ["print", "aliases", "user", source],
-            dry_run=False,
-            capture_output=True
-        )
-        summary_action(f"Aliases listed (dry run)")
+    aliases = _list_aliases(source)
+    if not aliases:
+        print_success("No aliases to transfer.")
+        summary_action("No aliases to transfer")
         return
 
-    quoted_dest = f'"{destination}"' if os.name == 'nt' else f"'{destination}'"
-    cmd_str = (
-        f'{GAM_COMMAND} print aliases user {source} | '
-        f'{GAM_COMMAND} csv - gam update alias ~Alias user {quoted_dest}'
-    )
+    print_info(f"Transferring {len(aliases)} alias(es): {', '.join(aliases)} "
+               f"-> {destination}")
 
-    success, output = run_shell_pipe(cmd_str, dry_run=False, timeout=120)
-    if success:
-        print_success("Aliases transferred")
-        summary_action(f"Aliases transferred to {destination}")
-    else:
-        summary_error(f"Alias transfer issue: {output[:200]}")
+    if dry_run:
+        for alias in aliases:
+            run_gam(["delete", "alias", alias], dry_run=True)
+            run_gam(["create", "alias", alias, "user", destination], dry_run=True)
+        summary_action(f"Would transfer {len(aliases)} alias(es) to {destination}")
+        return
+
+    moved: List[str] = []
+    failed: List[str] = []
+    for alias in aliases:
+        ok, _ = run_gam(["delete", "alias", alias], dry_run=False,
+                        capture_output=True)
+        if not ok:
+            failed.append(alias)
+            continue
+        # Retry the create while the deletion propagates ("Duplicate").
+        created = False
+        deadline = time.time() + 60
+        while True:
+            ok, output = run_gam(
+                ["create", "alias", alias, "user", destination],
+                dry_run=False,
+                capture_output=True,
+                suppress_summary_error=True
+            )
+            if ok and "duplicate" not in output.lower():
+                created = True
+                break
+            if time.time() >= deadline or shutdown_requested:
+                break
+            print_info(f"  {alias}: waiting for deletion to propagate, retrying...")
+            time.sleep(5)
+        if created:
+            moved.append(alias)
+        else:
+            failed.append(alias)
+            print_error(
+                f"Alias {alias} was deleted but could NOT be recreated on "
+                f"{destination}. Recreate it manually: "
+                f"gam create alias {alias} user {destination}"
+            )
+
+    if moved:
+        print_success(f"Transferred {len(moved)} alias(es): {', '.join(moved)}")
+        summary_action(f"Aliases transferred to {destination}: {', '.join(moved)}")
+    if failed:
+        summary_error(
+            f"Alias transfer FAILED for: {', '.join(failed)} — mail to these "
+            f"addresses will bounce until recreated on {destination}"
+        )
 
 
 def quarantine_unreadable_messages(backup_path: Path) -> List[str]:
@@ -2063,7 +2261,8 @@ def migrate_email(source: str, destination: str, dry_run: bool, strip_labels: bo
 
     print_info(f"Migrating email: {source} -> {destination}")
     backup_path = BACKUP_DIRECTORY / "mailboxes" / f"{source}_{datetime.now().strftime('%Y%m%d')}"
-    backup_path.mkdir(parents=True, exist_ok=True)
+    if not dry_run:
+        backup_path.mkdir(parents=True, exist_ok=True)
 
     # Backup
     print_info(f"Backing up email to: {backup_path}")
@@ -2133,11 +2332,14 @@ def transfer_calendar(source: str, destination: str, dry_run: bool):
     print_info(f"Granting calendar editor access: {source} -> {destination}")
     # GAM7 syntax: gam user <src> add calendaracls <calendarid> <role> user:<email>
     # Use the source email as the calendar ID (their primary calendar).
-    run_gam(
+    # Role 'writer' is the Calendar API name for what the UI calls
+    # "Make changes to events" (editor-level access).
+    ok, _ = run_gam(
         ["user", source, "add", "calendaracls", source, "writer", f"user:{destination}"],
         dry_run=dry_run
     )
-    summary_action(f"Calendar editor access granted to {destination}")
+    if ok:
+        summary_action(f"Calendar editor access granted to {destination}")
 
 
 ###############################################################################
@@ -2195,17 +2397,27 @@ def setup_forwarding(email: str, forward_to: str, dry_run: bool):
         attempt = 0
         while time.time() < deadline:
             attempt += 1
+            # suppress_summary_error: a transient poll failure must not add
+            # one summary error line per attempt; the unverified outcome is
+            # reported once below if the deadline passes.
             ok, status_output = run_gam(
                 ["user", email, "show", "forwardingaddresses"],
                 dry_run=False,
                 capture_output=True,
                 timeout=30,
-                stdout_only=True
+                stdout_only=True,
+                suppress_summary_error=True
             )
             if ok:
-                lower_out = status_output.lower()
-                if forward_to.lower() in lower_out and "accepted" in lower_out:
-                    verified = True
+                # Match 'accepted' on the SAME line as the target address.
+                # A substring check across the whole output false-positives
+                # when a DIFFERENT, previously registered forwarding address
+                # is already accepted while the target is still pending.
+                for status_line in status_output.lower().splitlines():
+                    if forward_to.lower() in status_line and "accepted" in status_line:
+                        verified = True
+                        break
+                if verified:
                     print_success(
                         f"Forwarding address verified after {attempt} check(s)."
                     )
@@ -2257,7 +2469,8 @@ def backup_drive_rclone(email: str, dry_run: bool) -> bool:
     print_header("DRIVE BACKUP (RCLONE)")
 
     backup_path = BACKUP_DIRECTORY / "drive" / f"{email}_{datetime.now().strftime('%Y%m%d')}"
-    backup_path.mkdir(parents=True, exist_ok=True)
+    if not dry_run:
+        backup_path.mkdir(parents=True, exist_ok=True)
 
     rclone_args = [
         RCLONE_COMMAND, "sync",
@@ -2370,7 +2583,8 @@ def backup_email_only(email: str, dry_run: bool) -> bool:
     print_header("EMAIL BACKUP (GYB, LOCAL ONLY)")
 
     backup_path = BACKUP_DIRECTORY / "mailboxes" / f"{email}_email_{datetime.now().strftime('%Y%m%d')}"
-    backup_path.mkdir(parents=True, exist_ok=True)
+    if not dry_run:
+        backup_path.mkdir(parents=True, exist_ok=True)
 
     print_info(f"Backing up email to: {backup_path}")
 
@@ -2410,11 +2624,18 @@ def delete_user(email: str, dry_run: bool):
     print_error(f"User: {email}")
     print_error("Irreversible after 20-day recovery window.")
 
-    run_gam(
+    ok, _ = run_gam(
         ["delete", "user", email],
         dry_run=dry_run
     )
-    summary_action(f"USER DELETED: {email}")
+    if ok:
+        summary_action(f"USER DELETED: {email}")
+    else:
+        print_error(
+            f"CRITICAL: Deletion FAILED — {email} still exists. "
+            f"Verify with: gam info user {email}"
+        )
+        summary_error(f"Deletion failed — {email} still exists")
 
 
 ###############################################################################
@@ -2432,7 +2653,7 @@ def set_auto_reply(email: str, dry_run: bool):
     """
     print_header("PHASE 8: AUTO-REPLY SETUP")
 
-    run_gam(
+    ok, _ = run_gam(
         [
             "user", email, "vacation", "on",
             "subject", "Out of Office",
@@ -2440,7 +2661,8 @@ def set_auto_reply(email: str, dry_run: bool):
         ],
         dry_run=dry_run
     )
-    summary_action("Auto-reply message configured")
+    if ok:
+        summary_action("Auto-reply message configured")
 
 
 ###############################################################################
@@ -2463,11 +2685,54 @@ def suspend_user(email: str, dry_run: bool):
     """
     print_header("PHASE 9: SUSPENSION")
 
-    run_gam(
+    ok, _ = run_gam(
         ["update", "user", email, "suspended", "on"],
         dry_run=dry_run
     )
-    summary_action("User account suspended")
+    if not ok:
+        print_error(
+            f"CRITICAL: Suspension FAILED — {email} is still active. "
+            f"Suspend manually: gam update user {email} suspended on"
+        )
+        summary_error(f"Suspension failed — {email} is still ACTIVE")
+        return
+
+    if dry_run:
+        summary_action("User account suspended")
+        return
+
+    # Read back the actual state: a successful 'Updated' response can lie.
+    # Observed live on dev 2026-07-13: an unsuspend returned 'Updated' with
+    # no state change for 70+ seconds until a suspend-toggle cycle cleared
+    # it. Suspension is the security-critical final step, so verify it
+    # rather than trusting the exit code; retry the read a few times to
+    # ride out ordinary propagation lag.
+    for attempt in range(3):
+        ok, output = run_gam(
+            ["info", "user", email, "quick"],
+            dry_run=False,
+            capture_output=True,
+            timeout=30,
+            suppress_summary_error=True
+        )
+        if ok:
+            for line in output.splitlines():
+                lower = line.lower()
+                if "account suspended" in lower and "true" in lower:
+                    summary_action("User account suspended (verified by read-back)")
+                    return
+        if attempt < 2:
+            time.sleep(5)
+    print_error(
+        f"CRITICAL: Suspension reported success but {email} still reads as "
+        f"ACTIVE. Toggle it manually: gam update user {email} suspended on "
+        f"(if that reports Updated with no effect, run suspended off then "
+        f"suspended on) and verify with: gam info user {email} quick"
+    )
+    summary_error(
+        f"Suspension NOT verified — {email} may still be ACTIVE despite "
+        f"a successful-looking update"
+    )
 
 
 ###############################################################################
@@ -2617,7 +2882,9 @@ def parse_args():
     parser.add_argument("--doit", action="store_true",
                         help="Execute changes (default is dry-run mode)")
     parser.add_argument("--force", action="store_true",
-                        help="Skip all interactive prompts (auto-yes)")
+                        help="Skip all interactive prompts (auto-yes). Exception: "
+                             "an already-suspended user is only temporarily "
+                             "unsuspended when --unsuspend is explicitly given.")
 
     # --- Backup flags ---
     backup_grp = parser.add_argument_group("Backup options")
@@ -2824,15 +3091,25 @@ def main():
     originally_suspended = is_suspended
     temp_unsuspended = False
     is_2sv_enrolled = user_info.get('2-step enrolled', 'false').lower() == 'true'
+    has_mailbox = user_info.get('mailbox is setup', 'true').lower() == 'true'
 
     # --- Temporarily unsuspend if requested ---
     if is_suspended and not args.scorched_earth:
-        do_unsuspend = args.unsuspend or prompt_yes_no(
-            "User is suspended. Temporarily unsuspend to allow full offboarding? "
-            "(Will be re-suspended at the end)",
-            default=False,
-            force=args.force
+        do_unsuspend = decide_unsuspend(
+            args.force, args.unsuspend,
+            lambda: prompt_yes_no(
+                "User is suspended. Temporarily unsuspend to allow full offboarding? "
+                "(Will be re-suspended at the end)",
+                default=False
+            )
         )
+        if args.force and not args.unsuspend:
+            print_warning(
+                "User is suspended and --unsuspend was not given: continuing "
+                "WITHOUT unsuspending. Suspension-dependent steps (deprovision "
+                "backup codes, turnoff2sv, forwarding, auto-reply) will fail. "
+                "Add --unsuspend to temporarily reactivate for full offboarding."
+            )
         if do_unsuspend:
             print_info("Temporarily unsuspending user for offboarding...")
             success, _ = run_gam(
@@ -2903,7 +3180,8 @@ def main():
     # =========================================================================
     with PhaseTimer("Kill switch"):
         try:
-            execute_kill_switch(user_email, dry_run, is_suspended, is_2sv_enrolled)
+            execute_kill_switch(user_email, dry_run, is_suspended,
+                                is_2sv_enrolled, has_mailbox)
         except Exception as e:
             print_error(f"Kill switch phase failed: {e}")
             summary_error(f"Kill switch exception: {e}")
