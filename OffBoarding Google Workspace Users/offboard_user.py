@@ -218,6 +218,7 @@ Planned Features (not yet implemented)
 """
 
 import argparse
+import atexit
 import csv
 import io
 import subprocess
@@ -475,6 +476,13 @@ def summary_error(msg: str):
 
 def summary_warning(msg: str):
     summary_warnings.append(msg)
+
+
+def record_finalization_blocker(phase: str, errors_before: int,
+                                blockers: List[str]):
+    """Record a data-protection blocker when a critical phase adds errors."""
+    if len(summary_errors) > errors_before and phase not in blockers:
+        blockers.append(phase)
 
 
 ###############################################################################
@@ -1269,6 +1277,67 @@ def decide_unsuspend(force: bool, unsuspend_flag: bool, prompt_fn) -> bool:
     if force:
         return unsuspend_flag
     return unsuspend_flag or prompt_fn()
+
+
+def read_suspension_state(email: str) -> Optional[bool]:
+    """Return the user's current suspension state, or None if unknown."""
+    success, output = run_gam(
+        ["info", "user", email, "quick"],
+        dry_run=False,
+        capture_output=True,
+        timeout=30,
+        suppress_summary_error=True,
+    )
+    if not success:
+        return None
+
+    for line in output.splitlines():
+        match = re.match(r"\s*account suspended\s*:\s*(true|false)\s*$",
+                         line, re.IGNORECASE)
+        if match:
+            return match.group(1).lower() == "true"
+    return None
+
+
+def wait_for_suspension_state(email: str, expected: bool,
+                              timeout: int = 60,
+                              poll_interval: int = 5) -> bool:
+    """Poll Directory state until suspension matches the expected value."""
+    deadline = time.time() + timeout
+    while True:
+        if read_suspension_state(email) is expected:
+            return True
+        if time.time() >= deadline:
+            return False
+        time.sleep(poll_interval)
+
+
+def restore_original_suspension(email: str, attempts: int = 3) -> bool:
+    """Emergency exit guard for an account temporarily unsuspended by us."""
+    if read_suspension_state(email) is True:
+        return True
+
+    print_warning(
+        f"Restoring original suspended state for {email} before exit..."
+    )
+    for attempt in range(1, attempts + 1):
+        run_gam(
+            ["update", "user", email, "suspended", "on"],
+            dry_run=False,
+            capture_output=True,
+            suppress_summary_error=True,
+        )
+        if wait_for_suspension_state(email, True, timeout=30):
+            print_success("Original suspended state restored and verified.")
+            return True
+        print_warning(f"Re-suspension attempt {attempt}/{attempts} was not verified.")
+
+    print_error(
+        f"EMERGENCY: {email} started suspended but could not be re-suspended. "
+        "Suspend the account manually immediately."
+    )
+    summary_error(f"Original suspension state NOT restored for {email}")
+    return False
 
 
 def prompt_email(question: str, force_value: Optional[str] = None) -> str:
@@ -2885,6 +2954,13 @@ def parse_args():
                         help="Skip all interactive prompts (auto-yes). Exception: "
                              "an already-suspended user is only temporarily "
                              "unsuspended when --unsuspend is explicitly given.")
+    parser.add_argument(
+        "--continue-on-transfer-error", action="store_true",
+        help="DANGER: remove licences even when a requested backup or data "
+             "transfer failed. By default, licences are retained so failed "
+             "operations can be retried. Final suspension still runs for "
+             "account security."
+    )
 
     # --- Backup flags ---
     backup_grp = parser.add_argument_group("Backup options")
@@ -3013,6 +3089,12 @@ def parse_args():
         args.no_delegates = True
         args.no_auto_reply = True
 
+    if args.unsuspend and args.no_suspend:
+        parser.error(
+            "--unsuspend cannot be combined with --no-suspend. An account "
+            "that starts suspended must be restored to its original state."
+        )
+
     return args
 
 
@@ -3088,10 +3170,15 @@ def main():
         sys.exit(2)
 
     is_suspended = user_info.get('_is_suspended', 'False') == 'True'
-    originally_suspended = is_suspended
     temp_unsuspended = False
+    finalization_blockers: List[str] = []
     is_2sv_enrolled = user_info.get('2-step enrolled', 'false').lower() == 'true'
     has_mailbox = user_info.get('mailbox is setup', 'true').lower() == 'true'
+
+    # Resolve and validate every transfer destination before making any
+    # account change. In particular, a suspended user must never be
+    # unsuspended and then left active because destination preflight aborted.
+    dest_map = preflight_destinations(args)
 
     # --- Temporarily unsuspend if requested ---
     if is_suspended and not args.scorched_earth:
@@ -3116,13 +3203,28 @@ def main():
                 ["update", "user", user_email, "suspended", "off"],
                 dry_run=dry_run
             )
-            if success:
+            if dry_run and success:
                 is_suspended = False
                 temp_unsuspended = True
-                print_success("User unsuspended. Will be re-suspended at the end.")
-                summary_action("Temporarily unsuspended for offboarding")
+                print_info("DRY RUN: Temporary unsuspension would be verified.")
+                summary_action("Would temporarily unsuspend for offboarding")
+            elif success and wait_for_suspension_state(user_email, False):
+                is_suspended = False
+                temp_unsuspended = True
+                print_success("User unsuspended and verified. Will be re-suspended at the end.")
+                summary_action("Temporarily unsuspended for offboarding (verified)")
+                # sys.exit and unhandled exceptions still run atexit handlers.
+                # The guard is idempotent: after normal final suspension it
+                # observes the restored state and makes no change.
+                atexit.register(restore_original_suspension, user_email)
             else:
-                print_error("Failed to unsuspend user. Continuing with limited offboarding.")
+                print_error(
+                    "Could not verify that the user was unsuspended. Restoring "
+                    "the original state and aborting before offboarding changes."
+                )
+                if not dry_run:
+                    restore_original_suspension(user_email)
+                sys.exit(2)
 
     # --- Scorched earth confirmation (even with --force, must type email) ---
     if args.scorched_earth and not dry_run:
@@ -3150,10 +3252,6 @@ def main():
         if not prompt_yes_no("Are you sure you want to proceed?"):
             print_info("Aborted by operator.")
             sys.exit(0)
-
-    # Resolve and validate transfer destinations up front so we fail fast
-    # before any destructive action if --force is missing destinations.
-    dest_map = preflight_destinations(args)
 
     # =========================================================================
     # PHASE 0: Pre-flight Snapshot
@@ -3272,19 +3370,27 @@ def main():
     # =========================================================================
     if args.backup_drive:
         with PhaseTimer("Drive backup (rclone)"):
+            errors_before = len(summary_errors)
             try:
                 backup_drive_rclone(user_email, dry_run)
             except Exception as e:
                 print_error(f"Drive backup failed: {e}")
                 summary_error(f"Drive backup exception: {e}")
+            record_finalization_blocker(
+                "Drive backup", errors_before, finalization_blockers
+            )
 
     if args.backup_email:
         with PhaseTimer("Email backup (GYB, local only)"):
+            errors_before = len(summary_errors)
             try:
                 backup_email_only(user_email, dry_run)
             except Exception as e:
                 print_error(f"Email backup failed: {e}")
                 summary_error(f"Email backup exception: {e}")
+            record_finalization_blocker(
+                "Email backup", errors_before, finalization_blockers
+            )
 
     if shutdown_requested:
         print_summary(dry_run)
@@ -3301,11 +3407,15 @@ def main():
     elif prompt_yes_no("Transfer Drive files to another user?", force=args.force):
         drive_dest = dest_map["drive"] or prompt_email("Drive destination email")
         with PhaseTimer("Drive transfer"):
+            errors_before = len(summary_errors)
             try:
                 transfer_drive(user_email, drive_dest, dry_run)
             except Exception as e:
                 print_error(f"Drive transfer failed: {e}")
                 summary_error(f"Drive exception: {e}")
+            record_finalization_blocker(
+                "Drive transfer", errors_before, finalization_blockers
+            )
     else:
         summary_skip("Drive transfer (declined)")
 
@@ -3323,11 +3433,15 @@ def main():
         else:
             strip_labels = args.strip_labels
         with PhaseTimer("Email migration"):
+            errors_before = len(summary_errors)
             try:
                 migrate_email(user_email, email_dest, dry_run, strip_labels=strip_labels)
             except Exception as e:
                 print_error(f"Email migration failed: {e}")
                 summary_error(f"Email exception: {e}")
+            record_finalization_blocker(
+                "Email migration", errors_before, finalization_blockers
+            )
     else:
         summary_skip("Email migration (declined)")
 
@@ -3337,11 +3451,15 @@ def main():
     elif prompt_yes_no("Transfer aliases to another user?", force=args.force):
         alias_dest = dest_map["alias"] or prompt_email("Alias destination email")
         with PhaseTimer("Alias transfer"):
+            errors_before = len(summary_errors)
             try:
                 transfer_aliases(user_email, alias_dest, dry_run)
             except Exception as e:
                 print_error(f"Alias transfer failed: {e}")
                 summary_error(f"Alias exception: {e}")
+            record_finalization_blocker(
+                "Alias transfer", errors_before, finalization_blockers
+            )
     else:
         summary_skip("Alias transfer (declined)")
 
@@ -3351,11 +3469,15 @@ def main():
     elif prompt_yes_no("Grant calendar access to another user?", force=args.force):
         cal_dest = dest_map["calendar"] or prompt_email("Calendar access destination email")
         with PhaseTimer("Calendar transfer"):
+            errors_before = len(summary_errors)
             try:
                 transfer_calendar(user_email, cal_dest, dry_run)
             except Exception as e:
                 print_error(f"Calendar transfer failed: {e}")
                 summary_error(f"Calendar exception: {e}")
+            record_finalization_blocker(
+                "Calendar transfer", errors_before, finalization_blockers
+            )
     else:
         summary_skip("Calendar transfer (declined)")
 
@@ -3398,12 +3520,44 @@ def main():
     # PHASE 5: Licence Removal (after all transfers so licence is intact
     # for Drive/Gmail API access during data operations)
     # =========================================================================
-    with PhaseTimer("Licence removal"):
-        try:
-            remove_licences(user_email, dry_run, cached_output=cached_licences_output)
-        except Exception as e:
-            print_error(f"Licence removal failed: {e}")
-            summary_error(f"Licence exception: {e}")
+    licence_hold = (
+        bool(finalization_blockers)
+        and not args.continue_on_transfer_error
+        and not dry_run
+    )
+    if licence_hold:
+        blocker_text = ", ".join(finalization_blockers)
+        print_error("DATA PROTECTION HOLD: Licences will NOT be removed.")
+        print_error(f"Failed required phase(s): {blocker_text}")
+        print_warning(
+            "The account will still be suspended for security. Retained "
+            "licences allow the failed backup/transfer to be retried after "
+            "a controlled temporary unsuspension. To override this hold, "
+            "re-run with --continue-on-transfer-error."
+        )
+        summary_skip(
+            f"Licence removal blocked by failed phase(s): {blocker_text}"
+        )
+        summary_warning(
+            "Licences retained for backup/transfer recovery; account will "
+            "still be suspended"
+        )
+    else:
+        if finalization_blockers and args.continue_on_transfer_error:
+            blocker_text = ", ".join(finalization_blockers)
+            print_warning(
+                "OVERRIDE: Removing licences despite failed phase(s): "
+                f"{blocker_text}"
+            )
+            summary_warning(
+                "Licence-removal safety hold overridden for: " + blocker_text
+            )
+        with PhaseTimer("Licence removal"):
+            try:
+                remove_licences(user_email, dry_run, cached_output=cached_licences_output)
+            except Exception as e:
+                print_error(f"Licence removal failed: {e}")
+                summary_error(f"Licence exception: {e}")
 
     # =========================================================================
     # PHASE 9: Suspend (always last)
