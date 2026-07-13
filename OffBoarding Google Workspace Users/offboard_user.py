@@ -1067,7 +1067,28 @@ def resolve_dest(specific: Optional[str], all_default: Optional[str]) -> Optiona
     return specific or all_default or None
 
 
-def preflight_destinations(args) -> Dict[str, Optional[str]]:
+def same_account(source: str, destination: str) -> bool:
+    """Compare account addresses safely and case-insensitively."""
+    return source.strip().casefold() == destination.strip().casefold()
+
+
+def reject_same_destination(source: str, destination: str,
+                            phase: str) -> bool:
+    """Reject a transfer or forwarding operation targeting its source."""
+    if not same_account(source, destination):
+        return False
+
+    print_error(
+        f"{phase} rejected: source and destination are the same account "
+        f"({source})."
+    )
+    summary_error(
+        f"{phase} rejected: source and destination must be different accounts"
+    )
+    return True
+
+
+def preflight_destinations(args, source_email: Optional[str] = None) -> Dict[str, Optional[str]]:
     """Resolve destinations for every transfer phase and validate them up front.
 
     Under --force, any non-skipped phase without a destination is a fatal error
@@ -1097,6 +1118,12 @@ def preflight_destinations(args) -> Dict[str, Optional[str]]:
         resolved[name] = dest
         if args.force and not dest:
             missing.append(name)
+        if dest and source_email and same_account(source_email, dest):
+            print_error(
+                f"Invalid {name} destination: {dest} is the account being "
+                "offboarded. Source and destination must be different."
+            )
+            sys.exit(2)
 
     if missing:
         print_error("--force requires a destination for every non-skipped phase.")
@@ -2042,6 +2069,9 @@ def transfer_drive(source: str, destination: str, dry_run: bool):
     """
     print_header("DRIVE TRANSFER")
 
+    if reject_same_destination(source, destination, "Drive transfer"):
+        return
+
     if not validate_destination(destination):
         summary_error(f"Drive transfer skipped: destination {destination} invalid")
         return
@@ -2133,6 +2163,9 @@ def transfer_aliases(source: str, destination: str, dry_run: bool):
     propagates. Each alias is reported individually.
     """
     print_header("ALIAS TRANSFER")
+
+    if reject_same_destination(source, destination, "Alias transfer"):
+        return
 
     if not validate_destination(destination):
         summary_error(f"Alias transfer skipped: destination {destination} invalid")
@@ -2324,6 +2357,9 @@ def migrate_email(source: str, destination: str, dry_run: bool, strip_labels: bo
     """
     print_header("EMAIL MIGRATION")
 
+    if reject_same_destination(source, destination, "Email migration"):
+        return
+
     if not validate_destination(destination):
         summary_error(f"Email migration skipped: destination {destination} invalid")
         return
@@ -2394,6 +2430,9 @@ def transfer_calendar(source: str, destination: str, dry_run: bool):
     """
     print_header("CALENDAR ACCESS TRANSFER")
 
+    if reject_same_destination(source, destination, "Calendar transfer"):
+        return
+
     if not validate_destination(destination):
         summary_error(f"Calendar transfer skipped: destination {destination} invalid")
         return
@@ -2434,6 +2473,9 @@ def setup_forwarding(email: str, forward_to: str, dry_run: bool):
     can be activated. There may be a brief delay between the two steps.
     """
     print_header("EMAIL FORWARDING SETUP")
+
+    if reject_same_destination(email, forward_to, "Email forwarding"):
+        return
 
     if not validate_destination(forward_to, allow_group=True):
         summary_error(f"Forwarding skipped: destination {forward_to} invalid")
@@ -3178,7 +3220,7 @@ def main():
     # Resolve and validate every transfer destination before making any
     # account change. In particular, a suspended user must never be
     # unsuspended and then left active because destination preflight aborted.
-    dest_map = preflight_destinations(args)
+    dest_map = preflight_destinations(args, source_email=user_email)
 
     # --- Temporarily unsuspend if requested ---
     if is_suspended and not args.scorched_earth:
