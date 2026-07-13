@@ -232,7 +232,7 @@
     <div id="exec-extras" style="display:none; margin-top:10px;">
       <div class="check">
         <input type="checkbox" id="force">
-        <label for="force"><strong>--force</strong> — skip all interactive prompts (auto-yes).<span class="check-desc">When set, every non-skipped transfer phase must have a destination — the builder validates this for you. Useful for automation or unattended runs.</span></label>
+        <label for="force"><strong>--force</strong> — skip all interactive prompts (auto-yes).<span class="check-desc">When set, every non-skipped transfer phase must have a destination — the builder validates this for you. Useful for automation or unattended runs. Exception (v5.0.0): an already-suspended user is only temporarily unsuspended when --unsuspend is explicitly ticked — --force alone never reactivates a suspended account.</span></label>
       </div>
     </div>
 
@@ -257,7 +257,7 @@
       </div>
       <div class="check">
         <input type="checkbox" id="unsuspend">
-        <label for="unsuspend"><strong>--unsuspend</strong><span class="check-desc">Temporarily unsuspend an already-suspended user so offboarding can complete. The script re-suspends at the end. Without this flag the script will abort early if the account is already suspended.</span></label>
+        <label for="unsuspend"><strong>--unsuspend</strong><span class="check-desc">Temporarily unsuspend an already-suspended user so offboarding can complete. The script re-suspends at the end. Without this flag an already-suspended user is offboarded in limited mode: suspension-dependent steps (deprovision backup codes, turnoff2sv, forwarding, auto-reply) will fail with warnings. With --force, this flag is the only way to opt in — --force alone never unsuspends.</span></label>
       </div>
     </div>
   </div>

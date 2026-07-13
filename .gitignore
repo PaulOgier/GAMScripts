@@ -19,3 +19,8 @@ OffBoarding Google Workspace Users/linkedin_post.md
 
 # Repo-local memory (Claude worklog + knowledge). Backed up to Drive via /backup, never shipped to GitHub.
 memory/
+
+# Local test-session artifacts (dev tenant details; never on GitHub).
+# The durable, shippable test suite is test_offboard_user.py.
+OffBoarding Google Workspace Users/test_logs/
+OffBoarding Google Workspace Users/TEST_PLAN_v*.md
