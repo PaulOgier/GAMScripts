@@ -1,4 +1,22 @@
-# GAM7 Offboarding Script v4.5: Test Environment Setup & Backup Guide
+# GAM7 Offboarding Script v5: Test Environment Setup & Backup Guide
+
+## Step 0: Run the offline unit tests first (no tenant needed)
+
+The repo ships `test_offboard_user.py` next to the script — a stdlib-only
+unittest suite in which every GAM/GYB call is stubbed, so it runs in
+seconds and never touches a Google Workspace tenant. Run it before and
+after ANY change to `offboard_user.py`:
+
+```bash
+python3 test_offboard_user.py -v
+```
+
+All tests must pass before you move on to the live tests below. Several
+tests pin behaviour that only surfaced against a live tenant (the
+alias-transfer propagation race, suspension updates that report success
+without taking effect, deprovision on mailbox-less users) — if one fails
+after your change, the script has regressed on a real, observed failure
+mode, not a theoretical one.
 
 ## Conventions used in this guide
 
@@ -294,7 +312,15 @@ python3 offboard_user.py --user testoffboard1@yourdomain.com
 python3 offboard_user.py --doit --user testoffboard1@yourdomain.com
 
 # Test 3: Already-suspended user (expect partial failures, verify handling)
+# Interactively you are asked whether to temporarily unsuspend. With --force,
+# the script NEVER unsuspends unless you explicitly add --unsuspend (v5.0.0
+# behaviour change); without it the run continues in limited mode and the
+# suspension-dependent steps fail with warnings.
 python3 offboard_user.py --doit --user testoffboard3@yourdomain.com
+
+# Test 3b: Already-suspended user, fully scripted with temporary unsuspend
+# (re-suspended automatically at the end)
+python3 offboard_user.py --doit --force --unsuspend --user testoffboard3@yourdomain.com --no-transfer
 
 # Test 4: Admin user (verify detection warning)
 python3 offboard_user.py --doit --user testoffboard4@yourdomain.com
@@ -470,6 +496,12 @@ offboarding_backups/mailboxes/user@domain.com_20260330_skipped-messages.csv
 ```
 
 GYB then skips the missing files and the restore completes in one pass. The
+skip machinery can be self-tested by `chmod 000` on one backed-up `.eml`
+between backup and restore — but ONLY on a local-disk backup directory.
+Inside an iCloud Drive folder the file provider silently restores the
+read permission within seconds and the simulation no-ops (real antivirus
+locks are unaffected — the scan probes actual reads, whatever the lock
+mechanism). The
 CSV lists each skipped message's Gmail message ID (the `.eml` filename), its
 date, and where the file was moved. Those messages are intentionally NOT
 restored to the destination mailbox — they are the flagged mail. To see what
@@ -628,6 +660,12 @@ destination up front and validates each address against the directory. If any
 phase has no resolvable destination, the run aborts with exit code 2 **before
 any destructive action**. This protects against half-offboarding from a typo
 or forgotten flag.
+
+**`--force` and suspended users (v5.0.0):** `--force` answers every prompt
+with yes EXCEPT the temporary-unsuspend question. An already-suspended user
+is only reactivated when you explicitly pass `--unsuspend`; without it the
+run continues in limited mode (suspension-dependent steps fail with
+warnings) and the account is never made less restricted than it started.
 
 **Behaviour without `--force`:** any phase without a flag-resolved destination
 falls back to an interactive prompt at runtime (current behaviour preserved).

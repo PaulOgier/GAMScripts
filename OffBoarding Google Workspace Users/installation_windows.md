@@ -318,6 +318,13 @@ Console visit, so this is a one-trip task instead of two:
 > GYB-specific, so they have to be added out-of-band. Doing it in the
 > same Admin Console visit means you authorise once and you're done.
 
+> **Multi-tenant admins:** domain-wide delegation lives per tenant. If
+> you point this same service account at another Google Workspace
+> tenant (a second domain, a dev/test tenant), you must repeat this
+> whole authorisation — including the GYB-only scopes — in THAT
+> tenant's Admin Console. GAM working against the new tenant does not
+> mean GYB will: `gyb --action check-service-account` is the test.
+
 Wait ~1 minute for DWD to propagate, then verify every scope is live:
 
 ```cmd
