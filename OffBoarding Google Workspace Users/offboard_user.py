@@ -218,6 +218,7 @@ Planned Features (not yet implemented)
 """
 
 import argparse
+import atexit
 import csv
 import io
 import subprocess
@@ -1269,6 +1270,67 @@ def decide_unsuspend(force: bool, unsuspend_flag: bool, prompt_fn) -> bool:
     if force:
         return unsuspend_flag
     return unsuspend_flag or prompt_fn()
+
+
+def read_suspension_state(email: str) -> Optional[bool]:
+    """Return the user's current suspension state, or None if unknown."""
+    success, output = run_gam(
+        ["info", "user", email, "quick"],
+        dry_run=False,
+        capture_output=True,
+        timeout=30,
+        suppress_summary_error=True,
+    )
+    if not success:
+        return None
+
+    for line in output.splitlines():
+        match = re.match(r"\s*account suspended\s*:\s*(true|false)\s*$",
+                         line, re.IGNORECASE)
+        if match:
+            return match.group(1).lower() == "true"
+    return None
+
+
+def wait_for_suspension_state(email: str, expected: bool,
+                              timeout: int = 60,
+                              poll_interval: int = 5) -> bool:
+    """Poll Directory state until suspension matches the expected value."""
+    deadline = time.time() + timeout
+    while True:
+        if read_suspension_state(email) is expected:
+            return True
+        if time.time() >= deadline:
+            return False
+        time.sleep(poll_interval)
+
+
+def restore_original_suspension(email: str, attempts: int = 3) -> bool:
+    """Emergency exit guard for an account temporarily unsuspended by us."""
+    if read_suspension_state(email) is True:
+        return True
+
+    print_warning(
+        f"Restoring original suspended state for {email} before exit..."
+    )
+    for attempt in range(1, attempts + 1):
+        run_gam(
+            ["update", "user", email, "suspended", "on"],
+            dry_run=False,
+            capture_output=True,
+            suppress_summary_error=True,
+        )
+        if wait_for_suspension_state(email, True, timeout=30):
+            print_success("Original suspended state restored and verified.")
+            return True
+        print_warning(f"Re-suspension attempt {attempt}/{attempts} was not verified.")
+
+    print_error(
+        f"EMERGENCY: {email} started suspended but could not be re-suspended. "
+        "Suspend the account manually immediately."
+    )
+    summary_error(f"Original suspension state NOT restored for {email}")
+    return False
 
 
 def prompt_email(question: str, force_value: Optional[str] = None) -> str:
@@ -3013,6 +3075,12 @@ def parse_args():
         args.no_delegates = True
         args.no_auto_reply = True
 
+    if args.unsuspend and args.no_suspend:
+        parser.error(
+            "--unsuspend cannot be combined with --no-suspend. An account "
+            "that starts suspended must be restored to its original state."
+        )
+
     return args
 
 
@@ -3088,10 +3156,14 @@ def main():
         sys.exit(2)
 
     is_suspended = user_info.get('_is_suspended', 'False') == 'True'
-    originally_suspended = is_suspended
     temp_unsuspended = False
     is_2sv_enrolled = user_info.get('2-step enrolled', 'false').lower() == 'true'
     has_mailbox = user_info.get('mailbox is setup', 'true').lower() == 'true'
+
+    # Resolve and validate every transfer destination before making any
+    # account change. In particular, a suspended user must never be
+    # unsuspended and then left active because destination preflight aborted.
+    dest_map = preflight_destinations(args)
 
     # --- Temporarily unsuspend if requested ---
     if is_suspended and not args.scorched_earth:
@@ -3116,13 +3188,28 @@ def main():
                 ["update", "user", user_email, "suspended", "off"],
                 dry_run=dry_run
             )
-            if success:
+            if dry_run and success:
                 is_suspended = False
                 temp_unsuspended = True
-                print_success("User unsuspended. Will be re-suspended at the end.")
-                summary_action("Temporarily unsuspended for offboarding")
+                print_info("DRY RUN: Temporary unsuspension would be verified.")
+                summary_action("Would temporarily unsuspend for offboarding")
+            elif success and wait_for_suspension_state(user_email, False):
+                is_suspended = False
+                temp_unsuspended = True
+                print_success("User unsuspended and verified. Will be re-suspended at the end.")
+                summary_action("Temporarily unsuspended for offboarding (verified)")
+                # sys.exit and unhandled exceptions still run atexit handlers.
+                # The guard is idempotent: after normal final suspension it
+                # observes the restored state and makes no change.
+                atexit.register(restore_original_suspension, user_email)
             else:
-                print_error("Failed to unsuspend user. Continuing with limited offboarding.")
+                print_error(
+                    "Could not verify that the user was unsuspended. Restoring "
+                    "the original state and aborting before offboarding changes."
+                )
+                if not dry_run:
+                    restore_original_suspension(user_email)
+                sys.exit(2)
 
     # --- Scorched earth confirmation (even with --force, must type email) ---
     if args.scorched_earth and not dry_run:
@@ -3150,10 +3237,6 @@ def main():
         if not prompt_yes_no("Are you sure you want to proceed?"):
             print_info("Aborted by operator.")
             sys.exit(0)
-
-    # Resolve and validate transfer destinations up front so we fail fast
-    # before any destructive action if --force is missing destinations.
-    dest_map = preflight_destinations(args)
 
     # =========================================================================
     # PHASE 0: Pre-flight Snapshot
