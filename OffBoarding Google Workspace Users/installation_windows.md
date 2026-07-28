@@ -507,7 +507,94 @@ build a safe test environment before pointing it at a real user.
 
 ---
 
+## 5. Large mailbox migrations
+
+A mailbox of a few thousand messages needs nothing special. Once you are into
+tens or hundreds of thousands, three flags matter.
+
+### Where the backup is written — `--backup-dir`
+
+```powershell
+python3 offboard_user.py --doit --user leaver@yourdomain.com `
+  --email-to successor@yourdomain.com `
+  --backup-dir C:\offboarding_backups
+```
+
+A mailbox backup can run to hundreds of gigabytes. Point this at a **local
+path, never inside OneDrive, Dropbox or Google Drive** — a synced folder will try
+to upload the whole thing. If you need to move an existing backup, a `move` on
+the same drive is instant.
+
+You can also set `BACKUP_DIRECTORY` near the top of the script for a permanent
+default.
+
+### How fast the restore runs — `--restore-batch-size`
+
+```powershell
+python3 offboard_user.py ... --restore-batch-size 100
+```
+
+GYB restores one message per request by default, which is slow and fragile: it
+also only writes its resume database at the end, so a crash restarts from the
+first message. Any value above 1 batches messages and commits progress as it
+goes.
+
+Measured on a real mailbox, 1,200 messages per run:
+
+| `--restore-batch-size` | throughput |
+|---|---|
+| 1 | 1,231 msg/hr |
+| 10 | 5,775 msg/hr |
+| 100 | 9,057 msg/hr |
+
+**100 is the maximum GYB accepts** — higher values are rejected outright. The
+script defaults to 50 and steps down automatically (100 → 75 → 50 → 25 → 10) if
+Gmail starts throttling.
+
+### Resuming a restore that died — `--reuse-email-backup`
+
+```powershell
+python3 offboard_user.py --doit --force --user leaver@yourdomain.com `
+  --email-to successor@yourdomain.com `
+  --reuse-email-backup C:\offboarding_backups/mailboxes/leaver@yourdomain.com_20260721
+```
+
+Restores from a backup you already have and skips the download and every other
+phase. Re-running a restore is safe: Gmail discards messages it already holds,
+so nothing is duplicated.
+
+### Before you start a big one
+
+- **Check the destination is not suspended and has Gmail.** Both failures waste
+  hours: a suspended mailbox rejects every message with an error that looks
+  exactly like rate limiting. The script checks this for you and refuses to
+  start.
+- **Remove the leaver's licence last, not first.** Gmail keeps accepting mail
+  for a long time after a licence is removed (over 12 minutes in testing), so a
+  restore can begin happily and then fail part way through.
+- **Expect it to take a while.** A 170,000-message, 190 GB mailbox took about
+  35 hours with antivirus running on the machine.
+
+---
+
 ## Troubleshooting
+
+- **Restore is slow and the log repeats "Backing off ... backendError".**
+  Usually the destination account is suspended, not a rate limit — the two are
+  indistinguishable in the log. Check with
+  `gam info user <destination> quick` and look for `Account Suspended: True`.
+- **Restore fails immediately with "Mail service not enabled".** The
+  destination has no Gmail licence. Assign one with
+  `gam user <destination> add license 1010020020`, then wait a minute.
+- **A few old messages arrive dated today.** Their sender wrote an unusable
+  `Date:` header, so Gmail stamps them with the time of the restore. It affects
+  a handful of messages and cannot be fixed — mention it if the recipient asks.
+- **A message is skipped as unreadable during a restore.** Antivirus has
+  quarantined it in the backup folder, which almost always means it really is
+  malicious. The script moves it aside, lists it in
+  `<backup>_skipped-messages.csv`, and carries on. Do not add an antivirus
+  exclusion for the backup folder — that would restore the malware into the
+  successor's mailbox.
 
 - **`gam` / `gyb` / `rclone` not recognized.** PATH update did not take
   effect. Close *all* cmd windows and open a new one. Verify with

@@ -670,6 +670,62 @@ warnings) and the account is never made less restricted than it started.
 **Behaviour without `--force`:** any phase without a flag-resolved destination
 falls back to an interactive prompt at runtime (current behaviour preserved).
 
+### Large mailbox flags
+
+Three flags only matter once a mailbox is big. Worth exercising at least once
+in the test tenant so you know what they do before a real migration.
+
+**`--backup-dir <path>`** — where snapshots, mailbox and Drive backups are
+written. Default `./offboarding_backups`. A real mailbox backup can reach
+hundreds of gigabytes, so keep it off any synced folder (iCloud, OneDrive,
+Dropbox, Google Drive) or you will re-upload all of it. An existing backup can
+be relocated with a plain `mv` on the same volume.
+
+**`--restore-batch-size <n>`** — messages per restore request. Default 50,
+maximum 100 (GYB rejects more). Measured on 1,200 real messages:
+
+| batch size | throughput |
+|---|---|
+| 1 | 1,231 msg/hr |
+| 10 | 5,775 msg/hr |
+| 100 | 9,057 msg/hr |
+
+Avoid 1: GYB switches to a path that uploads one message per request and only
+saves progress at the very end, so a crash restarts from the beginning. If
+Gmail starts throttling, the script steps the size down on its own
+(100 → 75 → 50 → 25 → 10).
+
+**`--reuse-email-backup <path>`** — restore-only mode. Restores from a backup
+you already have and skips the download plus every other phase. Use it to
+finish a restore that died part way. Needs `--force`. Re-running is safe:
+Gmail discards messages it already holds, so nothing is duplicated.
+
+```bash
+python3 offboard_user.py --doit --force \
+  --user testoffboard5@yourdomain.com \
+  --email-to testoffboard.dest@yourdomain.com \
+  --reuse-email-backup ./offboarding_backups/mailboxes/testoffboard5@yourdomain.com_20260721 \
+  --restore-batch-size 100
+```
+
+### Two destination failures worth testing deliberately
+
+Both waste a lot of time in real use and both are easy to reproduce in the
+test tenant. The script now refuses to start on either.
+
+**Suspended destination.** Suspend `testoffboard.dest` and run an email
+migration into it. Gmail rejects every message with a generic `backendError`
+and GYB retries for minutes per batch — in the log this is indistinguishable
+from rate limiting. Check with `gam info user <dest> quick` and look for
+`Account Suspended: True`.
+
+**Destination with no Gmail licence.** Remove the Workspace licence from a
+test user and migrate into it: every import fails with `Mail service not
+enabled`. Note that Gmail keeps working for a long while after a licence is
+removed (over 12 minutes in testing), so do not assume the removal took effect
+immediately — and always remove a leaver's licence **after** the migration
+finishes, never before.
+
 ### Mail capture after suspension (manual step)
 
 `--forward-to` configures **Gmail-level forwarding**, which only works while

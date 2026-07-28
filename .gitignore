@@ -24,3 +24,10 @@ memory/
 # The durable, shippable test suite is test_offboard_user.py.
 OffBoarding Google Workspace Users/test_logs/
 OffBoarding Google Workspace Users/TEST_PLAN_v*.md
+
+# Research / inspiration notes for future scripts. Local-only, never on GitHub.
+research/
+
+# Per-client session recovery notes. Contain real client mailbox data and
+# addresses; this repo is public. Local-only, never on GitHub.
+OffBoarding Google Workspace Users/SESSION_RECOVERY_*.md
