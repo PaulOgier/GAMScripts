@@ -42,7 +42,7 @@ YOU ASSUME ALL RISK ASSOCIATED WITH THE USE OF THIS SOFTWARE.
 Author:       Paul Ogier
 Created:      2023-06-22
 Updated:      2026-07-13
-Version:      5.0.0
+Version:      5.2.0
 Status:       Production
 Python:       3.8+
 Dependencies: GAM ADV X (GAM7), GYB (optional), rclone (optional), PyYAML (optional)
@@ -58,7 +58,9 @@ Features:
 - Email backup and migration via GYB with Migrated/<user> labelling
 - Drive transfer with organised folder creation
 - Drive backup via rclone (optional)
-- Shared Drives ownership handling
+- Shared Drive DETECTION: reports drives the leaver organizes and flags any
+  left with no other organizer (content is owned by the drive, not the user,
+  so nothing here transfers or backs it up — it must be handled by hand)
 - Device wipe and ChromeOS deprovisioning
 - Vacation responder, email forwarding, mailbox delegation cleanup
 - Calendar transfer / ACL wipe and signature backup
@@ -149,6 +151,69 @@ Changelog
   2026-05-07 - v4.4.0 - Added startup version check against remote VERSION file (CHECK_FOR_UPDATES toggle, fail-silent); restored author/contact header with Outsource House copyright and three Udemy course links; aligned in-script licence reference with the repo LICENSE (Apache 2.0) and added a plain-English summary emphasising attribution retention.
   2026-05-13 - v4.5.0 - BREAKING: renamed --transfer-to to --all-transfer-to. Added per-phase destination flags (--drive-to, --email-to, --alias-to, --calendar-to, --forward-to) that override the global default; precedence is phase-specific > --all-transfer-to > interactive prompt. Added upfront destination resolution and validation before any phase runs: under --force, any non-skipped phase without a resolvable destination aborts the run with a clear error instead of half-offboarding.
   2026-05-14 - v4.6.0 - Added end-of-run MANUAL ACTION block surfacing admin-console instructions for durable mail capture (alias / recipient address map / group) since GAM cannot configure recipient address map and Gmail-level forwarding stops on suspension/deletion; new --forward-alias-to flag explicitly nominates the successor printed in the block (falls back to --forward-to then --all-transfer-to), no automated change is made. Guide gains a "Mail capture after suspension" section and the order-of-operations list flags forwarding's suspension limitation.
+  2026-07-28 - v5.2.0 - Restore hardening, from a full test round against a live dev tenant
+                        using a 190GB real-world mailbox corpus. DESTINATION PRE-FLIGHT: a
+                        restore into a SUSPENDED mailbox fails with a generic backendError that
+                        is indistinguishable from rate limiting in the log — GYB backs off up
+                        to 60s per attempt, 10 attempts per batch, then gives up quietly, so
+                        the run can burn hours and report nothing useful. validate_destination
+                        now matches the "Account Suspended: True" FIELD rather than any line
+                        containing both words (a user surnamed "Suspended" was a false
+                        positive) and fails the phase with an explanatory error. New
+                        check_restore_destination_ready() also warns when the backup is larger
+                        than the tenant's free POOLED storage, and when the backup contains
+                        messages with no usable Date header — Gmail re-stamps those with the
+                        restore date, so years-old mail arrives looking new (11 of 170,888 on
+                        the migration this was found on; caused by the sender, not fixable in
+                        GYB). CRASH-DIRECTED QUARANTINE: new quarantine_gyb_locked_file()
+                        parses the .eml path out of GYB's own PermissionError traceback instead
+                        of re-scanning the backup after a crash. AV locking is
+                        non-deterministic, so a post-crash re-scan races the scanner and often
+                        finds the poison file readable — observed live, where one such file
+                        killed four consecutive retry attempts. The traceback names the culprit
+                        exactly. A named file that reads cleanly now is deliberately LEFT in
+                        place (transient block, not a quarantine). RETRY LOOP:
+                        MAX_RESTORE_ATTEMPTS 5 -> 20 (poison files cluster; five was observed
+                        to be too few), with an early bail-out after three consecutive attempts
+                        that neither restore anything nor find anything to quarantine, so a
+                        hard failure no longer burns the whole budget in silence. Progress is
+                        now measured from GYB's resume DB rather than its stdout, which freezes
+                        for long stretches in the tail phase of a large mailbox. THROTTLING
+                        LADDER: on a throttling-shaped failure the restore steps its batch size
+                        down 100 -> 75 -> 50 -> 25 -> 10, never below 10 (at --batch-size 1 GYB
+                        switches to a path that never commits the resume DB mid-run, so a crash
+                        at 99% restarts from message 1). An AV crash deliberately does NOT step
+                        the ladder. REPORTING: run_gyb gains suppress_summary_error, mirroring
+                        run_gam, so recovered intermediate attempts stay out of the end-of-run
+                        summary — previously a run that succeeded on attempt 5 finished
+                        reporting "Errors (4)" beside its success line and read as a failure.
+  2026-07-22 - v5.1.0 - Configurable backup location + restore that survives AV-locked
+                        messages. NEW --backup-dir PATH sets the root for all backup
+                        artefacts (snapshots, mailbox, Drive); the BACKUP_DIRECTORY constant
+                        can also be edited for a permanent default. Point it OUTSIDE a synced
+                        folder (iCloud/Dropbox/Drive): a mailbox backup can be hundreds of GB
+                        and a synced folder re-uploads all of it every run. RESTORE
+                        AUTO-RECOVERY: endpoint AV can lock a malicious .eml at any moment,
+                        non-deterministically (a file can read fine then raise PermissionError
+                        moments later), killing GYB mid-restore; one clean pre-scan cannot
+                        guarantee a clean restore. The restore now retries (up to 5x),
+                        re-quarantining whatever is unreadable on each failure. This is safe
+                        because GYB does not de-duplicate but Gmail's servers do — re-importing
+                        the same message leaves one copy (GYB maintainer, discussion #446) — so
+                        messages already restored before a crash collapse to a single copy on
+                        the next pass. NEW --reuse-email-backup PATH restores from an existing
+                        GYB backup folder and skips the download, running ONLY the email
+                        restore (no containment / transfers / suspension) — use it to resume a
+                        restore that died partway without re-downloading a large mailbox. The
+                        real root-cause fix remains an on-access-scan exclusion for the backup
+                        folder in the endpoint AV policy. RESTORE SPEED + RESUME: the restore
+                        now passes --batch-size (default 50, --restore-batch-size to override).
+                        GYB defaults restore batch_size to 1, which uploads every message as
+                        its own request (serial, days for a large mailbox) AND only commits the
+                        resume DB at the end of the run, so any crash restarts from message 1.
+                        Batching messages <=1MB makes the restore many times faster and commits
+                        the resume DB per batch, so a crash resumes instead of restarting
+                        (verified against gyb.py restore source, lines ~2333/2399/2446).
   2026-07-13 - v5.0.0 - Reporting/verification hardening (11 findings, all fixed and
                         regression-tested; every phase live-verified on a dev tenant, with a
                         permanent offline unit-test suite in test_offboard_user.py).
@@ -242,7 +307,7 @@ import shutil
 
 # [IMPORTANT] Current local script version. Bumped on each release.
 # Compared against the remote VERSION file to detect updates.
-SCRIPT_VERSION = "5.0.0"
+SCRIPT_VERSION = "5.2.0"
 
 # [OPTIONAL] Check for a newer script version on startup.
 # When True (default), the script makes a single 3-second HTTP request to
@@ -278,9 +343,34 @@ GAM_COMMAND = "gam"
 # If GYB is not installed, set this to None or leave as "gyb".
 GYB_COMMAND = "gyb"
 
-# [IMPORTANT] Directory for backups, snapshots, and email migration data.
-# Uses OS-agnostic path handling via pathlib.
+# [IMPORTANT] Root directory for backups, snapshots, and email migration data.
+# Snapshots, mailbox GYB backups and Drive downloads are all written in
+# subfolders here. Default: an 'offboarding_backups' folder in the current
+# working directory (i.e. next to wherever you run the script).
+#
+# A GYB mailbox backup can be HUNDREDS OF GIGABYTES. If this path sits inside a
+# synced folder (iCloud Drive, Dropbox, Google Drive), the sync client tries to
+# upload every byte on every run — slow, and it churns the cloud copy. To keep
+# backups off a synced folder, either edit the line below to a local path
+# (e.g. Path("~/offboarding_backups").expanduser()) or pass --backup-dir at
+# run time. Override precedence: --backup-dir > this constant.
 BACKUP_DIRECTORY = Path("./offboarding_backups")
+
+# [IMPORTANT] GYB restore batch size (messages per Gmail import HTTP request).
+# GYB defaults the RESTORE batch_size to 1 (gyb.py: "if options.batch_size == 0:
+# options.batch_size = 1"), which has two bad consequences:
+#   1. SPEED: every message — even a 12kb one — is uploaded as its own request
+#      (the single-message path fires when size >1MB OR batch_size == 1), so a
+#      large mailbox restores serially over days instead of hours.
+#   2. RESUME: with batch_size 1 the restored-messages resume DB is only
+#      committed at the END of the run (the per-batch sqlconn.commit() is never
+#      reached), so a crash — e.g. an AV-locked .eml, which GYB does not catch —
+#      loses ALL progress and the restore restarts from message 1.
+# Any value >1 batches messages <=1MB (larger ones still go singly) AND commits
+# the resume DB after every batch, so a crash resumes instead of restarting.
+# 50 is a safe middle; raise toward 100 for speed, drop toward 10 if Gmail
+# returns rateLimitExceeded. Override per-run with --restore-batch-size.
+RESTORE_BATCH_SIZE = 50
 
 # [OPTIONAL] Auto-reply message set on the departing user's account.
 # Customise this with your organisation's standard wording.
@@ -756,10 +846,18 @@ def run_shell_pipe(cmd_str: str, dry_run: bool = True,
         return False, str(e)
 
 
-def run_gyb(args: List[str], dry_run: bool = True) -> Tuple[bool, str]:
+def run_gyb(args: List[str], dry_run: bool = True,
+            suppress_summary_error: bool = False) -> Tuple[bool, str]:
     """
     Execute a GYB command, streaming output to the log including tqdm
     progress bars.
+
+    suppress_summary_error mirrors run_gam's flag: when True a failed call is
+    still logged and printed but does NOT record an entry in the end-of-run
+    summary. Used by the restore retry loop, where an intermediate attempt
+    failing is an expected, recovered event — without this, a run that
+    succeeded on attempt 5 finishes reporting four errors and reads as a
+    failure.
 
     GYB uses tqdm for progress, which writes \\r (carriage return) to
     overwrite the same line. A naive line iterator only yields on \\n,
@@ -860,7 +958,8 @@ def run_gyb(args: List[str], dry_run: bool = True) -> Tuple[bool, str]:
             return True, output
         else:
             print_error(f"GYB command failed (exit {proc.returncode}): {cmd_str}")
-            summary_error(f"GYB failed: {cmd_str}")
+            if not suppress_summary_error:
+                summary_error(f"GYB failed: {cmd_str}")
             return False, output
 
     except FileNotFoundError:
@@ -1059,7 +1158,7 @@ def resolve_dest(specific: Optional[str], all_default: Optional[str]) -> Optiona
     return specific or all_default or None
 
 
-def preflight_destinations(args) -> Dict[str, Optional[str]]:
+def preflight_destinations(args, source: Optional[str] = None) -> Dict[str, Optional[str]]:
     """Resolve destinations for every transfer phase and validate them up front.
 
     Under --force, any non-skipped phase without a destination is a fatal error
@@ -1098,6 +1197,26 @@ def preflight_destinations(args) -> Dict[str, Optional[str]]:
             "--<phase>-to <email>, or skipping with --no-<phase>."
         )
         sys.exit(2)
+
+    # A destination equal to the source is always an operator error — picking
+    # the leaver twice from a list, or a copy-paste. Nothing downstream catches
+    # it: the plan reads normally, GYB would restore the mailbox into itself
+    # under new labels, forwarding to self is a loop, and the account is
+    # suspended at the end regardless. Refuse rather than execute nonsense.
+    if source:
+        self_targeted = sorted({n for n, d in resolved.items()
+                                if d and d.lower() == source.lower()})
+        if self_targeted:
+            print_error(
+                f"Destination is the same account being offboarded "
+                f"({source}) for: {', '.join(self_targeted)}."
+            )
+            print_error(
+                "Transferring a leaver's data to themselves does nothing, "
+                "forwarding to self is a mail loop, and the account is "
+                "suspended at the end anyway. Name a different successor."
+            )
+            sys.exit(2)
 
     # Only the forward phase may target a group address; all other phases
     # require a real user account (Drive/Email/Alias/Calendar transfers
@@ -1143,8 +1262,16 @@ def validate_destination(email: str, allow_group: bool = False) -> bool:
     )
     if success:
         for line in output.splitlines():
-            if "suspended" in line.lower() and "true" in line.lower():
-                print_warning(f"Destination user {email} is SUSPENDED. Transfers may fail.")
+            # Match the field, not any line containing both words: a user
+            # surnamed "Suspended" is otherwise a false positive.
+            if re.match(r"\s*Account Suspended:\s*True\s*$", line, re.IGNORECASE):
+                print_error(
+                    f"Destination user {email} is SUSPENDED. A restore into a "
+                    f"suspended mailbox fails with a generic 'backendError' that "
+                    f"looks exactly like rate limiting in the log, and GYB will "
+                    f"retry it for minutes per batch before giving up quietly. "
+                    f"Unsuspend the account first."
+                )
                 return False
         return True
 
@@ -1284,6 +1411,181 @@ def prompt_email(question: str, force_value: Optional[str] = None) -> str:
         if re.match(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$', email):
             return email
         print("Please enter a valid email address.")
+
+
+def _plan_email(question: str, allow_group: bool = False) -> str:
+    """Prompt for a destination email and validate it against the directory now.
+
+    Front-loading the decisions is only useful if a fat-fingered destination
+    fails at plan time, not two phases into an unattended run — so unlike the
+    old inline flow we validate here and re-ask until the address resolves.
+    """
+    while True:
+        email = prompt_email(question)
+        if validate_destination(email, allow_group=allow_group):
+            return email
+        # validate_destination already printed why it failed.
+        print_warning("Destination did not validate — enter another.")
+
+
+def collect_plan(args, dest_map: Dict[str, Optional[str]],
+                 is_2sv_enrolled: bool = False,
+                 is_2sv_enforced: bool = False) -> Dict[str, dict]:
+    """Front-load every interactive offboarding decision into one block.
+
+    Asks all the yes/no and destination questions up front — honouring --force
+    and the --no-<phase> flags exactly as the old inline prompts did — so the
+    operator answers everything once and the run then proceeds unattended.
+    Destinations entered interactively are directory-validated immediately.
+    The phase code reads the returned dict instead of prompting mid-run.
+    """
+    plan: Dict[str, dict] = {}
+
+    # Drive
+    if args.no_drive:
+        plan["drive"] = {"do": False, "dest": None}
+    elif prompt_yes_no("Transfer Drive files to another user?", force=args.force):
+        dest = dest_map["drive"] or _plan_email("Drive destination email")
+        plan["drive"] = {"do": True, "dest": dest}
+    else:
+        plan["drive"] = {"do": False, "dest": None}
+
+    # Email migration (+ label handling)
+    if args.no_email:
+        plan["email"] = {"do": False, "dest": None, "strip_labels": True}
+    elif prompt_yes_no("Migrate email to another user (requires GYB)?", force=args.force):
+        dest = dest_map["email"] or _plan_email("Email migration destination email")
+        if args.strip_labels is None:
+            strip = prompt_yes_no(
+                "Strip original Gmail labels and archive migrated mail under "
+                "Migrated/<source-user> only? (No keeps INBOX and custom labels)",
+                default=True, force=args.force)
+        else:
+            strip = args.strip_labels
+        plan["email"] = {"do": True, "dest": dest, "strip_labels": strip}
+    else:
+        plan["email"] = {"do": False, "dest": None, "strip_labels": True}
+
+    # Alias transfer
+    if args.no_alias:
+        plan["alias"] = {"do": False, "dest": None}
+    elif prompt_yes_no("Transfer aliases to another user?", force=args.force):
+        dest = dest_map["alias"] or _plan_email("Alias destination email")
+        plan["alias"] = {"do": True, "dest": dest}
+    else:
+        plan["alias"] = {"do": False, "dest": None}
+
+    # Calendar access
+    if args.no_calendar:
+        plan["calendar"] = {"do": False, "dest": None}
+    elif prompt_yes_no("Grant calendar access to another user?", force=args.force):
+        dest = dest_map["calendar"] or _plan_email("Calendar access destination email")
+        plan["calendar"] = {"do": True, "dest": dest}
+    else:
+        plan["calendar"] = {"do": False, "dest": None}
+
+    # Email forwarding (destination may be a group)
+    if args.no_forward:
+        plan["forward"] = {"do": False, "dest": None}
+    elif prompt_yes_no("Set up email forwarding to a successor?", force=args.force):
+        dest = dest_map["forward"] or _plan_email("Forward emails to", allow_group=True)
+        plan["forward"] = {"do": True, "dest": dest}
+    else:
+        plan["forward"] = {"do": False, "dest": None}
+
+    # Auto-reply (no destination)
+    if args.no_auto_reply:
+        plan["auto_reply"] = {"do": False}
+    else:
+        plan["auto_reply"] = {
+            "do": prompt_yes_no("Set an auto-reply message on the account?", force=args.force)
+        }
+
+    # Suspend. --no-suspend and the temp-unsuspend contract are handled in the
+    # phase itself; here we only capture the operator's default-yes intent.
+    if args.no_suspend:
+        plan["suspend"] = {"do": False}
+    else:
+        plan["suspend"] = {
+            "do": prompt_yes_no("Suspend the user account?", default=True, force=args.force)
+        }
+
+    # Turn off 2SV. The kill switch's turnoff2sv errors out (GAM exit 50) when
+    # 2SV is ENFORCED — by the OU's 2SV policy or by a 2SV-enforcement group —
+    # because moving to the Offboarding OU doesn't clear a group-level policy.
+    # So surface the situation up front and let the operator decide, rather than
+    # letting it blow up mid-run. Not enrolled => nothing to turn off.
+    if not is_2sv_enrolled:
+        plan["turnoff2sv"] = {"do": False}
+    elif args.force:
+        # Non-interactive: attempt only when it can actually succeed. An
+        # enforced user would just produce the exit-50 error we're avoiding.
+        plan["turnoff2sv"] = {"do": not is_2sv_enforced}
+    else:
+        print_info("This user has 2-Step Verification turned ON.")
+        if is_2sv_enforced:
+            print_warning(
+                "2SV is ENFORCED by policy — either the OU's 2SV setting or a "
+                "2SV-enforcement group (e.g. org2stepverification@...). Turning "
+                "it off WILL fail until that enforcement is removed: move OUs / "
+                "remove the group membership first. The account is suspended at "
+                "the end of offboarding regardless, so leaving 2SV on is safe."
+            )
+        else:
+            print_info(
+                "2SV is enrolled but not policy-enforced, so turning it off "
+                "should succeed. The account is suspended at the end regardless."
+            )
+        skip = prompt_yes_no(
+            "Continue WITHOUT turning off 2SV?",
+            default=is_2sv_enforced)
+        plan["turnoff2sv"] = {"do": not skip}
+
+    return plan
+
+
+def print_plan(plan: Dict[str, dict]) -> None:
+    """Echo the collected plan so the operator can catch a wrong destination.
+
+    Also states the unconditional containment phase, which is not part of
+    `plan` and cannot be skipped. This block is what the operator confirms, so
+    leaving out the only irreversible phase would make the confirmation
+    misleading — particularly for a `--backup-drive --no-transfer` run, where
+    every other line reads "no".
+    """
+    def line(label: str, entry: dict) -> None:
+        if entry.get("do"):
+            dest = entry.get("dest")
+            extra = f" -> {dest}" if dest else ""
+            print_info(f"  [YES] {label}{extra}")
+        else:
+            print_info(f"  [ no] {label}")
+
+    print_header("OFFBOARDING PLAN")
+    # Containment is Phase 1 and unconditional, so it is not in `plan` and has
+    # no flag to skip it. State it anyway: this block is what the operator
+    # confirms, and omitting the only irreversible phase makes the confirmation
+    # a lie. --backup-drive --no-transfer reads like a read-only backup and is
+    # not one; this line is what says so before the prompt.
+    print_warning("  [YES] CONTAINMENT (always runs, cannot be skipped):")
+    print_warning("        OU move, recovery email + phone WIPED, app passwords")
+    print_warning("        and OAuth tokens revoked, all sessions signed out,")
+    print_warning("        PASSWORD SCRAMBLED, hidden from the GAL.")
+    print_warning("        The user loses access immediately and irreversibly.")
+    line("Transfer Drive files", plan["drive"])
+    line("Migrate email", plan["email"])
+    if plan["email"].get("do"):
+        mode = "strip labels + archive" if plan["email"]["strip_labels"] else "keep labels + INBOX"
+        print_info(f"         label handling: {mode}")
+    line("Transfer aliases", plan["alias"])
+    line("Grant calendar access", plan["calendar"])
+    line("Email forwarding", plan["forward"])
+    line("Auto-reply", plan["auto_reply"])
+    line("Suspend account", plan["suspend"])
+    if plan["turnoff2sv"]["do"]:
+        print_info("  [YES] Turn off 2SV")
+    else:
+        print_info("  [ no] Turn off 2SV (left ON — enforced/not-enrolled or operator choice)")
 
 
 ###############################################################################
@@ -1441,7 +1743,8 @@ def _read_2sv_enrolled(email: str) -> Optional[bool]:
 
 def execute_kill_switch(email: str, dry_run: bool, is_suspended: bool,
                         is_2sv_enrolled: bool = True,
-                        has_mailbox: bool = True):
+                        has_mailbox: bool = True,
+                        turn_off_2sv: bool = True):
     """
     [CRITICAL] Immediate containment of the user account.
 
@@ -1508,11 +1811,12 @@ def execute_kill_switch(email: str, dry_run: bool, is_suspended: bool,
     deprov_args = ["user", email, "deprovision", "signout"]
     if has_mailbox:
         deprov_args.insert(3, "popimap")
-    if is_2sv_enrolled:
+    do_2sv = is_2sv_enrolled and turn_off_2sv
+    if do_2sv:
         deprov_args.append("turnoff2sv")
     label = ("ASPs, backup codes, tokens, signout"
              + (", POP/IMAP" if has_mailbox else "")
-             + (", 2SV" if is_2sv_enrolled else ""))
+             + (", 2SV" if do_2sv else ""))
     print_info(f"Step 3/7: Deprovisioning ({label})...")
     success, output = run_gam(deprov_args, dry_run=dry_run, capture_output=True)
     if success:
@@ -1544,6 +1848,9 @@ def execute_kill_switch(email: str, dry_run: bool, is_suspended: bool,
     if not is_2sv_enrolled:
         print_info("Step 5/7: Skipping turnoff2sv (user not enrolled in 2SV).")
         summary_warning("turnoff2sv skipped (user not enrolled in 2SV)")
+    elif not turn_off_2sv:
+        print_info("Step 5/7: Leaving 2SV ON (operator chose to skip turnoff2sv).")
+        summary_warning("2SV left ON — turnoff2sv skipped by operator (likely enforced by OU/group)")
     elif dry_run:
         print_info("Step 5/7: Turning off 2-Step Verification...")
         run_gam(["user", email, "turnoff2sv"], dry_run=True)
@@ -2006,18 +2313,45 @@ def transfer_drive(source: str, destination: str, dry_run: bool):
             bufsize=1,  # line-buffered so progress appears live
         )
 
+        # Count the per-file "Ownership Transferred" confirmations, NOT GAM's
+        # opening "Got N Drive Files/Folders for Source User" line. That header
+        # counts files the source can ACCESS — which after a previous
+        # `keepuser` transfer includes files they no longer own. Measured on
+        # the dev tenant: header said 100 for a user owning 0. Without a count
+        # the summary reads "Drive transferred" whether it moved everything or
+        # nothing, and nothing moving usually means the wrong source address or
+        # a transfer that already ran.
+        transferred = 0
         for line in proc.stdout:  # type: ignore[union-attr]
             if shutdown_requested:
                 proc.terminate()
                 break
             line = line.rstrip()
             if line:
+                if "Ownership Transferred to User:" in line:
+                    transferred += 1
                 logger.info(line)
+        file_count: Optional[int] = transferred
 
         proc.wait()
 
         if proc.returncode == 0:
-            summary_action(f"Drive transferred to {destination}")
+            if file_count == 0:
+                print_warning(
+                    f"Drive transfer reported success but {source} owned NO "
+                    f"files to transfer. If that is unexpected, check the "
+                    f"source address and whether a transfer already ran."
+                )
+                summary_warning(
+                    f"Drive transfer to {destination} moved 0 files "
+                    f"({source} owned none)"
+                )
+            else:
+                summary_action(
+                    f"Drive transferred to {destination}"
+                    + (f" ({file_count} file(s)/folder(s))"
+                       if file_count is not None else "")
+                )
         else:
             print_error(f"Drive transfer failed (exit {proc.returncode}): {cmd_str}")
             summary_error(f"Drive transfer failed: {source} -> {destination}")
@@ -2238,7 +2572,309 @@ def quarantine_unreadable_messages(backup_path: Path) -> List[str]:
     return skipped
 
 
-def migrate_email(source: str, destination: str, dry_run: bool, strip_labels: bool = True):
+def quarantine_gyb_locked_file(backup_path: Path, gyb_output: str) -> List[str]:
+    """
+    Move aside the .eml file(s) named in a GYB crash so the retry can pass them.
+
+    More reliable than re-scanning, which races the non-deterministic AV lock.
+    A file that reads cleanly again is left alone; nothing is deleted.
+    """
+    quarantined: List[str] = []
+    try:
+        paths = re.findall(
+            r"PermissionError: \[Errno \d+\][^:]*: '([^']+\.eml)'", gyb_output
+        )
+        # Patched GYB reports the same event without dying; match that wording too.
+        paths += re.findall(
+            r"WARNING! could not read (\S+\.eml) for message", gyb_output
+        )
+        if not paths:
+            return quarantined
+        backup_resolved = backup_path.resolve()
+        quarantine_dir = backup_path.parent / f"{backup_path.name}_quarantined"
+        moved_to: Dict[str, Path] = {}
+        for raw in dict.fromkeys(paths):  # de-dup, preserve order
+            eml = Path(raw)
+            try:
+                rel = eml.resolve().relative_to(backup_resolved)
+            except (ValueError, OSError):
+                continue  # not inside this backup — ignore
+            if not eml.exists():
+                continue  # already moved aside on an earlier attempt
+            try:
+                with open(eml, "rb") as fh:
+                    fh.read(1)
+                continue  # readable now — transient block, leave it for retry
+            except OSError:
+                pass       # still locked — a real quarantine, move it aside
+            target = quarantine_dir / rel
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(eml), str(target))
+            except OSError as move_err:
+                print_warning(
+                    f"Could not move AV-locked message {eml.name} aside "
+                    f"({move_err}); the restore may crash on it again. "
+                    f"Move or delete it manually, then re-run."
+                )
+                continue
+            print_warning(
+                f"{Colours.RED}Quarantined AV-locked message {eml.stem} "
+                f"(named in GYB's crash); excluded from the restore and NOT "
+                f"delivered to the successor. Moved to {target}{Colours.RESET}"
+            )
+            quarantined.append(eml.stem)
+            moved_to[eml.stem] = target
+
+        if quarantined:
+            dates: Dict[str, str] = {}
+            try:
+                with sqlite3.connect(backup_path / "msg-db.sqlite") as db:
+                    for msg_id in quarantined:
+                        row = db.execute(
+                            "SELECT message_internaldate FROM messages "
+                            "WHERE message_filename LIKE ?", (f"%{msg_id}%",),
+                        ).fetchone()
+                        if row:
+                            dates[msg_id] = str(row[0])
+            except (sqlite3.Error, OSError):
+                pass
+            csv_path = backup_path.parent / f"{backup_path.name}_skipped-messages.csv"
+            new_file = not csv_path.exists()
+            with open(csv_path, "a", newline="", encoding="utf-8") as fh:
+                writer = csv.writer(fh)
+                if new_file:
+                    writer.writerow(["gmail_message_id", "message_date",
+                                     "quarantined_file", "note"])
+                for msg_id in quarantined:
+                    writer.writerow([
+                        msg_id, dates.get(msg_id, "unknown"),
+                        str(moved_to[msg_id]),
+                        "AV-locked on disk (named in GYB crash); excluded from "
+                        "restore as malware. Look up by message ID in your AV "
+                        "quarantine log, Google Vault, or the Security "
+                        "Investigation Tool.",
+                    ])
+            summary_warning(
+                f"{Colours.RED}{len(quarantined)} AV-locked message(s) named in "
+                f"a GYB crash, quarantined and excluded from the restore: "
+                f"{', '.join(quarantined)}; see {csv_path}{Colours.RESET}"
+            )
+    except Exception as parse_err:  # never break the retry loop
+        print_warning(f"Could not parse GYB crash for a locked file: {parse_err}")
+    return quarantined
+
+
+_SIZE_UNITS = {"B": 1, "KB": 1024, "MB": 1024 ** 2, "GB": 1024 ** 3,
+               "TB": 1024 ** 4, "PB": 1024 ** 5}
+
+
+def _parse_gam_size(output: str, field: str) -> Optional[int]:
+    """
+    Read a byte count out of a GAM field that prints a HUMAN-FORMATTED size.
+
+    `gam <user> show drivesettings` emits "limit: 329.85 TB", not raw bytes, so
+    a digits-only regex reads 329.85 TB as 329 BYTES and every storage
+    comparison downstream is nonsense. Parse the number AND its unit.
+
+    Anchored to the start of the line so `usage` does not also match
+    `usageInDrive` / `usageInDriveTrash`, which follow it in the same output.
+    Returns None when the field is absent or unparseable; callers skip the
+    check rather than guessing.
+    """
+    m = re.search(
+        rf"^\s*{re.escape(field)}\s*:\s*([\d.]+)\s*([KMGTP]?B)\b",
+        output, re.IGNORECASE | re.MULTILINE,
+    )
+    if not m:
+        return None
+    try:
+        return int(float(m.group(1)) * _SIZE_UNITS[m.group(2).upper()])
+    except (ValueError, KeyError):
+        return None
+
+
+def check_restore_destination_ready(destination: str, backup_path: Path,
+                                    dry_run: bool) -> bool:
+    """
+    Check the destination can receive a restore: storage headroom and undated mail.
+
+    Storage is pooled tenant-wide, so warns rather than blocks — the figure is an
+    estimate and Gmail charges less than the backup's on-disk size.
+    """
+    if dry_run:
+        return True
+
+    # Probe Gmail directly rather than reading licence metadata: `gam info user`
+    # intermittently renders an assigned SKU as "Not available/incomplete".
+    ok, profile = run_gam(["user", destination, "show", "gmailprofile"],
+                          dry_run=False, capture_output=True, timeout=60,
+                          suppress_summary_error=True)
+    if ok and "not enabled" in profile.lower():
+        print_error(
+            f"Destination {destination} has no Gmail service enabled. Every "
+            f"message import would fail with 'Mail service not enabled'. "
+            f"Assign a Workspace licence to the account first."
+        )
+        summary_error(f"Email restore to {destination} skipped: Gmail not enabled")
+        return False
+
+    ok, out = run_gam(["user", destination, "show", "drivesettings"],
+                      dry_run=False, capture_output=True, timeout=60,
+                      suppress_summary_error=True)
+    if not ok:
+        print_warning(
+            f"Could not read storage settings for {destination}; skipping the "
+            f"pre-flight storage check and continuing."
+        )
+        return True
+
+    limit = _parse_gam_size(out, "limit")
+    usage = _parse_gam_size(out, "usage")
+
+    try:
+        backup_bytes = sum(f.stat().st_size for f in backup_path.rglob("*.eml"))
+    except OSError:
+        backup_bytes = 0
+
+    if limit and usage is not None and backup_bytes:
+        headroom = limit - usage
+        gb = 1024 ** 3
+        print_info(
+            f"Tenant storage (pooled): {usage / gb:.1f} GB used of "
+            f"{limit / gb:.1f} GB, {headroom / gb:.1f} GB free. "
+            f"Backup on disk: {backup_bytes / gb:.1f} GB."
+        )
+        if backup_bytes > headroom:
+            print_warning(
+                f"{Colours.RED}The backup ({backup_bytes / gb:.1f} GB) is larger "
+                f"than the tenant's free pooled storage ({headroom / gb:.1f} GB). "
+                f"The restore may fill the pool and start failing on quota part "
+                f"way through. Add storage or reduce the migration scope before "
+                f"running a large restore.{Colours.RESET}"
+            )
+            summary_warning(
+                f"Restore to {destination} started with less free pooled storage "
+                f"({headroom / gb:.1f} GB) than the backup size "
+                f"({backup_bytes / gb:.1f} GB)"
+            )
+
+    undated = count_undated_messages(backup_path)
+    if undated:
+        print_warning(
+            f"{undated} message(s) in this backup have no usable Date header "
+            f"(stored at the Unix epoch, filed under 1970/). Gmail cannot date "
+            f"them on import either, so they will arrive in {destination}'s "
+            f"mailbox stamped with today's date rather than their original one. "
+            f"Nothing can be done about this in GYB — it is caused by the "
+            f"original sender. Mention it if the client asks why a handful of "
+            f"old messages look new."
+        )
+        summary_warning(
+            f"{undated} message(s) restored with today's date (no usable Date "
+            f"header in the original)"
+        )
+    return True
+
+
+def _build_batch_ladder(start: int) -> List[int]:
+    """
+    Batch sizes to fall back through when Gmail throttles: 100 -> 75 -> 50 -> 25 -> 10.
+
+    Floors at 10 because below that GYB stops committing its resume DB mid-run.
+    """
+    # Never step above the operator's starting value.
+    floor = min(10, start)
+    ladder = [start, int(start * 0.75), int(start * 0.5), int(start * 0.25), floor]
+    out: List[int] = []
+    for size in ladder:
+        size = max(floor, size)
+        if size < (out[-1] if out else start + 1) and size not in out:
+            out.append(size)
+        elif not out:
+            out.append(size)
+    return out
+
+
+def _restored_count(backup_path: Path, destination: str) -> int:
+    """
+    Messages GYB has committed to its resume DB for this destination.
+
+    The reliable progress signal; GYB's stdout stalls and its denominator is
+    post-skip. Returns 0 if the resume DB does not exist yet.
+    """
+    try:
+        db_path = backup_path / f"{destination}-restored.sqlite"
+        if not db_path.exists():
+            return 0
+        with sqlite3.connect(db_path) as db:
+            row = db.execute("SELECT count(*) FROM restored_messages").fetchone()
+            return int(row[0]) if row else 0
+    except (sqlite3.Error, OSError):
+        return 0
+
+
+def _looks_rate_limited(gyb_output: str) -> bool:
+    """
+    Whether a failed run looks like throttling rather than a bad file.
+
+    A suspended destination looks identical here; validate_destination() is
+    what separates them, before the restore starts.
+    """
+    markers = ("rateLimitExceeded", "userRateLimitExceeded", "quotaExceeded",
+               "Backing off", "backendError")
+    return any(m in gyb_output for m in markers)
+
+
+def verify_backup_complete(backup_path: Path) -> Tuple[int, int]:
+    """
+    Check a GYB backup's message DB against the .eml files actually on disk.
+
+    A backup whose DB claims messages it cannot produce restores silently short.
+    Re-running the backup re-fetches anything missing. Returns (db_rows, on_disk).
+    """
+    try:
+        with sqlite3.connect(backup_path / "msg-db.sqlite") as db:
+            rows = int(db.execute("SELECT count(*) FROM messages").fetchone()[0])
+    except (sqlite3.Error, OSError):
+        return (0, 0)
+    on_disk = sum(1 for _ in backup_path.rglob("*.eml"))
+    if rows != on_disk:
+        print_warning(
+            f"{Colours.RED}Backup is incomplete: msg-db lists {rows} message(s) "
+            f"but {on_disk} .eml file(s) are on disk ({rows - on_disk} missing). "
+            f"Re-run the backup to re-fetch them before restoring."
+            f"{Colours.RESET}"
+        )
+        summary_warning(
+            f"Backup at {backup_path} lists {rows} messages but has {on_disk} "
+            f"files on disk ({rows - on_disk} missing)"
+        )
+    else:
+        print_success(f"Backup verified: {rows} message(s), DB matches disk.")
+    return (rows, on_disk)
+
+
+def count_undated_messages(backup_path: Path) -> int:
+    """
+    Count backup messages stored at the Unix epoch (unparseable sender Date).
+
+    Gmail re-stamps these with the restore date, so warn before old mail
+    arrives looking new. Returns 0 on any error; never blocks a run.
+    """
+    try:
+        with sqlite3.connect(backup_path / "msg-db.sqlite") as db:
+            row = db.execute(
+                "SELECT count(*) FROM messages WHERE message_internaldate < ?",
+                ("1971-01-01",),
+            ).fetchone()
+            return int(row[0]) if row else 0
+    except (sqlite3.Error, OSError):
+        return 0
+
+
+def migrate_email(source: str, destination: str, dry_run: bool, strip_labels: bool = True,
+                  reuse_backup: Optional[Path] = None, batch_size: int = RESTORE_BATCH_SIZE):
     """
     [OPTIONAL] Back up and restore email using GYB.
 
@@ -2248,6 +2884,12 @@ def migrate_email(source: str, destination: str, dry_run: bool, strip_labels: bo
     Effectively this archives the migrated mail under a single namespaced label.
     When False, original labels (INBOX, custom labels, system labels) are
     preserved and the migration label is added on top.
+
+    When reuse_backup is given, the GYB backup step is SKIPPED and the restore
+    runs against that existing local backup folder. Use this to resume a restore
+    that died partway (e.g. on an AV-locked message) without re-downloading a
+    large mailbox — Gmail dedupes re-restored messages server-side, so it is
+    safe. The path must be a GYB backup folder (contains msg-db.sqlite).
 
     GYB syntax:
       gyb --email <src> --action backup --local-folder <path>
@@ -2260,23 +2902,43 @@ def migrate_email(source: str, destination: str, dry_run: bool, strip_labels: bo
         return
 
     print_info(f"Migrating email: {source} -> {destination}")
-    backup_path = BACKUP_DIRECTORY / "mailboxes" / f"{source}_{datetime.now().strftime('%Y%m%d')}"
-    if not dry_run:
-        backup_path.mkdir(parents=True, exist_ok=True)
 
-    # Backup
-    print_info(f"Backing up email to: {backup_path}")
-    print_info(
-        "GYB will print a live progress bar (e.g. ' 42%|####  | 1234/2950 [01:23<02:45]'). "
-        "For large mailboxes this phase can run for tens of minutes."
-    )
-    success, _ = run_gyb(
-        ["--email", source, "--action", "backup", "--local-folder", str(backup_path)],
-        dry_run=dry_run
-    )
-    if not success and not dry_run:
-        print_error("Email backup failed; skipping restore.")
-        summary_error("Email backup failed")
+    if reuse_backup is not None:
+        # Restore-only: skip backup, restore from the existing folder.
+        backup_path = reuse_backup
+        if not dry_run and not (backup_path / "msg-db.sqlite").exists():
+            print_error(
+                f"--reuse-email-backup path is not a GYB backup folder "
+                f"(no msg-db.sqlite): {backup_path}"
+            )
+            summary_error(f"Email restore skipped: invalid reuse-backup path {backup_path}")
+            return
+        print_info(f"Reusing existing backup (skipping download): {backup_path}")
+    else:
+        backup_path = BACKUP_DIRECTORY / "mailboxes" / f"{source}_{datetime.now().strftime('%Y%m%d')}"
+        if not dry_run:
+            backup_path.mkdir(parents=True, exist_ok=True)
+
+        # Backup
+        print_info(f"Backing up email to: {backup_path}")
+        print_info(
+            "GYB will print a live progress bar (e.g. ' 42%|####  | 1234/2950 [01:23<02:45]'). "
+            "For large mailboxes this phase can run for tens of minutes."
+        )
+        success, _ = run_gyb(
+            ["--email", source, "--action", "backup", "--local-folder", str(backup_path)],
+            dry_run=dry_run
+        )
+        if not success and not dry_run:
+            print_error("Email backup failed; skipping restore.")
+            summary_error("Email backup failed")
+            return
+        if not dry_run:
+            verify_backup_complete(backup_path)
+
+    # Pre-flight the destination before spending hours on a doomed restore.
+    if not check_restore_destination_ready(destination, backup_path, dry_run):
+        summary_error(f"Email restore to {destination} skipped: destination not ready")
         return
 
     # Pre-scan: move any unreadable (AV-quarantined) messages aside so the
@@ -2292,16 +2954,96 @@ def migrate_email(source: str, destination: str, dry_run: bool, strip_labels: bo
     print_info(f"Restoring email to: {destination} (label: {migration_label}; {mode_desc})")
     restore_args = ["--email", destination, "--action", "restore",
                     "--local-folder", str(backup_path),
-                    "--label-restored", migration_label]
+                    "--label-restored", migration_label,
+                    # Batch messages so the restore is fast AND commits its
+                    # resume DB per batch (GYB's default of 1 is serial and only
+                    # commits at end — a crash then restarts from scratch).
+                    "--batch-size", str(batch_size)]
     if strip_labels:
         restore_args.append("--strip-labels")
-    success, _ = run_gyb(restore_args, dry_run=dry_run)
+    print_info(f"Restore batch size: {batch_size} (messages <=1MB per import request)")
+
+    # Restore with auto-recovery from AV-locked messages.
+    #
+    # Endpoint AV can lock a malicious .eml at ANY moment — even after the
+    # pre-scan read it cleanly, and non-deterministically (the same file can
+    # read fine one moment and raise PermissionError the next). A single locked
+    # file kills GYB's restore mid-run because GYB has no per-message read-error
+    # handling. So one clean pre-scan can't guarantee a clean restore.
+    #
+    # Re-running the restore is SAFE: GYB makes no attempt to de-duplicate, but
+    # Gmail's servers do — importing the exact same message twice leaves one
+    # copy (GYB maintainer, jay0lee, GYB discussion #446). So messages already
+    # restored before a crash collapse to a single copy on the next pass and
+    # the run continues past the poison. On each failure we quarantine whatever
+    # is unreadable right now (moving it aside makes GYB skip it — its own
+    # os.path.isfile check) and retry. The malware is intentionally never
+    # restored to the successor.
+    #
+    # High ceiling is safe: resume means each attempt continues where the last
+    # died, and the loop bails out early once it stops making progress.
+    MAX_RESTORE_ATTEMPTS = 20
+    success = False
+    batch_ladder = _build_batch_ladder(batch_size)
+    ladder_pos = 0
+    stalled = 0
+    for attempt in range(1, MAX_RESTORE_ATTEMPTS + 1):
+        before = _restored_count(backup_path, destination)
+        # Keep recovered intermediate failures out of the end-of-run summary.
+        success, gyb_output = run_gyb(
+            restore_args, dry_run=dry_run,
+            suppress_summary_error=(attempt < MAX_RESTORE_ATTEMPTS),
+        )
+        if success or dry_run:
+            break
+        progressed = _restored_count(backup_path, destination) - before
+
+        # Prefer the file named in the crash; a re-scan races the AV lock and
+        # often finds nothing, leaving the next attempt to die on the same file.
+        newly = quarantine_gyb_locked_file(backup_path, gyb_output)
+        if not newly:
+            newly = quarantine_unreadable_messages(backup_path)
+        skipped.extend(m for m in newly if m not in skipped)
+
+        # Step down only for throttling: a smaller batch is slower, so an AV
+        # crash must not drag it down.
+        if _looks_rate_limited(gyb_output) and ladder_pos < len(batch_ladder) - 1:
+            ladder_pos += 1
+            new_size = batch_ladder[ladder_pos]
+            restore_args[restore_args.index("--batch-size") + 1] = str(new_size)
+            print_warning(
+                f"Gmail is throttling the restore; stepping batch size down to "
+                f"{new_size} (ladder: {' -> '.join(str(b) for b in batch_ladder)})."
+            )
+
+        # Stop once we are neither restoring messages nor clearing blockers.
+        if progressed == 0 and not newly:
+            stalled += 1
+            if stalled >= 3:
+                print_error(
+                    f"Restore made no progress across {stalled} consecutive "
+                    f"attempts and found nothing to quarantine; stopping rather "
+                    f"than retrying {MAX_RESTORE_ATTEMPTS - attempt} more times."
+                )
+                break
+        else:
+            stalled = 0
+
+        if attempt < MAX_RESTORE_ATTEMPTS:
+            print_warning(
+                f"Restore attempt {attempt}/{MAX_RESTORE_ATTEMPTS} failed; "
+                f"restored {progressed} message(s) before dying, quarantined "
+                f"{len(newly)}. Retrying — resume skips what already landed and "
+                f"Gmail dedupes anything re-sent."
+            )
     if not success and not dry_run:
         print_error(f"Email restore failed; backup retained at {backup_path}")
         summary_error(
-            f"Email restore to {destination} FAILED partway; backup retained at "
-            f"{backup_path}. Re-run the same gyb restore command (resume is on "
-            f"by default) or re-run this script."
+            f"Email restore to {destination} FAILED after {MAX_RESTORE_ATTEMPTS} "
+            f"attempt(s); backup retained at {backup_path}. Re-run the same gyb "
+            f"restore command (resume is on by default) or re-run this script. "
+            f"If AV keeps locking messages mid-restore, add an on-access-scan "
+            f"exclusion for {backup_path.parent} in the endpoint AV policy."
         )
         return
     migrated_desc = f"Email migrated to {destination} under label '{migration_label}' ({mode_desc})"
@@ -2457,6 +3199,211 @@ def setup_forwarding(email: str, forward_to: str, dry_run: bool):
 # Downloads the user's entire Drive to local disk before any transfers.
 ###############################################################################
 
+def check_shared_drives(email: str, dry_run: bool) -> List[str]:
+    """
+    Report Shared Drives the leaver organizes, flagging any they organize ALONE.
+
+    Nothing in an offboarding touches Shared Drives. Their content is owned by
+    the drive, not by a member, so `gam transfer drive` (My Drive ownership)
+    moves none of it and rclone — which walks the user's own Drive tree — backs
+    up none of it. A leaver who is the SOLE organizer therefore leaves a drive
+    that, once the account is deleted, no one can add members to, change
+    settings on, or delete.
+
+    GAM cannot fix this as part of the transfer because there is no correct
+    automatic answer to who should inherit it. So this reports and instructs,
+    the same way the mail-capture block does.
+
+    Returns the names of drives left without another organizer.
+    """
+    if dry_run:
+        print_info("DRY RUN: would check Shared Drive memberships")
+        return []
+
+    ok, out = run_gam(["user", email, "print", "shareddrives"],
+                      dry_run=False, capture_output=True, timeout=180,
+                      suppress_summary_error=True)
+    if not ok:
+        print_warning(
+            f"Could not list Shared Drives for {email}; check by hand whether "
+            f"they solely organize any before deleting the account."
+        )
+        return []
+
+    try:
+        rows = list(csv.DictReader(io.StringIO(
+            out[out.index("User,id,name,role"):])))
+    except (ValueError, csv.Error):
+        return []
+
+    organized = [r for r in rows if (r.get("role") or "").lower() == "organizer"]
+    if not organized:
+        print_info("No Shared Drives organized by this user.")
+        return []
+
+    orphaned: List[str] = []
+    for row in organized:
+        drive_id, name = row.get("id", ""), row.get("name", "(unnamed)")
+        # CSV, not `show drivefileacls`: the text form prints role and
+        # emailAddress on separate lines with no stable ordering between them,
+        # so pairing them by proximity is guesswork. The CSV gives indexed
+        # permissions.N.emailAddress / permissions.N.role columns that pair
+        # unambiguously.
+        ok_acl, acl = run_gam(["user", email, "print", "drivefileacls", drive_id],
+                              dry_run=False, capture_output=True, timeout=120,
+                              suppress_summary_error=True)
+        # Another organizer means the drive stays manageable without the leaver.
+        others = 0
+        if ok_acl:
+            try:
+                acl_rows = list(csv.DictReader(io.StringIO(
+                    acl[acl.index("Owner,"):])))
+            except (ValueError, csv.Error):
+                acl_rows = []
+            for acl_row in acl_rows:
+                for key, addr in acl_row.items():
+                    m_perm = re.fullmatch(r"permissions\.(\d+)\.emailAddress", key or "")
+                    if not m_perm or not addr:
+                        continue
+                    role = acl_row.get(f"permissions.{m_perm.group(1)}.role", "")
+                    if (addr.lower() != email.lower()
+                            and (role or "").lower() == "organizer"):
+                        others += 1
+        if others == 0:
+            orphaned.append(f"{name} ({drive_id})")
+
+    print_warning(
+        f"{email} organizes {len(organized)} Shared Drive(s). NONE of their "
+        f"content is backed up or transferred by this script — Shared Drive "
+        f"files are owned by the drive, not by the user."
+    )
+    if orphaned:
+        print_error(
+            f"{Colours.RED}{len(orphaned)} Shared Drive(s) have NO other "
+            f"organizer. Deleting this account leaves them unmanageable — no "
+            f"one will be able to add members, change settings, or delete "
+            f"them:{Colours.RESET}"
+        )
+        for item in orphaned:
+            print_error(f"    - {item}")
+        print_error(
+            "Add a replacement organizer BEFORE deleting the account:\n"
+            "    gam user <new-organizer> add drivefileacl <driveId> "
+            "user <new-organizer> role organizer"
+        )
+        summary_warning(
+            f"{len(orphaned)} Shared Drive(s) left with no organizer other than "
+            f"{email}: {'; '.join(orphaned)}"
+        )
+    else:
+        summary_warning(
+            f"{email} organizes {len(organized)} Shared Drive(s); content not "
+            f"backed up or transferred (other organizers remain)"
+        )
+    return orphaned
+
+
+def verify_drive_backup_complete(email: str, backup_path: Path) -> Tuple[int, int]:
+    """
+    Reconcile the files in the user's Drive against the files rclone wrote.
+
+    Drive is not a filesystem: it allows two files with the SAME NAME in the
+    same folder, distinguished only by file ID. A filesystem cannot, so when
+    both export to the same extension (two Google Docs called "Notes" both
+    become "Notes.docx") the second overwrites the first. rclone treats that as
+    an ordinary destination write, exits 0, and the backup is silently short.
+    Nothing else in the run notices — the same failure shape as the GYB restore
+    defects: data lost, exit code clean.
+
+    "Untitled document" is the most common filename in Drive, so this is a
+    routine case, not a contrived one.
+
+    Returns (drive_files, local_files). Counts only, no listing of every file,
+    to stay cheap on a large Drive.
+    """
+    # `trashed = false` is load-bearing: GAM's filelist INCLUDES trashed files
+    # by default and rclone downloads none of them, so counting the default
+    # list reports a shortfall for every user with a non-empty bin — i.e. most
+    # of them. Measured on the dev fixture: 134 counted vs 126 untrashed.
+    ok, out = run_gam(
+        ["user", email, "print", "filelist", "fields", "id,mimetype",
+         "query", "mimeType != 'application/vnd.google-apps.folder' "
+                  "and trashed = false"],
+        dry_run=False, capture_output=True, timeout=600,
+        suppress_summary_error=True,
+    )
+    if not ok:
+        print_warning(
+            "Could not list Drive to reconcile the backup; skipping the "
+            "completeness check. Verify the file count by hand before deleting "
+            "the source account."
+        )
+        return (0, 0)
+
+    # Use GAM's own tally. run_gam merges stderr into stdout, and GAM writes two
+    # progress lines there ("Getting all...", "Got N..."), so counting output
+    # lines over-reports by exactly those two and invents a shortfall.
+    m = re.search(r"Got (\d+) Drive Files/Folders", out)
+    if m:
+        drive_files = int(m.group(1))
+    else:
+        # Fall back to CSV rows after the header. Only id/mimeType are
+        # requested, so no field can contain an embedded newline — file NAMES
+        # can (and one in the dev fixture does), which would break this.
+        lines = [ln for ln in out.splitlines() if ln.strip()]
+        header = next((i for i, ln in enumerate(lines) if ln.startswith("Owner,")), None)
+        drive_files = len(lines) - header - 1 if header is not None else 0
+
+    local_files = sum(1 for p in backup_path.rglob("*") if p.is_file())
+
+    if drive_files and local_files < drive_files:
+        print_warning(
+            f"{Colours.RED}Drive backup is SHORT: {drive_files} file(s) owned in "
+            f"Drive but {local_files} on disk ({drive_files - local_files} "
+            f"missing). Two causes, in order of likelihood:\n"
+            f"  1. Two files share a name in the same folder. On Drive they are "
+            f"distinct file IDs; on disk the second overwrites the first, and "
+            f"rclone counts that a normal write. Those files are NOT in this "
+            f"backup — rename them in Drive and re-run, or export them by hand.\n"
+            f"  2. The user OWNS a file that lives only under another user's "
+            f"folder. GAM counts it; rclone walks this user's own tree and never "
+            f"reaches it. Nothing is lost, but it is not in this backup either.\n"
+            f"Check before deleting the source account.{Colours.RESET}"
+        )
+        summary_warning(
+            f"Drive backup at {backup_path} has {local_files} file(s) on disk "
+            f"but Drive lists {drive_files} ({drive_files - local_files} missing, "
+            f"likely same-name collisions)"
+        )
+    elif drive_files:
+        print_success(f"Drive backup verified: {local_files} file(s), matches Drive.")
+
+    # Trashed files are excluded from the comparison above because rclone does
+    # not fetch them. That makes the count honest, but it also means a leaver's
+    # bin is silently absent from the backup — and a bin can hold work deleted
+    # in the last 30 days. Report it rather than let it disappear quietly.
+    ok_all, out_all = run_gam(
+        ["user", email, "print", "filelist", "fields", "id",
+         "query", "mimeType != 'application/vnd.google-apps.folder'"],
+        dry_run=False, capture_output=True, timeout=600,
+        suppress_summary_error=True,
+    )
+    m_all = re.search(r"Got (\d+) Drive Files/Folders", out_all) if ok_all else None
+    trashed = int(m_all.group(1)) - drive_files if m_all else 0
+    if trashed > 0:
+        print_warning(
+            f"{trashed} file(s) are in {email}'s TRASH and are NOT in this "
+            f"backup (rclone does not fetch trashed files). Google purges the "
+            f"bin 30 days after deletion, and deleting the account destroys it "
+            f"immediately. Restore anything still wanted in Drive first, then "
+            f"re-run the backup."
+        )
+        summary_warning(
+            f"{trashed} trashed file(s) for {email} were not backed up"
+        )
+    return (drive_files, local_files)
+
+
 def backup_drive_rclone(email: str, dry_run: bool) -> bool:
     """
     [RECOMMENDED] Back up user's Drive to local disk via rclone.
@@ -2509,11 +3456,26 @@ def backup_drive_rclone(email: str, dry_run: bool) -> bool:
         last_summary_line = ""
         buffer = ""
 
+        # Drive refuses to serve files it has flagged as malware/spam, so a
+        # backup can be short by those files alone. Name them rather than
+        # reporting the whole backup as failed.
+        abusive_files: List[str] = []
+        # Matched off per-file "ERROR : <name>: Failed to copy" lines only; the
+        # "Attempt N/3" lines name no file and "Errors: N" needs -P.
+        failed_files: List[str] = []
+
         def emit(line: str):
             nonlocal last_progress_log, last_summary_line
             line = line.rstrip()
             if not line:
                 return
+            m = re.search(r"ERROR\s*:\s*(\S.*?):\s*Failed to copy", line)
+            if m:
+                name = m.group(1)
+                if name not in failed_files:
+                    failed_files.append(name)
+                if "cannotDownloadAbusiveFile" in line and name not in abusive_files:
+                    abusive_files.append(name)
             is_progress = line.startswith("Transferred:") or "ETA" in line or "%" in line
             if is_progress:
                 now = time.time()
@@ -2552,9 +3514,34 @@ def backup_drive_rclone(email: str, dry_run: bool) -> bool:
             if last_summary_line:
                 print_info(f"  {last_summary_line}")
             summary_action(f"Drive backed up via rclone to {backup_path}")
+            # rclone exiting 0 does not mean every file arrived; same-name
+            # collisions overwrite silently. Reconcile before believing it.
+            verify_drive_backup_complete(email, backup_path)
+            return True
+        elif abusive_files and len(failed_files) == len(abusive_files):
+            # Only flagged files failed, so the rest of the backup is intact.
+            print_warning(
+                f"{Colours.RED}Drive backed up to {backup_path}, EXCEPT "
+                f"{len(abusive_files)} file(s) Google has flagged as malware or "
+                f"spam and refuses to release: {', '.join(abusive_files)}. "
+                f"Everything else transferred. These cannot be recovered by "
+                f"re-running; the owner can still download them by hand from "
+                f"the Drive web UI after acknowledging the warning."
+                f"{Colours.RESET}"
+            )
+            summary_warning(
+                f"Drive backup to {backup_path} completed WITHOUT "
+                f"{len(abusive_files)} malware/spam-flagged file(s): "
+                f"{', '.join(abusive_files)}"
+            )
             return True
         else:
             print_error(f"rclone failed (exit {proc.returncode})")
+            if abusive_files:
+                print_error(
+                    f"  including {len(abusive_files)} file(s) Google refused to "
+                    f"release as malware/spam: {', '.join(abusive_files)}"
+                )
             summary_error(f"rclone backup failed (exit {proc.returncode})")
             return False
 
@@ -2896,6 +3883,27 @@ def parse_args():
         "--backup-email", action="store_true",
         help="Download email locally via GYB WITHOUT restoring to another user. "
              "Requires GYB. Does NOT prevent --no-email migration if both used.")
+    backup_grp.add_argument(
+        "--backup-dir", type=str, metavar="PATH",
+        help="Root folder for ALL backups (snapshots, mailbox, Drive). "
+             "Subfolders are created inside it. Default: ./offboarding_backups "
+             "in the current directory. Point this OUTSIDE any synced folder "
+             "(iCloud/Dropbox/Drive): a mailbox backup can be hundreds of GB "
+             "and a synced folder re-uploads all of it every run.")
+    backup_grp.add_argument(
+        "--reuse-email-backup", type=str, metavar="PATH",
+        help="Restore email from this EXISTING GYB backup folder and skip the "
+             "download step. Use to resume a restore that died partway (e.g. on "
+             "an AV-locked message) without re-downloading a large mailbox — "
+             "Gmail dedupes re-restored mail server-side, so it is safe. The "
+             "path must contain msg-db.sqlite.")
+    backup_grp.add_argument(
+        "--restore-batch-size", type=int, metavar="N", default=RESTORE_BATCH_SIZE,
+        help=f"Messages per Gmail import request on restore (1-100, default "
+             f"{RESTORE_BATCH_SIZE}). GYB's own default is 1 = serial + only "
+             f"commits resume state at the end (a crash restarts from scratch); "
+             f">1 batches small messages (fast) and commits per batch (a crash "
+             f"resumes). Drop toward 10 if Gmail returns rateLimitExceeded.")
 
     # --- Mode flags ---
     mode_grp = parser.add_argument_group("Operation modes")
@@ -2987,6 +3995,17 @@ def parse_args():
 
     # === Flag validation and implications ===
 
+    # GYB's own argparse restricts --batch-size to choices 1-100 and rejects
+    # anything else outright. Caught here, that is a one-line usage error;
+    # caught by GYB, it fails EVERY restore attempt instantly — but only after
+    # the mailbox backup has already run, which on a large mailbox is hours.
+    if not 1 <= args.restore_batch_size <= 100:
+        parser.error(
+            f"--restore-batch-size must be between 1 and 100 "
+            f"(got {args.restore_batch_size}); GYB rejects anything outside "
+            f"that range. Use {RESTORE_BATCH_SIZE} unless you have a reason."
+        )
+
     if args.scorched_earth:
         if not args.doit:
             parser.error("--scorched-earth requires --doit")
@@ -3021,10 +4040,16 @@ def parse_args():
 ###############################################################################
 
 def main():
-    global logger, exit_code
+    global logger, exit_code, BACKUP_DIRECTORY
 
     args = parse_args()
     dry_run = not args.doit
+
+    # --backup-dir overrides the module default so large backups can live off a
+    # synced folder (iCloud/Dropbox). expanduser() so '~' works; resolve() so
+    # the logged path is unambiguous.
+    if args.backup_dir:
+        BACKUP_DIRECTORY = Path(args.backup_dir).expanduser().resolve()
 
     # Get user email before logging so the filename can include it
     user_email = args.user or prompt_email("Enter the email of the user to offboard")
@@ -3091,7 +4116,44 @@ def main():
     originally_suspended = is_suspended
     temp_unsuspended = False
     is_2sv_enrolled = user_info.get('2-step enrolled', 'false').lower() == 'true'
+    is_2sv_enforced = user_info.get('2-step enforced', 'false').lower() == 'true'
     has_mailbox = user_info.get('mailbox is setup', 'true').lower() == 'true'
+
+    # --- Restore-only / resume mode (--reuse-email-backup) -------------------
+    # Resuming a failed email restore must NOT re-run containment (password
+    # scramble, sign-out), group/licence removal, or any other transfer. Do
+    # only the email restore against the existing backup, then exit.
+    if args.reuse_email_backup:
+        reuse_backup = Path(args.reuse_email_backup).expanduser().resolve()
+        email_dest = args.email_to or args.all_transfer_to
+        if not email_dest:
+            print_error("--reuse-email-backup requires --email-to (or --all-transfer-to).")
+            sys.exit(2)
+        # This mode skips preflight_destinations(), so validate here or the
+        # suspended-destination check never runs — and restore-only is exactly
+        # the mode used to resume a restore a suspended destination just killed.
+        if not dry_run and not validate_destination(email_dest):
+            print_error(f"Restore destination {email_dest} did not validate; aborting.")
+            summary_error(f"Restore-only aborted: destination {email_dest} invalid")
+            sys.exit(2)
+        strip_labels = args.strip_labels if args.strip_labels is not None else True
+        print_header("RESTORE-ONLY MODE (resume email restore from existing backup)")
+        print_info(f"Source user : {user_email}")
+        print_info(f"Restore to  : {email_dest}")
+        print_info(f"Backup      : {reuse_backup}")
+        print_info(f"Label mode  : {'strip (single Migrated/ label)' if strip_labels else 'keep original labels'}")
+        if not dry_run and not prompt_yes_no("Proceed with restore-only?", force=args.force):
+            print_info("Aborted by operator.")
+            sys.exit(0)
+        with PhaseTimer("Email migration"):
+            try:
+                migrate_email(user_email, email_dest, dry_run, strip_labels=strip_labels,
+                              reuse_backup=reuse_backup, batch_size=args.restore_batch_size)
+            except Exception as e:
+                print_error(f"Email migration failed: {e}")
+                summary_error(f"Email exception: {e}")
+        print_summary(dry_run)
+        sys.exit(exit_code)
 
     # --- Temporarily unsuspend if requested ---
     if is_suspended and not args.scorched_earth:
@@ -3153,7 +4215,17 @@ def main():
 
     # Resolve and validate transfer destinations up front so we fail fast
     # before any destructive action if --force is missing destinations.
-    dest_map = preflight_destinations(args)
+    dest_map = preflight_destinations(args, source=user_email)
+
+    # Front-load every remaining interactive decision into one block, echo the
+    # plan, and take a single final confirmation. After this the run needs no
+    # further operator input — the phases below read `plan` instead of prompting.
+    plan = collect_plan(args, dest_map, is_2sv_enrolled, is_2sv_enforced)
+    print_plan(plan)
+    if not dry_run:
+        if not prompt_yes_no("Proceed with this plan?", force=args.force):
+            print_info("Aborted by operator.")
+            sys.exit(0)
 
     # =========================================================================
     # PHASE 0: Pre-flight Snapshot
@@ -3181,7 +4253,8 @@ def main():
     with PhaseTimer("Kill switch"):
         try:
             execute_kill_switch(user_email, dry_run, is_suspended,
-                                is_2sv_enrolled, has_mailbox)
+                                is_2sv_enrolled, has_mailbox,
+                                turn_off_2sv=plan["turnoff2sv"]["do"])
         except Exception as e:
             print_error(f"Kill switch phase failed: {e}")
             summary_error(f"Kill switch exception: {e}")
@@ -3298,8 +4371,8 @@ def main():
     # Drive transfer
     if args.no_drive:
         summary_skip("Drive transfer (--no-drive)")
-    elif prompt_yes_no("Transfer Drive files to another user?", force=args.force):
-        drive_dest = dest_map["drive"] or prompt_email("Drive destination email")
+    elif plan["drive"]["do"]:
+        drive_dest = plan["drive"]["dest"]
         with PhaseTimer("Drive transfer"):
             try:
                 transfer_drive(user_email, drive_dest, dry_run)
@@ -3309,22 +4382,25 @@ def main():
     else:
         summary_skip("Drive transfer (declined)")
 
+    # Shared Drives are untouched by every phase above, so report them
+    # regardless of whether the My Drive transfer ran or was skipped.
+    with PhaseTimer("Shared Drive check"):
+        try:
+            check_shared_drives(user_email, dry_run)
+        except Exception as e:
+            print_warning(f"Shared Drive check failed: {e}")
+
     # Email migration
     if args.no_email:
         summary_skip("Email migration (--no-email)")
-    elif prompt_yes_no("Migrate email to another user (requires GYB)?", force=args.force):
-        email_dest = dest_map["email"] or prompt_email("Email migration destination email")
-        # Resolve label-handling mode: CLI flag wins; otherwise prompt (default = strip+archive).
-        if args.strip_labels is None:
-            strip_labels = prompt_yes_no(
-                "Strip original Gmail labels and archive migrated mail under "
-                "Migrated/<source-user> only? (No keeps INBOX and custom labels)",
-                default=True, force=args.force)
-        else:
-            strip_labels = args.strip_labels
+    elif plan["email"]["do"]:
+        email_dest = plan["email"]["dest"]
+        strip_labels = plan["email"]["strip_labels"]
+        reuse_backup = Path(args.reuse_email_backup).expanduser().resolve() if args.reuse_email_backup else None
         with PhaseTimer("Email migration"):
             try:
-                migrate_email(user_email, email_dest, dry_run, strip_labels=strip_labels)
+                migrate_email(user_email, email_dest, dry_run, strip_labels=strip_labels,
+                              reuse_backup=reuse_backup, batch_size=args.restore_batch_size)
             except Exception as e:
                 print_error(f"Email migration failed: {e}")
                 summary_error(f"Email exception: {e}")
@@ -3334,8 +4410,8 @@ def main():
     # Alias transfer
     if args.no_alias:
         summary_skip("Alias transfer (--no-alias)")
-    elif prompt_yes_no("Transfer aliases to another user?", force=args.force):
-        alias_dest = dest_map["alias"] or prompt_email("Alias destination email")
+    elif plan["alias"]["do"]:
+        alias_dest = plan["alias"]["dest"]
         with PhaseTimer("Alias transfer"):
             try:
                 transfer_aliases(user_email, alias_dest, dry_run)
@@ -3348,8 +4424,8 @@ def main():
     # Calendar transfer
     if args.no_calendar:
         summary_skip("Calendar transfer (--no-calendar)")
-    elif prompt_yes_no("Grant calendar access to another user?", force=args.force):
-        cal_dest = dest_map["calendar"] or prompt_email("Calendar access destination email")
+    elif plan["calendar"]["do"]:
+        cal_dest = plan["calendar"]["dest"]
         with PhaseTimer("Calendar transfer"):
             try:
                 transfer_calendar(user_email, cal_dest, dry_run)
@@ -3368,8 +4444,8 @@ def main():
     # =========================================================================
     if args.no_forward:
         summary_skip("Email forwarding (--no-forward)")
-    elif prompt_yes_no("Set up email forwarding to a successor?", force=args.force):
-        fwd_dest = dest_map["forward"] or prompt_email("Forward emails to")
+    elif plan["forward"]["do"]:
+        fwd_dest = plan["forward"]["dest"]
         with PhaseTimer("Email forwarding"):
             try:
                 setup_forwarding(user_email, fwd_dest, dry_run)
@@ -3384,7 +4460,7 @@ def main():
     # =========================================================================
     if args.no_auto_reply:
         summary_skip("Auto-reply (--no-auto-reply)")
-    elif prompt_yes_no("Set an auto-reply message on the account?", force=args.force):
+    elif plan["auto_reply"]["do"]:
         with PhaseTimer("Auto-reply"):
             try:
                 set_auto_reply(user_email, dry_run)
@@ -3444,7 +4520,7 @@ def main():
             "User was NOT suspended. Remember to suspend manually when "
             "the transition period is over."
         )
-    elif prompt_yes_no("Suspend the user account?", default=True, force=args.force):
+    elif plan["suspend"]["do"]:
         with PhaseTimer("Suspension"):
             try:
                 suspend_user(user_email, dry_run)

@@ -363,6 +363,21 @@
       <input type="text" id="log-dir" placeholder="./logs" autocomplete="off">
       <span class="field-hint">Where the script writes its log file. Defaults to <code>./logs</code> relative to where the script is run. Use an absolute path if you run the script from different directories to avoid logs scattering across your filesystem.</span>
     </div>
+    <div class="field" style="margin-top:10px;">
+      <label class="field-label" for="backup-dir">Backup directory <span class="hint">— <code>--backup-dir</code>. Default <code>./offboarding_backups</code>.</span></label>
+      <input type="text" id="backup-dir" placeholder="./offboarding_backups" autocomplete="off">
+      <span class="field-hint">Where snapshots, mailbox backups and Drive backups are written. A mailbox backup can reach hundreds of gigabytes, so point this at a local disk and <strong>never inside iCloud, OneDrive, Dropbox or Google Drive</strong> — a synced folder will try to upload all of it.</span>
+    </div>
+    <div class="field" style="margin-top:10px;">
+      <label class="field-label" for="restore-batch-size">Restore batch size <span class="hint">— <code>--restore-batch-size</code>. Default <code>50</code>, max <code>100</code>.</span></label>
+      <input type="number" id="restore-batch-size" min="1" max="100" placeholder="50" autocomplete="off">
+      <span class="field-hint">Messages sent per request when restoring mail. Measured on a real mailbox: 1 gives ~1,200 msg/hr, 10 gives ~5,800, 100 gives ~9,100. GYB rejects anything above 100. The script steps this down automatically (100 → 75 → 50 → 25 → 10) if Gmail starts throttling, so the default is a safe starting point.</span>
+    </div>
+    <div class="field" style="margin-top:10px;">
+      <label class="field-label" for="reuse-email-backup">Reuse an existing mailbox backup <span class="hint">— <code>--reuse-email-backup</code></span></label>
+      <input type="text" id="reuse-email-backup" placeholder="/path/to/offboarding_backups/mailboxes/user@domain_20260721" autocomplete="off">
+      <span class="field-hint">Restore-only mode: restores from a backup you already have and skips the download and every other phase. Use it to finish a restore that died part way. Re-running is safe — Gmail discards messages it already holds, so nothing is duplicated. Needs <code>--force</code>.</span>
+    </div>
   </details>
 
   <!-- ============== PROFILES ============== -->
@@ -514,6 +529,23 @@
       if (!validEmailOrEmpty(id)) errors.push(`${flag} is not a valid email address.`);
     });
 
+    const batchSizeVal = trimmed('restore-batch-size');
+    if (batchSizeVal && (!/^[0-9]+$/.test(batchSizeVal) || +batchSizeVal < 1 || +batchSizeVal > 100)) {
+      errors.push('Restore batch size must be a whole number from 1 to 100 — GYB rejects anything above 100.');
+    } else if (batchSizeVal && +batchSizeVal === 1) {
+      notes.push('Batch size 1 uploads one message per request and only saves progress at the end, so a crash restarts from the first message. Use 10 or more unless you have a reason not to.');
+    }
+
+    const reuseVal = trimmed('reuse-email-backup');
+    if (reuseVal) {
+      if (getMode() !== 'exec') {
+        notes.push('--reuse-email-backup only takes effect in Execute mode.');
+      } else if (!$('force').checked) {
+        errors.push('--reuse-email-backup needs --force — a restore-only run cannot answer interactive prompts.');
+      }
+      notes.push('Restore-only mode: the mailbox restore runs and every other phase is skipped.');
+    }
+
     // Label radio mutual exclusion is enforced by radio inputs; nothing to check.
 
     if (mode === 'exec') {
@@ -602,6 +634,21 @@
       parts.push('--log-dir', needsQuotes ? `'${logDir}'` : logDir);
     }
 
+    const backupDir = trimmed('backup-dir');
+    if (backupDir) {
+      const needsQuotes = /[^\w./:-]/.test(backupDir);
+      parts.push('--backup-dir', needsQuotes ? `'${backupDir}'` : backupDir);
+    }
+
+    const batchSize = trimmed('restore-batch-size');
+    if (batchSize) parts.push('--restore-batch-size', batchSize);
+
+    const reuseBackup = trimmed('reuse-email-backup');
+    if (reuseBackup) {
+      const needsQuotes = /[^\w./:@-]/.test(reuseBackup);
+      parts.push('--reuse-email-backup', needsQuotes ? `'${reuseBackup}'` : reuseBackup);
+    }
+
     return parts.join(' ');
   }
 
@@ -680,7 +727,8 @@
     };
     [
       'user','all-to','drive-to','email-to','alias-to','calendar-to',
-      'forward-to','forward-alias-to','log-dir'
+      'forward-to','forward-alias-to','log-dir','backup-dir',
+      'restore-batch-size','reuse-email-backup'
     ].forEach(id => { snap.text[id] = $(id).value; });
     ['no-transfer','unsuspend','backup-drive','backup-email', ...SKIP_FLAGS]
       .forEach(id => { snap.bool[id] = $(id).checked; });

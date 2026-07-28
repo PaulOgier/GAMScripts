@@ -543,5 +543,445 @@ class TestA8VerifyUserFixtures(OffboardTestCase):
                             for w in offb.summary_warnings))
 
 
+class TestB1BatchLadder(unittest.TestCase):
+    """
+    The restore batch-size fallback used when Gmail throttles a run.
+
+    Written against the behaviour agreed with the operator: 100 -> 75 -> 50,
+    never stepping above the starting value and never below 10 unless the
+    operator explicitly asked for less. The floor matters: at --batch-size 1
+    GYB takes its single-message path, which never commits the resume DB inside
+    the loop, so a crash at 99% restarts from message 1.
+    """
+
+    def test_b1_1_hundred_steps_as_specified(self):
+        self.assertEqual(offb._build_batch_ladder(100), [100, 75, 50, 25, 10])
+
+    def test_b1_2_never_steps_above_start_and_always_descends(self):
+        for start in (500, 100, 50, 20, 10, 7, 1):
+            ladder = offb._build_batch_ladder(start)
+            self.assertEqual(ladder[0], start)
+            self.assertEqual(ladder, sorted(ladder, reverse=True))
+            self.assertEqual(len(ladder), len(set(ladder)))
+            self.assertTrue(all(b <= start for b in ladder))
+
+    def test_b1_3_floor_is_ten_unless_operator_asked_for_less(self):
+        self.assertEqual(min(offb._build_batch_ladder(100)), 10)
+        # An explicit small choice is honoured rather than raised to the floor.
+        self.assertEqual(offb._build_batch_ladder(3), [3])
+
+
+class TestB2RateLimitDetection(unittest.TestCase):
+    """Only throttling-shaped failures should drag the batch size down."""
+
+    def test_b2_1_throttling_markers_detected(self):
+        for marker in ("rateLimitExceeded", "userRateLimitExceeded",
+                       "quotaExceeded", "backendError", "Backing off 16 seconds"):
+            self.assertTrue(offb._looks_rate_limited(f"blah {marker} blah"), marker)
+
+    def test_b2_2_av_crash_is_not_treated_as_throttling(self):
+        crash = ("Traceback (most recent call last):\n"
+                 "PermissionError: [Errno 1] Operation not permitted: '/b/a.eml'")
+        self.assertFalse(offb._looks_rate_limited(crash))
+
+
+class TestB3QuarantineFromCrash(unittest.TestCase):
+    """Quarantining the .eml named in a GYB crash, and only if still locked."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.backup = Path(self.tmp.name) / "user@x.com_20260101"
+        (self.backup / "2026" / "1").mkdir(parents=True)
+        self.locked = self.backup / "2026" / "1" / "deadbeef.eml"
+        self.locked.write_bytes(b"poison")
+        self.readable = self.backup / "2026" / "1" / "cafe1234.eml"
+        self.readable.write_bytes(b"fine")
+        offb.summary_warnings.clear()
+
+    def tearDown(self):
+        # Make every 000-mode file readable again wherever it ended up, so the
+        # temp dir can be removed. The poison file is expected to have MOVED in
+        # the passing case, so its original path may legitimately be gone.
+        for p in Path(self.tmp.name).rglob("*.eml"):
+            try:
+                p.chmod(0o644)
+            except OSError:
+                pass
+        self.tmp.cleanup()
+
+    def _crash(self, path):
+        return ("Traceback (most recent call last):\n"
+                f"PermissionError: [Errno 1] Operation not permitted: '{path}'")
+
+    def test_b3_1_locked_file_named_in_crash_is_moved_aside(self):
+        self.locked.chmod(0o000)
+        moved = offb.quarantine_gyb_locked_file(self.backup, self._crash(self.locked))
+        self.assertEqual(moved, ["deadbeef"])
+        self.assertFalse(self.locked.exists(), "poison file should have been moved")
+        quarantined = (self.backup.parent / f"{self.backup.name}_quarantined"
+                       / "2026" / "1" / "deadbeef.eml")
+        self.assertTrue(quarantined.exists(), "file must be moved, never deleted")
+
+    def test_b3_2_file_readable_again_is_left_in_place(self):
+        # Transient AV block: it killed the run but reads fine now. Moving it
+        # would drop a legitimate message from the successor's mailbox.
+        moved = offb.quarantine_gyb_locked_file(self.backup, self._crash(self.readable))
+        self.assertEqual(moved, [])
+        self.assertTrue(self.readable.exists())
+
+    def test_b3_3_patched_gyb_warning_wording_also_parsed(self):
+        self.locked.chmod(0o000)
+        out = (f"WARNING! could not read {self.locked} for message 60818: "
+               f"[Errno 13] Permission denied")
+        self.assertEqual(offb.quarantine_gyb_locked_file(self.backup, out),
+                         ["deadbeef"])
+
+    def test_b3_4_path_outside_the_backup_is_ignored(self):
+        outside = Path(self.tmp.name) / "elsewhere.eml"
+        outside.write_bytes(b"x")
+        outside.chmod(0o000)
+        try:
+            self.assertEqual(
+                offb.quarantine_gyb_locked_file(self.backup, self._crash(outside)), [])
+            self.assertTrue(outside.exists())
+        finally:
+            outside.chmod(0o644)
+
+    def test_b3_5_unparseable_output_never_raises(self):
+        self.assertEqual(offb.quarantine_gyb_locked_file(self.backup, "no paths here"), [])
+
+
+class TestB4UndatedMessages(unittest.TestCase):
+    """Counting epoch-dated messages; warn-only, so it must never raise."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.backup = Path(self.tmp.name) / "b"
+        self.backup.mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _db(self, dates):
+        import sqlite3
+        with sqlite3.connect(self.backup / "msg-db.sqlite") as db:
+            db.execute("CREATE TABLE messages(message_num INTEGER PRIMARY KEY, "
+                       "message_filename TEXT, message_internaldate TIMESTAMP)")
+            db.executemany("INSERT INTO messages VALUES (?,?,?)",
+                           [(i, f"{i}.eml", d) for i, d in enumerate(dates, 1)])
+
+    def test_b4_1_counts_epoch_dated_messages(self):
+        self._db(["1970-01-01 02:00:00", "2026-07-21 17:18:09",
+                  "1970-01-01 02:00:00"])
+        self.assertEqual(offb.count_undated_messages(self.backup), 2)
+
+    def test_b4_2_healthy_backup_counts_zero(self):
+        self._db(["2024-01-01 00:00:00", "2026-07-21 17:18:09"])
+        self.assertEqual(offb.count_undated_messages(self.backup), 0)
+
+    def test_b4_3_missing_db_returns_zero_not_an_exception(self):
+        self.assertEqual(offb.count_undated_messages(self.backup / "nope"), 0)
+
+
+class TestB5SuspendedDestination(unittest.TestCase):
+    """Rejecting a suspended destination, matching the field not the word."""
+
+    def setUp(self):
+        offb.summary_errors.clear()
+
+    def test_b5_1_suspended_destination_rejected(self):
+        with mock.patch.object(offb, "run_gam",
+                               return_value=(True, FIXTURE_SUSPENDED_USER)):
+            self.assertFalse(offb.validate_destination("testoffboard3@yourdomain.com"))
+
+    def test_b5_2_active_user_named_suspended_is_not_a_false_positive(self):
+        # "Last Name: Suspended" / "Full Name: Charlie Suspended" must not trip it.
+        active_but_named_suspended = FIXTURE_SUSPENDED_USER.replace(
+            "Account Suspended: True", "Account Suspended: False")
+        self.assertIn("Last Name: Suspended", active_but_named_suspended)
+        with mock.patch.object(offb, "run_gam",
+                               return_value=(True, active_but_named_suspended)):
+            self.assertTrue(offb.validate_destination("testoffboard3@yourdomain.com"))
+
+
+class TestB6BackupCompleteness(unittest.TestCase):
+    """Backup DB row count must match the .eml files actually on disk."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.b = Path(self.tmp.name) / "bk"
+        (self.b / "2026" / "1").mkdir(parents=True)
+        offb.summary_warnings.clear()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _make(self, rows, files):
+        import sqlite3
+        with sqlite3.connect(self.b / "msg-db.sqlite") as db:
+            db.execute("CREATE TABLE messages(message_num INTEGER PRIMARY KEY, "
+                       "message_filename TEXT, message_internaldate TIMESTAMP)")
+            db.executemany("INSERT INTO messages VALUES (?,?,?)",
+                           [(i, f"2026/1/{i}.eml", "2026-01-01") for i in range(1, rows + 1)])
+        for i in range(1, files + 1):
+            (self.b / "2026" / "1" / f"{i}.eml").write_bytes(b"x")
+
+    def test_b6_1_matching_backup_passes_quietly(self):
+        self._make(5, 5)
+        self.assertEqual(offb.verify_backup_complete(self.b), (5, 5))
+        self.assertFalse(offb.summary_warnings)
+
+    def test_b6_2_short_backup_warns(self):
+        self._make(5, 3)
+        self.assertEqual(offb.verify_backup_complete(self.b), (5, 3))
+        self.assertTrue(any("missing" in w for w in offb.summary_warnings))
+
+    def test_b6_3_missing_db_returns_zeroes(self):
+        self.assertEqual(offb.verify_backup_complete(self.b / "nope"), (0, 0))
+
+
+# Real `gam user <u> show gmailprofile` output, dev.osh.co.za 2026-07-28.
+FIXTURE_GMAIL_OFF = "User: nolic@yourdomain.com, Gmail Service/App not enabled\n"
+FIXTURE_GMAIL_ON = ("User: ok@yourdomain.com, historyId: 50524, "
+                    "messagesTotal: 3296, threadsTotal: 3180\n")
+
+
+class TestB7GmailEnabled(unittest.TestCase):
+    """Restore must refuse a destination with no Gmail service."""
+
+    def setUp(self):
+        offb.summary_errors.clear()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.b = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_b7_1_gmail_disabled_blocks_the_restore(self):
+        with mock.patch.object(offb, "run_gam",
+                               return_value=(True, FIXTURE_GMAIL_OFF)):
+            self.assertFalse(
+                offb.check_restore_destination_ready("nolic@yourdomain.com",
+                                                     self.b, dry_run=False))
+        self.assertTrue(any("Gmail not enabled" in e for e in offb.summary_errors))
+
+    def test_b7_2_gmail_enabled_proceeds(self):
+        with mock.patch.object(offb, "run_gam",
+                               return_value=(True, FIXTURE_GMAIL_ON)):
+            self.assertTrue(
+                offb.check_restore_destination_ready("ok@yourdomain.com",
+                                                     self.b, dry_run=False))
+
+
+FIXTURE_DRIVESETTINGS = """User: leaver@yourdomain.com, Show 1 Drive Settings
+  name: A Leaver
+  appInstalled: False
+  limit: 329.85 TB
+  maxUploadSize: 5.24 TB
+  usage: 7.66 GB
+  usageInDrive: 0 KB
+  usageInDriveTrash: 0 KB
+"""
+
+
+class TestB8StorageSizeParsing(unittest.TestCase):
+    """GAM prints human-formatted sizes; a digits-only read is off by ~10^12."""
+
+    def test_b8_1_terabyte_limit_is_not_read_as_bytes(self):
+        limit = offb._parse_gam_size(FIXTURE_DRIVESETTINGS, "limit")
+        self.assertEqual(limit, int(329.85 * 1024 ** 4))
+
+    def test_b8_2_gigabyte_usage_parsed(self):
+        usage = offb._parse_gam_size(FIXTURE_DRIVESETTINGS, "usage")
+        self.assertEqual(usage, int(7.66 * 1024 ** 3))
+
+    def test_b8_3_usage_does_not_match_usageindrive(self):
+        # usageInDrive is 0 KB and follows usage; anchoring must not pick it up.
+        self.assertNotEqual(offb._parse_gam_size(FIXTURE_DRIVESETTINGS, "usage"), 0)
+
+    def test_b8_4_headroom_is_positive_on_a_healthy_tenant(self):
+        limit = offb._parse_gam_size(FIXTURE_DRIVESETTINGS, "limit")
+        usage = offb._parse_gam_size(FIXTURE_DRIVESETTINGS, "usage")
+        # The old digits-only regex gave 329 - 7 = 322 bytes, so every restore
+        # over 322 bytes tripped the out-of-storage warning.
+        self.assertGreater(limit - usage, 300 * 1024 ** 4)
+
+    def test_b8_5_missing_or_unparseable_field_returns_none(self):
+        self.assertIsNone(offb._parse_gam_size(FIXTURE_DRIVESETTINGS, "nosuch"))
+        self.assertIsNone(offb._parse_gam_size("limit: banana", "limit"))
+
+
+class TestB9DriveBackupReconciliation(unittest.TestCase):
+    """rclone exits 0 even when same-name files overwrite each other on disk."""
+
+    def setUp(self):
+        offb.summary_warnings.clear()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.b = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _filelist(n):
+        return "Owner,id,mimeType\n" + "\n".join(
+            f"u,id{i},application/vnd.google-apps.document" for i in range(n))
+
+    def test_b9_1_short_backup_warns(self):
+        (self.b / "one.docx").write_text("x")
+        with mock.patch.object(offb, "run_gam",
+                               return_value=(True, self._filelist(3))):
+            drive, local = offb.verify_drive_backup_complete("u@d.com", self.b)
+        self.assertEqual((drive, local), (3, 1))
+        self.assertTrue(any("missing" in w for w in offb.summary_warnings))
+
+    def test_b9_2_matching_backup_is_quiet(self):
+        for name in ("a.docx", "b.docx"):
+            (self.b / name).write_text("x")
+        with mock.patch.object(offb, "run_gam",
+                               return_value=(True, self._filelist(2))):
+            drive, local = offb.verify_drive_backup_complete("u@d.com", self.b)
+        self.assertEqual((drive, local), (2, 2))
+        self.assertFalse(offb.summary_warnings)
+
+    def test_b9_3_nested_files_are_counted(self):
+        sub = self.b / "Projects" / "2024"
+        sub.mkdir(parents=True)
+        (sub / "deep.docx").write_text("x")
+        with mock.patch.object(offb, "run_gam",
+                               return_value=(True, self._filelist(1))):
+            self.assertEqual(offb.verify_drive_backup_complete("u@d.com", self.b),
+                             (1, 1))
+
+    def test_b9_5_gam_progress_lines_do_not_inflate_the_count(self):
+        # run_gam merges stderr into stdout; GAM writes two progress lines
+        # there. Counting raw lines invented a 2-file shortfall on every run.
+        out = ("Getting all Drive Files/Folders for u@d.com\n"
+               "Got 2 Drive Files/Folders that matched query for u@d.com...\n"
+               + self._filelist(2))
+        for name in ("a.docx", "b.docx"):
+            (self.b / name).write_text("x")
+        with mock.patch.object(offb, "run_gam", return_value=(True, out)):
+            self.assertEqual(offb.verify_drive_backup_complete("u@d.com", self.b),
+                             (2, 2))
+        self.assertFalse(offb.summary_warnings)
+
+    def test_b9_4_gam_failure_does_not_raise_or_warn(self):
+        with mock.patch.object(offb, "run_gam", return_value=(False, "")):
+            self.assertEqual(offb.verify_drive_backup_complete("u@d.com", self.b),
+                             (0, 0))
+        self.assertFalse(offb.summary_warnings)
+
+
+SD_LIST = ("Getting all Shared Drives for leaver@yourdomain.com\n"
+           "Got 1 Shared Drive for leaver@yourdomain.com...\n"
+           "User,id,name,role\n"
+           "leaver@yourdomain.com,0ABC123,Client Contracts,organizer\n")
+
+# Real `gam print drivefileacls` shape: indexed permissions.N.* columns.
+SD_ACL_SOLE = (
+    "Owner,id,permissions,permissions.0.emailAddress,permissions.0.role\n"
+    "leaver@yourdomain.com,0ABC123,1,leaver@yourdomain.com,organizer\n"
+)
+
+SD_ACL_SHARED = (
+    "Owner,id,permissions,permissions.0.emailAddress,permissions.0.role,"
+    "permissions.1.emailAddress,permissions.1.role\n"
+    "leaver@yourdomain.com,0ABC123,2,leaver@yourdomain.com,organizer,"
+    "successor@yourdomain.com,organizer\n"
+)
+
+
+class TestB11SharedDrives(unittest.TestCase):
+    """Nothing in an offboarding touches Shared Drives; they must be reported."""
+
+    def setUp(self):
+        offb.summary_warnings.clear()
+
+    def test_b11_1_sole_organizer_is_flagged_as_orphaned(self):
+        with mock.patch.object(offb, "run_gam",
+                               side_effect=[(True, SD_LIST), (True, SD_ACL_SOLE)]):
+            orphaned = offb.check_shared_drives("leaver@yourdomain.com", dry_run=False)
+        self.assertEqual(len(orphaned), 1)
+        self.assertIn("Client Contracts", orphaned[0])
+        self.assertTrue(any("no organizer other than" in w
+                            for w in offb.summary_warnings))
+
+    def test_b11_2_another_organizer_means_not_orphaned(self):
+        with mock.patch.object(offb, "run_gam",
+                               side_effect=[(True, SD_LIST), (True, SD_ACL_SHARED)]):
+            orphaned = offb.check_shared_drives("leaver@yourdomain.com", dry_run=False)
+        self.assertEqual(orphaned, [])
+        # Still warns that the content is not backed up or transferred.
+        self.assertTrue(offb.summary_warnings)
+
+    def test_b11_3_no_shared_drives_is_quiet(self):
+        empty = "Got 0 Shared Drives\nUser,id,name,role\n"
+        with mock.patch.object(offb, "run_gam", return_value=(True, empty)):
+            self.assertEqual(
+                offb.check_shared_drives("leaver@yourdomain.com", dry_run=False), [])
+        self.assertFalse(offb.summary_warnings)
+
+    def test_b11_4_gam_failure_never_raises(self):
+        with mock.patch.object(offb, "run_gam", return_value=(False, "")):
+            self.assertEqual(
+                offb.check_shared_drives("leaver@yourdomain.com", dry_run=False), [])
+
+    def test_b11_5_dry_run_makes_no_calls(self):
+        with mock.patch.object(offb, "run_gam") as rg:
+            self.assertEqual(
+                offb.check_shared_drives("leaver@yourdomain.com", dry_run=True), [])
+        rg.assert_not_called()
+
+
+class _Args:
+    """Minimal stand-in for the argparse namespace preflight_destinations reads."""
+    def __init__(self, **kw):
+        self.no_drive = self.no_email = self.no_alias = False
+        self.no_calendar = self.no_forward = False
+        self.drive_to = self.email_to = self.alias_to = None
+        self.calendar_to = self.forward_to = None
+        self.all_transfer_to = None
+        self.force = True
+        self.__dict__.update(kw)
+
+
+class TestB10SelfTransferGuard(unittest.TestCase):
+    """Transferring a leaver's data to the leaver is always an operator error."""
+
+    def test_b10_1_destination_equal_to_source_is_refused(self):
+        args = _Args(all_transfer_to="leaver@yourdomain.com")
+        with mock.patch.object(offb, "validate_destination", return_value=True):
+            with self.assertRaises(SystemExit) as cm:
+                offb.preflight_destinations(args, source="leaver@yourdomain.com")
+        self.assertEqual(cm.exception.code, 2)
+
+    def test_b10_2_case_and_domain_case_still_caught(self):
+        args = _Args(all_transfer_to="Leaver@YourDomain.com")
+        with mock.patch.object(offb, "validate_destination", return_value=True):
+            with self.assertRaises(SystemExit):
+                offb.preflight_destinations(args, source="leaver@yourdomain.com")
+
+    def test_b10_3_one_phase_self_targeted_is_enough(self):
+        args = _Args(all_transfer_to="successor@yourdomain.com",
+                     forward_to="leaver@yourdomain.com")
+        with mock.patch.object(offb, "validate_destination", return_value=True):
+            with self.assertRaises(SystemExit):
+                offb.preflight_destinations(args, source="leaver@yourdomain.com")
+
+    def test_b10_4_a_real_successor_passes(self):
+        args = _Args(all_transfer_to="successor@yourdomain.com")
+        with mock.patch.object(offb, "validate_destination", return_value=True):
+            got = offb.preflight_destinations(args, source="leaver@yourdomain.com")
+        self.assertEqual(got["drive"], "successor@yourdomain.com")
+
+    def test_b10_5_no_source_given_skips_the_check(self):
+        # Keeps the function usable without a source (older call sites).
+        args = _Args(all_transfer_to="leaver@yourdomain.com")
+        with mock.patch.object(offb, "validate_destination", return_value=True):
+            got = offb.preflight_destinations(args)
+        self.assertEqual(got["drive"], "leaver@yourdomain.com")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
