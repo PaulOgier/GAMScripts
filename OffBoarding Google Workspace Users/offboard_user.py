@@ -2118,7 +2118,14 @@ def cleanup_delegates(email: str, dry_run: bool):
         "Check the pre-flight snapshot's delegate section for any references, "
         "or run: gam all users print delegates | grep <email>"
     )
-    summary_warning("Outbound delegate cleanup requires manual verification")
+    # Carry the command in the SUMMARY line too, not just the phase output —
+    # the summary is what gets read at the end of a long run, and "requires
+    # manual verification" alone leaves the operator to work out how.
+    summary_warning(
+        f"Outbound delegate access not cleaned up ({email} may still be a "
+        f"delegate on other mailboxes). Find them with: "
+        f"gam all users print delegates | grep {email}"
+    )
 
 
 ###############################################################################
@@ -3365,7 +3372,11 @@ def verify_drive_backup_complete(email: str, backup_path: Path) -> Tuple[int, in
             f"distinct file IDs; on disk the second overwrites the first, and "
             f"rclone counts that a normal write. Those files are NOT in this "
             f"backup — rename them in Drive and re-run, or export them by hand.\n"
-            f"  2. The user OWNS a file that lives only under another user's "
+            f"  2. Google FORMS and SITES cannot be exported to a file at all, "
+            f"so rclone does not even list them. No setting fixes this. A Form "
+            f"carries its response data — transfer its ownership instead of "
+            f"relying on this backup.\n"
+            f"  3. The user OWNS a file that lives only under another user's "
             f"folder. GAM counts it; rclone walks this user's own tree and never "
             f"reaches it. Nothing is lost, but it is not in this backup either.\n"
             f"Check before deleting the source account.{Colours.RESET}"
@@ -3535,6 +3546,20 @@ def backup_drive_rclone(email: str, dry_run: bool) -> bool:
                 f"{', '.join(abusive_files)}"
             )
             return True
+        elif shutdown_requested:
+            # We terminated rclone ourselves on Ctrl+C. Reporting that as a
+            # tool failure misleads whoever reads the log later — the backup is
+            # incomplete because someone stopped it, not because rclone broke.
+            print_warning(
+                f"Drive backup CANCELLED by operator (Ctrl+C). The partial "
+                f"backup at {backup_path} is incomplete — do not treat it as a "
+                f"copy of this user's Drive. Re-run to finish it."
+            )
+            summary_warning(
+                f"Drive backup cancelled by operator; partial data at "
+                f"{backup_path} is INCOMPLETE"
+            )
+            return False
         else:
             print_error(f"rclone failed (exit {proc.returncode})")
             if abusive_files:
