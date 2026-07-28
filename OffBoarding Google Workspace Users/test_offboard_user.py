@@ -983,5 +983,46 @@ class TestB10SelfTransferGuard(unittest.TestCase):
         self.assertEqual(got["drive"], "leaver@yourdomain.com")
 
 
+class _PlanArgs(_Args):
+    """argparse stand-in for collect_plan: adds the skip flags it reads."""
+    def __init__(self, **kw):
+        super().__init__()
+        self.no_auto_reply = self.no_suspend = False
+        self.strip_labels = True
+        self.__dict__.update(kw)
+
+
+class TestB12Plan2SVDecision(unittest.TestCase):
+    """collect_plan decides turnoff2sv up front so it cannot blow up mid-run.
+
+    turnoff2sv errors with GAM exit 50 when 2SV is ENFORCED by an OU policy or
+    an enforcement group, because moving OUs does not clear a group policy.
+    Under --force the plan must therefore only attempt it when it can succeed.
+    Cannot be tested live: no dev-tenant user has 2SV enrolled, and enrolling
+    needs a real authenticator.
+    """
+
+    @staticmethod
+    def _plan(enrolled, enforced):
+        args = _PlanArgs(no_drive=True, no_email=True, no_alias=True,
+                         no_calendar=True, no_forward=True)
+        dest_map = {k: None for k in
+                    ("drive", "email", "alias", "calendar", "forward")}
+        return offb.collect_plan(args, dest_map, enrolled, enforced)
+
+    def test_b12_1_not_enrolled_means_nothing_to_turn_off(self):
+        self.assertFalse(self._plan(False, False)["turnoff2sv"]["do"])
+
+    def test_b12_2_enrolled_not_enforced_is_attempted(self):
+        self.assertTrue(self._plan(True, False)["turnoff2sv"]["do"])
+
+    def test_b12_3_enforced_is_skipped_under_force(self):
+        # The whole point: attempting it here is the guaranteed exit-50 error.
+        self.assertFalse(self._plan(True, True)["turnoff2sv"]["do"])
+
+    def test_b12_4_enforced_but_not_enrolled_still_skipped(self):
+        self.assertFalse(self._plan(False, True)["turnoff2sv"]["do"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
