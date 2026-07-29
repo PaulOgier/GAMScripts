@@ -574,6 +574,63 @@ so nothing is duplicated.
   restore can begin happily and then fail part way through.
 - **Expect it to take a while.** A 170,000-message, 190 GB mailbox took about
   35 hours with antivirus running on the machine.
+- **Awkward filenames survive on Windows — with one exception.** Drive allows
+  names NTFS does not. Tested on Windows 11, a full Drive → disk → Drive round
+  trip returned every one of these unchanged: `Notes: Draft v2? | final`,
+  `Q3/Q4 Budget Review`, `Café ☕ 中文 Bespreking`, `Trailing space `, a
+  200-character name, `.hidden budget`, and a name with an embedded newline.
+  rclone stores the illegal characters as full-width lookalikes (`:` becomes
+  `：`, `?` becomes `？`, `|` becomes `｜`, `/` becomes `／`) and converts them
+  back on upload, so the names on disk look odd and the names in Drive are
+  correct.
+- **The exception is Windows reserved device names — `CON`, `PRN`, `AUX`,
+  `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`.** rclone writes `CON.docx` to disk
+  successfully and the file is complete: it is listed by `Get-ChildItem`, it
+  reports the right size, and .NET reads all of its bytes. But PowerShell's file
+  cmdlets cannot address it — `Copy-Item` on that path fails with
+  "Cannot find path ... because it does not exist", because Windows resolves
+  `CON` as the console device. Nothing is missing from the backup and the file
+  count is correct; the trap is at RESTORE time, where a copy done with
+  `Copy-Item`, Explorer or a similar tool will skip it. If a leaver has a file
+  named after a device, rename it in Drive before backing up, or copy it back
+  with a tool that uses extended (`\\?\`) paths.
+
+---
+
+## 6. What the Drive backup does NOT capture
+
+`--backup-drive` is a convenience copy, not an archive. Four things it misses,
+all measured rather than assumed:
+
+- **Two files with the same name in one folder.** Drive allows it, a filesystem
+  does not, so when both export to the same extension the second overwrites the
+  first. rclone counts that as an ordinary write and still exits 0.
+  `Untitled document` is the most common filename in Drive, so this is routine.
+- **Google Forms and Sites.** They have no exportable format, so rclone does not
+  even list them. No setting changes this. A Form carries its response data, so
+  a leaver's survey and order-form results are simply absent.
+- **Files the user owns inside someone else's folder.** rclone walks the user's
+  own Drive tree; a file parented only in a colleague's folder is not in it.
+  These are often the collaborative documents that matter most.
+- **Anything in the bin.** rclone does not fetch trashed files, and deleting the
+  account destroys them immediately rather than after the usual 30 days.
+
+Since v5.2.0 the script counts what Drive holds against what reached the disk
+and tells you when they disagree, naming the files rclone reported dropping.
+Do not read a clean rclone exit as a complete backup — read the count.
+
+**When a complete copy is the requirement, transfer ownership instead.**
+`gam transfer drive` never touches a filesystem, so it preserves duplicates,
+Forms, Sites and files parented elsewhere. Measured on the same 115-file test
+set: transfer moved all 115, the local backup captured 113.
+
+**Neither approach touches Shared Drives.** Their content belongs to the drive,
+not to any member. The script lists the Shared Drives a leaver organises and
+flags any where they are the only organiser, which is the case worth acting on:
+once that account is deleted, no member can add members, change settings or
+delete the drive, and recovery means a super admin taking it over from the
+Admin console. Add another organiser before deleting anyone.
+
 
 ---
 

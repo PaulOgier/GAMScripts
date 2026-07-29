@@ -18,6 +18,16 @@ without taking effect, deprovision on mailbox-less users) — if one fails
 after your change, the script has regressed on a real, observed failure
 mode, not a theoretical one.
 
+**Run it on Windows too, not just macOS.** The suite passed on macOS while
+failing on Windows 11 with two failures and five errors, and those exposed
+three genuine defects rather than test artefacts — output decoded with the
+console code page, so a single non-ASCII character in a Drive filename aborted
+the whole Drive backup; a filename that could not be encoded to the console
+raised inside the logging handler and lost the line; and GYB's SQLite handle
+was never closed, which on Windows locks the backup directory against being
+moved or deleted. Platform-specific defects do not announce themselves on the
+other platform.
+
 ## Conventions used in this guide
 
 All command examples are written to run identically on macOS, Linux, and
@@ -123,6 +133,15 @@ gam delete org '/Test Users'
 ```
 
 Go to your Google Admin console and check the 2SV setting for the `/Offboarding` organisational unit. Navigate to **Security > 2-Step Verification** ([https://admin.google.com/ac/security/2sv](https://admin.google.com/ac/security/2sv)), select the `/Offboarding` OU from the left menu, and confirm that "Enforcement" is set to "Off" or "Allow user to turn it on". Don't use "Enforce".
+
+This matters because 2SV enforcement follows the OU, and the kill switch moves
+the user into `/Offboarding` before it touches 2SV. If that OU enforces 2SV,
+GAM refuses with exit 50 — *"user is required by admin policy to have 2-Step
+Verification"* — and 2SV stays on. Since v5.2.0 that is reported plainly rather
+than as a failed deprovision (the rest of the bundle still completes: tokens,
+app passwords, backup codes, sign-out and POP/IMAP), and the message tells you
+to remove the OU policy rather than to retry. Leaving 2SV on is not dangerous
+in itself, since the account is suspended at the end of the run either way.
 
 ### Step 2: Create 5 Test Users
 
@@ -300,6 +319,48 @@ gam user testoffboard5@yourdomain.com add drivefile localfile '%TEMP%\offboard_c
 gam user testoffboard5@yourdomain.com add drivefile localfile '%TEMP%\offboard_project.txt'
 ```
 
+#### Fixtures for the v5.2.0 completeness checks
+
+These exist to make the script's newer checks FIRE. Without them a test run
+looks clean simply because there was nothing to catch. Each was the reproduction
+for a real defect.
+
+```bash
+# 1. Same-name collision. Drive allows two files with one name in a folder; a
+#    filesystem cannot, so the second overwrites the first on the way to disk.
+#    Two Docs sharing a name is the case; a Doc and a Sheet is not, because
+#    they export to different extensions.
+gam user testoffboard1@yourdomain.com add drivefile drivefilename 'Duplicate Name Collision' mimetype gdoc
+gam user testoffboard1@yourdomain.com add drivefile drivefilename 'Duplicate Name Collision' mimetype gdoc
+
+# 2. Formats rclone cannot export at all. Neither is listed in a backup, and a
+#    Form carries its response data.
+gam user testoffboard1@yourdomain.com add drivefile drivefilename 'Feedback Form' mimetype gform
+gam user testoffboard1@yourdomain.com add drivefile drivefilename 'Team Site' mimetype gsite
+
+# 3. A Shared Drive the leaver ALONE organises. Deleting that account leaves the
+#    drive unmanageable by any member.
+gam create shareddrive 'Leaver Sole Manager SD' adminmanagedrestrictions true
+# then, using the drive id it prints:
+#   gam add drivefileacl <driveId> user testoffboard1@yourdomain.com role organizer
+#   gam user testoffboard1@yourdomain.com add drivefile drivefilename 'SD content' mimetype gdoc parentid <driveId>
+
+# 4. An alias on the leaver, for the self-transfer guard. Passing this as a
+#    destination is a different address that resolves to the same mailbox.
+gam create alias alice.old@yourdomain.com user testoffboard1@yourdomain.com
+
+# 5. Something in the bin. rclone never fetches trashed files, and deleting the
+#    account destroys them immediately instead of after the usual 30 days.
+#    Create a throwaway file, then trash it in the Drive UI.
+```
+
+**Filenames worth seeding if you are testing on Windows**, where they are
+illegal or reserved rather than merely awkward: `Notes: Draft v2? | final`,
+`Trailing space `, `CON`, and one with an embedded newline. macOS survives all
+of them; on Windows, `CON` writes and reads but cannot be addressed by
+PowerShell's file cmdlets, so a restore done with `Copy-Item` or Explorer skips
+it.
+
 ### Step 5: Run the Test Matrix
 
 Run each user through the offboarding script. Start with dry runs.
@@ -394,6 +455,34 @@ ls -la ./offboarding_backups/snapshots/
 
 # Check rclone Drive backup (if --backup-drive was used)
 ls -la ./offboarding_backups/drive/
+```
+
+#### What the completeness checks should have said
+
+A run over the fixtures above is only correct if these appear. Silence here
+means the check did not fire, which is the failure mode they exist to prevent —
+a clean exit code proves nothing about completeness.
+
+- **Drive backup SHORT.** With the duplicate pair, the Form and the Site in
+  place, `--backup-drive` must report fewer files on disk than Drive holds, and
+  name the files rclone dropped as collisions. rclone exits 0 either way.
+- **Shared Drive with no other organiser.** A red error naming
+  `Leaver Sole Manager SD`, with the command to add a replacement organiser.
+  Add a second organiser and re-run: it should drop to a plain warning.
+- **Self-transfer refused.** `--all-transfer-to alice.old@yourdomain.com` (the
+  alias) must abort with exit 2 before anything destructive happens, not plan a
+  transfer to the leaver.
+- **Trashed files reported separately.** Counted apart from the shortfall,
+  because deleting the account destroys the bin immediately.
+
+Verify the counts yourself rather than trusting the summary line:
+
+```bash
+# What Drive actually holds, excluding folders and the bin
+gam user testoffboard1@yourdomain.com print filelist fields id \
+  query "mimeType != 'application/vnd.google-apps.folder' and trashed = false"
+# ...against what reached the disk
+find ./offboarding_backups/drive/ -type f | wc -l
 du -sh ./offboarding_backups/drive/*/
 
 # Check GYB mailbox backups (migration or --backup-email)

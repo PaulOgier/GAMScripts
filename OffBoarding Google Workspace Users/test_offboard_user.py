@@ -17,6 +17,8 @@ suspension updates, popimap on mailbox-less users) — do not weaken them
 without re-testing live.
 """
 
+import builtins
+import contextlib
 import importlib.util
 import logging
 import subprocess
@@ -588,6 +590,31 @@ class TestB2RateLimitDetection(unittest.TestCase):
 class TestB3QuarantineFromCrash(unittest.TestCase):
     """Quarantining the .eml named in a GYB crash, and only if still locked."""
 
+    @staticmethod
+    @contextlib.contextmanager
+    def _unreadable(path):
+        """Make ONE file raise PermissionError on open, on any OS.
+
+        chmod(0o000) does not remove read access on Windows — os.chmod there
+        only toggles the read-only bit — so the AV-lock simulation silently did
+        nothing, the poison file read fine, and both tests failed on Windows 11
+        (2026-07-29) while passing on macOS. Patch the read itself, which is
+        what an AV lock actually does to us.
+        """
+        real_open = builtins.open
+
+        def fake_open(file, *args, **kwargs):
+            try:
+                same = Path(file) == Path(path)
+            except TypeError:
+                same = False
+            if same:
+                raise PermissionError(13, "Permission denied")
+            return real_open(file, *args, **kwargs)
+
+        with mock.patch("builtins.open", fake_open):
+            yield
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.backup = Path(self.tmp.name) / "user@x.com_20260101"
@@ -614,8 +641,9 @@ class TestB3QuarantineFromCrash(unittest.TestCase):
                 f"PermissionError: [Errno 1] Operation not permitted: '{path}'")
 
     def test_b3_1_locked_file_named_in_crash_is_moved_aside(self):
-        self.locked.chmod(0o000)
-        moved = offb.quarantine_gyb_locked_file(self.backup, self._crash(self.locked))
+        with self._unreadable(self.locked):
+            moved = offb.quarantine_gyb_locked_file(
+                self.backup, self._crash(self.locked))
         self.assertEqual(moved, ["deadbeef"])
         self.assertFalse(self.locked.exists(), "poison file should have been moved")
         quarantined = (self.backup.parent / f"{self.backup.name}_quarantined"
@@ -630,11 +658,11 @@ class TestB3QuarantineFromCrash(unittest.TestCase):
         self.assertTrue(self.readable.exists())
 
     def test_b3_3_patched_gyb_warning_wording_also_parsed(self):
-        self.locked.chmod(0o000)
         out = (f"WARNING! could not read {self.locked} for message 60818: "
                f"[Errno 13] Permission denied")
-        self.assertEqual(offb.quarantine_gyb_locked_file(self.backup, out),
-                         ["deadbeef"])
+        with self._unreadable(self.locked):
+            self.assertEqual(offb.quarantine_gyb_locked_file(self.backup, out),
+                             ["deadbeef"])
 
     def test_b3_4_path_outside_the_backup_is_ignored(self):
         outside = Path(self.tmp.name) / "elsewhere.eml"
@@ -664,7 +692,7 @@ class TestB4UndatedMessages(unittest.TestCase):
 
     def _db(self, dates):
         import sqlite3
-        with sqlite3.connect(self.backup / "msg-db.sqlite") as db:
+        with offb._gyb_db(self.backup / "msg-db.sqlite") as db:
             db.execute("CREATE TABLE messages(message_num INTEGER PRIMARY KEY, "
                        "message_filename TEXT, message_internaldate TIMESTAMP)")
             db.executemany("INSERT INTO messages VALUES (?,?,?)",
@@ -718,7 +746,7 @@ class TestB6BackupCompleteness(unittest.TestCase):
 
     def _make(self, rows, files):
         import sqlite3
-        with sqlite3.connect(self.b / "msg-db.sqlite") as db:
+        with offb._gyb_db(self.b / "msg-db.sqlite") as db:
             db.execute("CREATE TABLE messages(message_num INTEGER PRIMARY KEY, "
                        "message_filename TEXT, message_internaldate TIMESTAMP)")
             db.executemany("INSERT INTO messages VALUES (?,?,?)",
@@ -811,6 +839,40 @@ class TestB8StorageSizeParsing(unittest.TestCase):
         self.assertIsNone(offb._parse_gam_size("limit: banana", "limit"))
 
 
+class TestB14ConsoleEncoding(unittest.TestCase):
+    """Non-ASCII filenames must not kill, or vanish from, the console output.
+
+    On Windows the console defaults to cp1252, so logging a name containing
+    rclone's encoded newline (U+240A), CJK or an emoji raised UnicodeEncodeError
+    inside the logging handler — which logging swallows, losing the very line
+    that names a missing file. Windows 11 ARM64, 2026-07-29.
+    """
+
+    def test_b14_1_console_is_reconfigured_to_utf8(self):
+        calls = []
+
+        class FakeStream:
+            def reconfigure(self, **kw):
+                calls.append(kw)
+
+        with mock.patch.object(offb.sys, "stdout", FakeStream()), \
+             mock.patch.object(offb.sys, "stderr", FakeStream()):
+            offb._force_utf8_console()
+        self.assertEqual(len(calls), 2)
+        for kw in calls:
+            self.assertEqual(kw["encoding"], "utf-8")
+            self.assertEqual(kw["errors"], "replace")
+
+    def test_b14_2_a_stream_that_cannot_reconfigure_is_survivable(self):
+        class Stubborn:
+            def reconfigure(self, **kw):
+                raise ValueError("underlying buffer detached")
+
+        with mock.patch.object(offb.sys, "stdout", Stubborn()), \
+             mock.patch.object(offb.sys, "stderr", Stubborn()):
+            offb._force_utf8_console()   # must not raise
+
+
 class TestB9DriveBackupReconciliation(unittest.TestCase):
     """rclone exits 0 even when same-name files overwrite each other on disk."""
 
@@ -865,6 +927,44 @@ class TestB9DriveBackupReconciliation(unittest.TestCase):
             self.assertEqual(offb.verify_drive_backup_complete("u@d.com", self.b),
                              (2, 2))
         self.assertFalse(offb.summary_warnings)
+
+    def test_b9_6_paged_output_uses_the_last_running_total(self):
+        # Captured live on dev 2026-07-29: GAM prints one "Got N" per page,
+        # CARRIAGE-RETURN separated, N being the running total. Reading the
+        # first gave 100 for a 256-file user, so a 106-file shortfall passed
+        # as "matches Drive". The last one is the answer.
+        out = (self._filelist(256) + "\n"
+               "Getting all Drive Files/Folders for u@d.com\n"
+               "Got 100 Drive Files/Folders for u@d.com...\r"
+               "Got 200 Drive Files/Folders for u@d.com...\r"
+               "Got 256 Drive Files/Folders for u@d.com...")
+        for i in range(150):
+            (self.b / f"f{i}.docx").write_text("x")
+        with mock.patch.object(offb, "run_gam", return_value=(True, out)):
+            drive, local = offb.verify_drive_backup_complete("u@d.com", self.b)
+        self.assertEqual((drive, local), (256, 150))
+        self.assertTrue(any("missing" in w for w in offb.summary_warnings))
+
+    def test_b9_7_row_fallback_ignores_stray_progress_lines(self):
+        # Fallback path (no "Got" line at all): stderr is appended AFTER the
+        # CSV, so anything GAM writes there must not count as a file row.
+        out = self._filelist(2) + "\nGetting all Drive Files/Folders for u@d.com"
+        with mock.patch.object(offb, "run_gam", return_value=(True, out)):
+            self.assertEqual(
+                offb.verify_drive_backup_complete("u@d.com", self.b)[0], 2)
+
+    def test_b9_8_rclone_named_duplicates_are_listed_not_guessed(self):
+        # rclone prints "NOTICE: <path>: Duplicate object found in source -
+        # ignoring" and still exits 0. Captured live on Windows 11 2026-07-29;
+        # it is the exact list the count can otherwise only guess at.
+        (self.b / "one.docx").write_text("x")
+        with mock.patch.object(offb, "run_gam",
+                               return_value=(True, self._filelist(3))):
+            offb.verify_drive_backup_complete(
+                "u@d.com", self.b, ["folder/Notes.docx", "folder/Line one.docx"])
+        joined = " ".join(offb.summary_warnings)
+        self.assertIn("folder/Notes.docx", joined)
+        self.assertIn("folder/Line one.docx", joined)
 
     def test_b9_4_gam_failure_does_not_raise_or_warn(self):
         with mock.patch.object(offb, "run_gam", return_value=(False, "")):
@@ -927,6 +1027,36 @@ class TestB11SharedDrives(unittest.TestCase):
             self.assertEqual(
                 offb.check_shared_drives("leaver@yourdomain.com", dry_run=False), [])
 
+    def test_b11_6_unreadable_acl_is_unknown_not_orphaned(self):
+        # Proved on dev 2026-07-29: a drive WITH a second organizer was
+        # reported as having none when the ACL read failed. A failed read is
+        # not evidence of absence, and the red warning states it as fact.
+        with mock.patch.object(offb, "run_gam",
+                               side_effect=[(True, SD_LIST), (False, "")]):
+            orphaned = offb.check_shared_drives("leaver@yourdomain.com", dry_run=False)
+        self.assertEqual(orphaned, [])
+        self.assertTrue(any("unknown" in w.lower() for w in offb.summary_warnings))
+        self.assertFalse(any("no organizer other than" in w
+                             for w in offb.summary_warnings))
+
+    def test_b11_7_unparseable_drive_list_is_not_silence(self):
+        with mock.patch.object(offb, "run_gam", return_value=(True, "garbage")):
+            self.assertEqual(
+                offb.check_shared_drives("leaver@yourdomain.com", dry_run=False), [])
+        self.assertTrue(any("inconclusive" in w for w in offb.summary_warnings))
+
+    def test_b11_8_remedy_command_runs_as_the_leaver(self):
+        # A non-member cannot grant themselves organizer: GAM answers
+        # "Add Failed: Does not exist" (dev, 2026-07-29). The printed command
+        # must name the leaver, who is the only organizer left.
+        printed = []
+        with mock.patch.object(offb, "run_gam",
+                               side_effect=[(True, SD_LIST), (True, SD_ACL_SOLE)]):
+            with mock.patch.object(offb, "print_error", printed.append):
+                offb.check_shared_drives("leaver@yourdomain.com", dry_run=False)
+        self.assertTrue(any("gam user leaver@yourdomain.com add drivefileacl" in p
+                            for p in printed))
+
     def test_b11_5_dry_run_makes_no_calls(self):
         with mock.patch.object(offb, "run_gam") as rg:
             self.assertEqual(
@@ -948,6 +1078,30 @@ class _Args:
 
 class TestB10SelfTransferGuard(unittest.TestCase):
     """Transferring a leaver's data to the leaver is always an operator error."""
+
+    def setUp(self):
+        # The guard resolves the source's aliases; stub the lookup by default.
+        p = mock.patch.object(offb, "_list_aliases", return_value=[])
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_b10_6_an_alias_of_the_leaver_is_caught(self):
+        # A different address, the same mailbox. The literal comparison alone
+        # let this through: Drive to self, mail to self, forward to self.
+        args = _Args(all_transfer_to="l.old@yourdomain.com")
+        with mock.patch.object(offb, "_list_aliases",
+                               return_value=["l.old@yourdomain.com"]):
+            with mock.patch.object(offb, "validate_destination", return_value=True):
+                with self.assertRaises(SystemExit) as cm:
+                    offb.preflight_destinations(args, source="leaver@yourdomain.com")
+        self.assertEqual(cm.exception.code, 2)
+
+    def test_b10_7_alias_lookup_is_skipped_when_nothing_is_targeted(self):
+        args = _Args(no_drive=True, no_email=True, no_alias=True,
+                     no_calendar=True, no_forward=True)
+        with mock.patch.object(offb, "_list_aliases") as la:
+            offb.preflight_destinations(args, source="leaver@yourdomain.com")
+        la.assert_not_called()
 
     def test_b10_1_destination_equal_to_source_is_refused(self):
         args = _Args(all_transfer_to="leaver@yourdomain.com")
@@ -998,8 +1152,10 @@ class TestB12Plan2SVDecision(unittest.TestCase):
     turnoff2sv errors with GAM exit 50 when 2SV is ENFORCED by an OU policy or
     an enforcement group, because moving OUs does not clear a group policy.
     Under --force the plan must therefore only attempt it when it can succeed.
-    Cannot be tested live: no dev-tenant user has 2SV enrolled, and enrolling
-    needs a real authenticator.
+    Proved live on dev 2026-07-29 (testoffboard4, enrolled, /Offboarding OU
+    enforcing): exit 50, "user is required by admin policy to have 2-Step
+    Verification". The plan's reading is necessary but NOT sufficient — see
+    TestB13, the OU move changes the answer underneath it.
     """
 
     @staticmethod
@@ -1016,12 +1172,92 @@ class TestB12Plan2SVDecision(unittest.TestCase):
     def test_b12_2_enrolled_not_enforced_is_attempted(self):
         self.assertTrue(self._plan(True, False)["turnoff2sv"]["do"])
 
-    def test_b12_3_enforced_is_skipped_under_force(self):
-        # The whole point: attempting it here is the guaranteed exit-50 error.
-        self.assertFalse(self._plan(True, True)["turnoff2sv"]["do"])
+    def test_b12_3_enforced_is_still_attempted_under_force(self):
+        # Was "skip if enforced". Wrong in both directions: enforcement follows
+        # the OU and the kill switch moves the user first, so the plan-time
+        # reading describes the OU being left. Attempt, and handle the refusal.
+        self.assertTrue(self._plan(True, True)["turnoff2sv"]["do"])
 
     def test_b12_4_enforced_but_not_enrolled_still_skipped(self):
         self.assertFalse(self._plan(False, True)["turnoff2sv"]["do"])
+
+
+ENFORCED_ERR = ('User: leaver@yourdomain.com, Turn Off 2-Step Verification '
+                'Failed: 2-Step Verification cannot be turned off: user is '
+                'required by admin policy to have 2-Step Verification '
+                '("enforced")')
+
+
+class TestB132SVEnforcedRefusal(unittest.TestCase):
+    """An enforced refusal is a fact to report, not an outcome to predict.
+
+    Proved on dev 2026-07-29 (testoffboard4, enrolled, /Offboarding enforcing):
+    `deprovision popimap signout turnoff2sv` exits 50, but every other action in
+    the bundle completed first — ASPs, backup codes, tokens, sign-out, POP/IMAP.
+    Reporting that as a failed deprovision tells the operator containment did
+    not happen, which is the opposite of the truth.
+    """
+
+    def setUp(self):
+        offb.summary_warnings.clear()
+        offb.summary_errors.clear()
+        offb.summary_actions.clear()
+
+    def _kill(self, gam_side_effect, enrolled_readback=False):
+        with mock.patch.object(offb, "_read_2sv_enrolled",
+                               return_value=enrolled_readback):
+            with mock.patch.object(offb, "run_gam", side_effect=gam_side_effect):
+                offb.execute_kill_switch(
+                    "leaver@yourdomain.com", dry_run=False, is_suspended=False,
+                    is_2sv_enrolled=True, has_mailbox=True, turn_off_2sv=True)
+
+    def test_b13_1_bundle_reports_containment_done_not_failed(self):
+        def fake(args, **kw):
+            return (True, ENFORCED_ERR) if "deprovision" in args else (True, "")
+        self._kill(fake)
+        self.assertTrue(any("Deprovisioned" in a for a in offb.summary_actions))
+        self.assertFalse(any("deprovision" in e.lower()
+                             for e in offb.summary_errors))
+
+    def test_b13_2_explicit_turnoff2sv_refusal_is_a_warning_not_an_error(self):
+        # "Retry manually" was the old advice. Policy is refusing, so the retry
+        # fails identically; the message must name what would actually change.
+        def fake(args, **kw):
+            return (False, ENFORCED_ERR) if "turnoff2sv" in args else (True, "")
+        self._kill(fake, enrolled_readback=True)
+        self.assertTrue(any("enforced by policy" in w
+                            for w in offb.summary_warnings))
+        self.assertFalse(any("turnoff2sv failed" in e
+                             for e in offb.summary_errors))
+
+    def test_b13_3_an_unrelated_failure_is_still_a_real_error(self):
+        def fake(args, **kw):
+            return ((False, "Turn Off 2-Step Verification Failed: backendError")
+                    if "turnoff2sv" in args and "deprovision" not in args
+                    else (True, ""))
+        self._kill(fake, enrolled_readback=True)
+        self.assertTrue(any("turnoff2sv failed" in e
+                            for e in offb.summary_errors))
+
+    def test_b13_4_not_enrolled_after_deprovision_is_success_not_a_skip(self):
+        # The directory read lags: deprovision turned 2SV off at 12:26:12 and
+        # `gam info user quick` still said enrolled at 12:26:22 (dev, live).
+        # The run then reported "turnoff2sv skipped" for a 2SV it had removed.
+        not_enrolled = ("\nUser: leaver@yourdomain.com, Turn Off 2-Step "
+                        "Verification Failed: 2-Step Verification cannot be "
+                        "turned off: user not enrolled in 2-Step Verification")
+
+        def fake(args, **kw):
+            return (False, not_enrolled) if "turnoff2sv" in args else (True, "")
+        self._kill(fake, enrolled_readback=True)
+        self.assertTrue(any("Turned off 2SV" in a for a in offb.summary_actions))
+        self.assertFalse(any("skipped" in w for w in offb.summary_warnings))
+
+    def test_b13_5_a_reason_is_never_quoted_as_an_empty_string(self):
+        # stdout is empty and stderr is appended after it, so line [0] is blank
+        # and the message printed "turnoff2sv skipped: " with nothing after it.
+        self.assertEqual(offb._first_line("\nreal reason\nmore"), "real reason")
+        self.assertEqual(offb._first_line(""), "no reason given")
 
 
 if __name__ == "__main__":
