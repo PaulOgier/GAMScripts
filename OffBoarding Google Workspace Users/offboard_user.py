@@ -42,7 +42,7 @@ YOU ASSUME ALL RISK ASSOCIATED WITH THE USE OF THIS SOFTWARE.
 Author:       Paul Ogier
 Created:      2023-06-22
 Updated:      2026-07-13
-Version:      5.2.0
+Version:      5.3.0
 Status:       Production
 Python:       3.8+
 Dependencies: GAM ADV X (GAM7), GYB (optional), rclone (optional), PyYAML (optional)
@@ -151,6 +151,27 @@ Changelog
   2026-05-07 - v4.4.0 - Added startup version check against remote VERSION file (CHECK_FOR_UPDATES toggle, fail-silent); restored author/contact header with Outsource House copyright and three Udemy course links; aligned in-script licence reference with the repo LICENSE (Apache 2.0) and added a plain-English summary emphasising attribution retention.
   2026-05-13 - v4.5.0 - BREAKING: renamed --transfer-to to --all-transfer-to. Added per-phase destination flags (--drive-to, --email-to, --alias-to, --calendar-to, --forward-to) that override the global default; precedence is phase-specific > --all-transfer-to > interactive prompt. Added upfront destination resolution and validation before any phase runs: under --force, any non-skipped phase without a resolvable destination aborts the run with a clear error instead of half-offboarding.
   2026-05-14 - v4.6.0 - Added end-of-run MANUAL ACTION block surfacing admin-console instructions for durable mail capture (alias / recipient address map / group) since GAM cannot configure recipient address map and Gmail-level forwarding stops on suspension/deletion; new --forward-alias-to flag explicitly nominates the successor printed in the block (falls back to --forward-to then --all-transfer-to), no automated change is made. Guide gains a "Mail capture after suspension" section and the order-of-operations list flags forwarding's suspension limitation.
+  2026-07-29 - v5.3.0 - Three state-safety defects reported by Gavin-X (issues #2, #3, #5),
+                        all in the same shape: the run ended in a state nobody could see.
+                        SUSPENSION STATE: destinations are now validated BEFORE the temporary
+                        unsuspend, so a preflight abort can no longer leave an account that
+                        started suspended sitting active; the unsuspend itself is verified by
+                        read-back (GAM has reported suspension updates that had not taken
+                        effect) and an atexit guard re-suspends on every remaining exit path,
+                        including an unhandled exception. --unsuspend with --no-suspend is now
+                        refused at parse time: they ask for opposite end states.
+                        FAILED TRANSFERS: a failed backup or transfer holds licence removal
+                        back, because removing the licence kills the Gmail and Drive access the
+                        retry needs. Suspension still runs — containment is not the thing worth
+                        deferring. No override flag: a skip flag mixable into any combination
+                        is a worse trap than the one it removes, and one gam command removes a
+                        licence by hand once the data is confirmed safe.
+                        CONTAINMENT: execute_kill_switch() returns what it actually achieved
+                        instead of returning nothing. A failed password scramble or an
+                        unconfirmed sign-out is now a summary ERROR, and it overrides
+                        --no-suspend: an account that could not be locked is not left active.
+                        Also removed run_shell_pipe(), dead since the alias rewrite and
+                        carrying shell=True, and the unread originally_suspended.
   2026-07-28 - v5.2.0 - Restore hardening, from a full test round against a live dev tenant
                         using a 190GB real-world mailbox corpus. DESTINATION PRE-FLIGHT: a
                         restore into a SUSPENDED mailbox fails with a generic backendError that
@@ -310,6 +331,7 @@ Planned Features (not yet implemented)
 """
 
 import argparse
+import atexit
 import contextlib
 import csv
 import io
@@ -335,7 +357,7 @@ import shutil
 
 # [IMPORTANT] Current local script version. Bumped on each release.
 # Compared against the remote VERSION file to detect updates.
-SCRIPT_VERSION = "5.2.0"
+SCRIPT_VERSION = "5.3.0"
 
 # [OPTIONAL] Check for a newer script version on startup.
 # When True (default), the script makes a single 3-second HTTP request to
@@ -616,6 +638,23 @@ def summary_warning(msg: str):
     summary_warnings.append(msg)
 
 
+@contextlib.contextmanager
+def record_failure(phase: str, failures: List[str]):
+    """Append `phase` to `failures` if it records any summary error.
+
+    The data-moving phases report their own failures through summary_error()
+    rather than a return value (some fail several files deep and keep going),
+    so the growth of that list is the honest signal for "this phase lost
+    something". Used to hold licence removal back after a failed transfer.
+    """
+    before = len(summary_errors)
+    try:
+        yield
+    finally:
+        if len(summary_errors) > before and phase not in failures:
+            failures.append(phase)
+
+
 ###############################################################################
 # DISPLAY HELPERS [OPTIONAL]
 ###############################################################################
@@ -844,56 +883,6 @@ def run_gam(args: List[str], dry_run: bool = True,
     except Exception as e:
         print_error(f"Unexpected error: {e}")
         summary_error(f"Exception: {e}")
-        return False, str(e)
-
-
-def run_shell_pipe(cmd_str: str, dry_run: bool = True,
-                   timeout: int = 300) -> Tuple[bool, str]:
-    """
-    Execute a shell pipe command (e.g. gam print ... | gam csv ...).
-
-    This is needed for GAM's CSV piping pattern. Uses platform-aware
-    shell detection to avoid issues on Windows vs Unix.
-
-    EDGE CASE: On Windows, subprocess with shell=True uses cmd.exe by
-    default, which handles pipes correctly. On Unix, it uses /bin/sh.
-    """
-    if shutdown_requested:
-        return False, "Shutdown requested"
-
-    if dry_run:
-        print_info(f"DRY RUN: {cmd_str}")
-        return True, ""
-
-    logger.info(f"Executing (shell pipe): {cmd_str}")
-
-    try:
-        result = subprocess.run(
-            cmd_str,
-            shell=True,
-            capture_output=True,
-            text=True,
-            encoding="utf-8", errors="replace",
-            timeout=timeout
-        )
-
-        output = (result.stdout + "\n" + result.stderr).strip()
-
-        if result.returncode == 0:
-            return True, output
-        else:
-            if "0 entities" in output.lower():
-                return True, output
-            print_error(f"Pipe command failed (exit {result.returncode})")
-            if output:
-                print_error(output)
-            return False, output
-
-    except subprocess.TimeoutExpired:
-        print_error(f"Pipe command timed out after {timeout}s")
-        return False, "Timeout"
-    except Exception as e:
-        print_error(f"Pipe command exception: {e}")
         return False, str(e)
 
 
@@ -1458,6 +1447,77 @@ def decide_unsuspend(force: bool, unsuspend_flag: bool, prompt_fn) -> bool:
     return unsuspend_flag or prompt_fn()
 
 
+def read_suspended(email: str) -> Optional[bool]:
+    """Read the account's actual suspension state; None if the read fails.
+
+    Matches the `Account Suspended:` FIELD, never a substring: a user surnamed
+    "Suspended" exists on the dev tenant and defeats a naive `in` test.
+    """
+    ok, output = run_gam(
+        ["info", "user", email, "quick"],
+        dry_run=False,
+        capture_output=True,
+        timeout=30,
+        suppress_summary_error=True
+    )
+    if not ok:
+        return None
+    for line in output.splitlines():
+        key, sep, value = line.partition(":")
+        if sep and key.strip().lower() == "account suspended":
+            return value.strip().lower() == "true"
+    return None
+
+
+def wait_for_suspended(email: str, expected: bool, timeout: int = 60,
+                       poll_interval: int = 5) -> bool:
+    """Poll until the directory agrees the account is/is not suspended.
+
+    GAM has been observed reporting a successful suspension update that had not
+    taken effect, so a state change we depend on is read back rather than
+    trusted. Returns False if the state never matches within `timeout`.
+    """
+    deadline = time.time() + timeout
+    while True:
+        if read_suspended(email) is expected:
+            return True
+        if time.time() >= deadline:
+            return False
+        time.sleep(poll_interval)
+
+
+def restore_original_suspension(email: str, attempts: int = 3) -> bool:
+    """Re-suspend an account this run temporarily unsuspended.
+
+    Registered with atexit once the temporary unsuspend is verified, so the
+    account is restored on EVERY exit path — a preflight abort, an unhandled
+    exception, or a normal finish (where it is a verified no-op because the
+    suspension phase already ran).
+    """
+    if read_suspended(email) is True:
+        return True
+
+    print_warning(f"Restoring original suspended state for {email} before exit...")
+    for attempt in range(1, attempts + 1):
+        run_gam(
+            ["update", "user", email, "suspended", "on"],
+            dry_run=False,
+            capture_output=True,
+            suppress_summary_error=True
+        )
+        if wait_for_suspended(email, True, timeout=30):
+            print_success("Original suspended state restored and verified.")
+            return True
+        print_warning(f"Re-suspension attempt {attempt}/{attempts} was not verified.")
+
+    print_error(
+        f"EMERGENCY: {email} started suspended, was temporarily unsuspended by "
+        f"this run, and could NOT be re-suspended. Suspend it manually now."
+    )
+    summary_error(f"Original suspension state NOT restored for {email}")
+    return False
+
+
 def prompt_email(question: str, force_value: Optional[str] = None) -> str:
     """Ask for an email address with basic validation."""
     if force_value:
@@ -1841,9 +1901,15 @@ _2SV_ENFORCED_ERROR = "required by admin policy"
 def execute_kill_switch(email: str, dry_run: bool, is_suspended: bool,
                         is_2sv_enrolled: bool = True,
                         has_mailbox: bool = True,
-                        turn_off_2sv: bool = True):
+                        turn_off_2sv: bool = True) -> Dict[str, bool]:
     """
     [CRITICAL] Immediate containment of the user account.
+
+    Returns the containment outcome so the caller can act on it:
+    {"password_scrambled", "signed_out", "contained"}. `contained` is False
+    whenever the account may still be reachable — a failed password scramble,
+    or no successful sign-out — which is the combination that used to be
+    printed and then forgotten (issue #5).
 
     EXECUTION ORDER REASONING:
       1. OU move FIRST (allows turnoff2sv by removing 2SV enforcement)
@@ -1946,9 +2012,10 @@ def execute_kill_switch(email: str, dry_run: bool, is_suspended: bool,
     # GAM7 wiki (Users-Signout-Turnoff2SV):
     #   gam <UserTypeEntity> signout
     print_info("Step 4/7: Forcing sign-out from all sessions...")
-    ok, _ = run_gam(["user", email, "signout"], dry_run=dry_run)
-    if ok:
+    signout_ok, _ = run_gam(["user", email, "signout"], dry_run=dry_run)
+    if signout_ok:
         summary_action("Forced sign-out")
+    signed_out = signout_ok or bool(success)
 
     # Step 5: Turn off 2SV [RECOMMENDED]
     # GAM7 wiki (Users-Signout-Turnoff2SV):
@@ -2022,11 +2089,11 @@ def execute_kill_switch(email: str, dry_run: bool, is_suspended: bool,
     # Step 6: Scramble password [CRITICAL]
     # GAM7 wiki (Users): gam update user <email> password random
     print_info("Step 6/7: Scrambling password...")
-    ok, _ = run_gam(
+    password_scrambled, _ = run_gam(
         ["update", "user", email, "password", "random", "changepassword", "on"],
         dry_run=dry_run
     )
-    if ok:
+    if password_scrambled:
         summary_action("Password scrambled and forced change on next login")
     else:
         print_error("CRITICAL: Password scramble failed — the user can still log in.")
@@ -2040,6 +2107,23 @@ def execute_kill_switch(email: str, dry_run: bool, is_suspended: bool,
     )
     if ok:
         summary_action("Hidden from GAL")
+
+    contained = bool(password_scrambled and signed_out)
+    if not contained:
+        reasons = []
+        if not password_scrambled:
+            reasons.append("password not scrambled")
+        if not signed_out:
+            reasons.append("sign-out not confirmed")
+        summary_error(
+            f"CONTAINMENT INCOMPLETE for {email} ({', '.join(reasons)}) — "
+            f"the account may still be accessible with its old credentials"
+        )
+    return {
+        "password_scrambled": bool(password_scrambled),
+        "signed_out": bool(signed_out),
+        "contained": contained,
+    }
 
 
 ###############################################################################
@@ -4311,6 +4395,14 @@ def parse_args():
         args.no_delegates = True
         args.no_auto_reply = True
 
+    # An account that starts suspended is restored to suspended at the end;
+    # asking for both is asking for two opposite end states. (Gavin-X, PR #7.)
+    if args.unsuspend and args.no_suspend:
+        parser.error(
+            "--unsuspend cannot be combined with --no-suspend: an account "
+            "that starts suspended is always returned to suspended."
+        )
+
     return args
 
 
@@ -4392,8 +4484,8 @@ def main():
         sys.exit(2)
 
     is_suspended = user_info.get('_is_suspended', 'False') == 'True'
-    originally_suspended = is_suspended
     temp_unsuspended = False
+    transfer_failures: List[str] = []
     is_2sv_enrolled = user_info.get('2-step enrolled', 'false').lower() == 'true'
     is_2sv_enforced = user_info.get('2-step enforced', 'false').lower() == 'true'
     has_mailbox = user_info.get('mailbox is setup', 'true').lower() == 'true'
@@ -4434,6 +4526,11 @@ def main():
         print_summary(dry_run)
         sys.exit(exit_code)
 
+    # Resolve and validate transfer destinations BEFORE any account change.
+    # This used to run after the temporary unsuspend below, so a preflight
+    # exit(2) left an account that started suspended sitting active (issue #2).
+    dest_map = preflight_destinations(args, source=user_email)
+
     # --- Temporarily unsuspend if requested ---
     if is_suspended and not args.scorched_earth:
         do_unsuspend = decide_unsuspend(
@@ -4457,13 +4554,32 @@ def main():
                 ["update", "user", user_email, "suspended", "off"],
                 dry_run=dry_run
             )
-            if success:
+            if dry_run and success:
                 is_suspended = False
                 temp_unsuspended = True
-                print_success("User unsuspended. Will be re-suspended at the end.")
-                summary_action("Temporarily unsuspended for offboarding")
+                print_info("DRY RUN: unsuspend would be verified by read-back.")
+                summary_action("Would temporarily unsuspend for offboarding")
+            elif success and wait_for_suspended(user_email, False):
+                is_suspended = False
+                temp_unsuspended = True
+                print_success("User unsuspended and verified. Will be re-suspended at the end.")
+                summary_action("Temporarily unsuspended for offboarding (verified)")
+                # sys.exit() and unhandled exceptions still run atexit handlers,
+                # so this restores the account on every remaining exit path.
+                # Idempotent: after the normal suspension phase it reads the
+                # restored state and changes nothing. Skipped under --no-suspend,
+                # where leaving the account active is the operator's stated
+                # intent and is reported as a contract violation instead.
+                if not args.no_suspend:
+                    atexit.register(restore_original_suspension, user_email)
             else:
-                print_error("Failed to unsuspend user. Continuing with limited offboarding.")
+                print_error(
+                    "Could not verify that the user was unsuspended. Restoring "
+                    "the original state and aborting before any offboarding change."
+                )
+                if not dry_run:
+                    restore_original_suspension(user_email)
+                sys.exit(2)
 
     # --- Scorched earth confirmation (even with --force, must type email) ---
     if args.scorched_earth and not dry_run:
@@ -4491,10 +4607,6 @@ def main():
         if not prompt_yes_no("Are you sure you want to proceed?"):
             print_info("Aborted by operator.")
             sys.exit(0)
-
-    # Resolve and validate transfer destinations up front so we fail fast
-    # before any destructive action if --force is missing destinations.
-    dest_map = preflight_destinations(args, source=user_email)
 
     # Front-load every remaining interactive decision into one block, echo the
     # plan, and take a single final confirmation. After this the run needs no
@@ -4529,14 +4641,30 @@ def main():
     # =========================================================================
     # PHASE 1: Kill Switch (always runs)
     # =========================================================================
+    containment = {"contained": False}
     with PhaseTimer("Kill switch"):
         try:
-            execute_kill_switch(user_email, dry_run, is_suspended,
-                                is_2sv_enrolled, has_mailbox,
-                                turn_off_2sv=plan["turnoff2sv"]["do"])
+            containment = execute_kill_switch(user_email, dry_run, is_suspended,
+                                              is_2sv_enrolled, has_mailbox,
+                                              turn_off_2sv=plan["turnoff2sv"]["do"])
         except Exception as e:
             print_error(f"Kill switch phase failed: {e}")
             summary_error(f"Kill switch exception: {e}")
+
+    # Containment failed and --no-suspend would leave the account reachable.
+    # Suspension is the one remaining lever, so it overrides the flag rather
+    # than the run ending with a printed warning nobody acts on (issue #5).
+    force_suspend = not containment.get("contained", False)
+    if force_suspend and args.no_suspend:
+        print_error(
+            "Containment did not complete and --no-suspend was given. "
+            "Suspending anyway: an account that cannot be locked must not be "
+            "left active. Re-run without --no-suspend once containment works."
+        )
+        summary_warning(
+            "--no-suspend overridden: containment failed, account suspended "
+            "to close the access it left open"
+        )
 
     if shutdown_requested:
         print_summary(dry_run)
@@ -4623,7 +4751,8 @@ def main():
     # These run even with --no-transfer so you can archive without moving data.
     # =========================================================================
     if args.backup_drive:
-        with PhaseTimer("Drive backup (rclone)"):
+        with PhaseTimer("Drive backup (rclone)"), \
+                record_failure("Drive backup", transfer_failures):
             try:
                 backup_drive_rclone(user_email, dry_run)
             except Exception as e:
@@ -4631,7 +4760,8 @@ def main():
                 summary_error(f"Drive backup exception: {e}")
 
     if args.backup_email:
-        with PhaseTimer("Email backup (GYB, local only)"):
+        with PhaseTimer("Email backup (GYB, local only)"), \
+                record_failure("Email backup", transfer_failures):
             try:
                 backup_email_only(user_email, dry_run)
             except Exception as e:
@@ -4652,7 +4782,8 @@ def main():
         summary_skip("Drive transfer (--no-drive)")
     elif plan["drive"]["do"]:
         drive_dest = plan["drive"]["dest"]
-        with PhaseTimer("Drive transfer"):
+        with PhaseTimer("Drive transfer"), \
+                record_failure("Drive transfer", transfer_failures):
             try:
                 transfer_drive(user_email, drive_dest, dry_run)
             except Exception as e:
@@ -4676,7 +4807,8 @@ def main():
         email_dest = plan["email"]["dest"]
         strip_labels = plan["email"]["strip_labels"]
         reuse_backup = Path(args.reuse_email_backup).expanduser().resolve() if args.reuse_email_backup else None
-        with PhaseTimer("Email migration"):
+        with PhaseTimer("Email migration"), \
+                record_failure("Email migration", transfer_failures):
             try:
                 migrate_email(user_email, email_dest, dry_run, strip_labels=strip_labels,
                               reuse_backup=reuse_backup, batch_size=args.restore_batch_size)
@@ -4691,7 +4823,8 @@ def main():
         summary_skip("Alias transfer (--no-alias)")
     elif plan["alias"]["do"]:
         alias_dest = plan["alias"]["dest"]
-        with PhaseTimer("Alias transfer"):
+        with PhaseTimer("Alias transfer"), \
+                record_failure("Alias transfer", transfer_failures):
             try:
                 transfer_aliases(user_email, alias_dest, dry_run)
             except Exception as e:
@@ -4705,7 +4838,8 @@ def main():
         summary_skip("Calendar transfer (--no-calendar)")
     elif plan["calendar"]["do"]:
         cal_dest = plan["calendar"]["dest"]
-        with PhaseTimer("Calendar transfer"):
+        with PhaseTimer("Calendar transfer"), \
+                record_failure("Calendar transfer", transfer_failures):
             try:
                 transfer_calendar(user_email, cal_dest, dry_run)
             except Exception as e:
@@ -4753,12 +4887,32 @@ def main():
     # PHASE 5: Licence Removal (after all transfers so licence is intact
     # for Drive/Gmail API access during data operations)
     # =========================================================================
-    with PhaseTimer("Licence removal"):
-        try:
-            remove_licences(user_email, dry_run, cached_output=cached_licences_output)
-        except Exception as e:
-            print_error(f"Licence removal failed: {e}")
-            summary_error(f"Licence exception: {e}")
+    # A failed backup or transfer means data is still only in this account.
+    # Removing the licence kills Gmail and Drive API access and makes the retry
+    # impossible, so the licence stays until the transfer actually worked
+    # (issue #3). Suspension below still runs — the account is contained either
+    # way; what is held back is the thing that would destroy the retry.
+    if transfer_failures and not dry_run:
+        blocked = ", ".join(transfer_failures)
+        print_error("DATA PROTECTION HOLD: licences will NOT be removed.")
+        print_error(f"Failed phase(s): {blocked}")
+        print_warning(
+            "The account is still suspended below. The licence is left in "
+            "place so the failed phase can be retried after a controlled "
+            "unsuspend; remove it by hand once the data is safe."
+        )
+        summary_skip(f"Licence removal held back by failed phase(s): {blocked}")
+        summary_warning(
+            "Licences RETAINED so the failed transfer can be retried — "
+            "remove them manually once the data is confirmed moved"
+        )
+    else:
+        with PhaseTimer("Licence removal"):
+            try:
+                remove_licences(user_email, dry_run, cached_output=cached_licences_output)
+            except Exception as e:
+                print_error(f"Licence removal failed: {e}")
+                summary_error(f"Licence exception: {e}")
 
     # =========================================================================
     # PHASE 9: Suspend (always last)
@@ -4768,8 +4922,9 @@ def main():
     # skip the prompt and force suspension so the account never ends in a
     # less-restricted state than it started in. --no-suspend still wins, but
     # we make a lot of noise about it.
+    skip_suspend = args.no_suspend and not force_suspend
     if temp_unsuspended:
-        if args.no_suspend:
+        if skip_suspend:
             summary_skip("Suspension (--no-suspend)")
             summary_warning(
                 "CONTRACT VIOLATION: User was suspended at start of run, "
@@ -4793,13 +4948,13 @@ def main():
                 except Exception as e:
                     print_error(f"Suspension failed: {e}")
                     summary_error(f"Suspension exception: {e}")
-    elif args.no_suspend:
+    elif skip_suspend:
         summary_skip("Suspension (--no-suspend)")
         summary_warning(
             "User was NOT suspended. Remember to suspend manually when "
             "the transition period is over."
         )
-    elif plan["suspend"]["do"]:
+    elif plan["suspend"]["do"] or force_suspend:
         with PhaseTimer("Suspension"):
             try:
                 suspend_user(user_email, dry_run)
