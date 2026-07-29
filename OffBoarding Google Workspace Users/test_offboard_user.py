@@ -1260,5 +1260,146 @@ class TestB132SVEnforcedRefusal(unittest.TestCase):
         self.assertEqual(offb._first_line(""), "no reason given")
 
 
+###############################################################################
+# B15 — Issue #2: a preflight abort must not leave a suspended account active
+###############################################################################
+
+class TestB15SuspensionRestore(OffboardTestCase):
+    """The temporary unsuspend is a promise: the account goes back."""
+
+    def test_b15_1_suspended_field_is_read_not_substring_matched(self):
+        # testoffboard3 is Charlie SUSPENDED and is genuinely suspended; the
+        # active fixture below is the one a substring match gets wrong.
+        with mock.patch.object(offb, "run_gam",
+                               return_value=(True, FIXTURE_SUSPENDED_USER)):
+            self.assertIs(offb.read_suspended("x@yourdomain.com"), True)
+        with mock.patch.object(offb, "run_gam",
+                               return_value=(True, FIXTURE_ACTIVE_USER)):
+            self.assertIs(offb.read_suspended("x@yourdomain.com"), False)
+
+    def test_b15_2_unreadable_state_is_none_not_false(self):
+        with mock.patch.object(offb, "run_gam", return_value=(False, "")):
+            self.assertIsNone(offb.read_suspended("x@yourdomain.com"))
+
+    def test_b15_3_poll_gives_up_instead_of_hanging(self):
+        clock = _FakeClock()
+        with mock.patch.object(offb, "read_suspended", return_value=False), \
+                mock.patch("time.time", clock.time), \
+                mock.patch("time.sleep", clock.sleep):
+            self.assertFalse(offb.wait_for_suspended("x@yourdomain.com", True,
+                                                     timeout=30))
+
+    def test_b15_4_already_suspended_makes_no_change(self):
+        with mock.patch.object(offb, "read_suspended", return_value=True), \
+                mock.patch.object(offb, "run_gam") as gam:
+            self.assertTrue(offb.restore_original_suspension("x@yourdomain.com"))
+        gam.assert_not_called()
+
+    def test_b15_5_restore_is_attempted_then_reported_as_an_error(self):
+        clock = _FakeClock()
+        with mock.patch.object(offb, "read_suspended", return_value=False), \
+                mock.patch.object(offb, "run_gam", return_value=(True, "")) as gam, \
+                mock.patch("time.time", clock.time), \
+                mock.patch("time.sleep", clock.sleep):
+            ok = offb.restore_original_suspension("x@yourdomain.com", attempts=2)
+        self.assertFalse(ok)
+        self.assertEqual(gam.call_count, 2)
+        self.assertTrue(any("NOT restored" in e for e in offb.summary_errors))
+
+    def test_b15_6_destinations_are_validated_before_the_unsuspend(self):
+        # The bug was ordering: preflight exit(2) ran after the unsuspend.
+        import inspect
+        src = inspect.getsource(offb.main)
+        self.assertLess(src.index("preflight_destinations(args"),
+                        src.index("Temporarily unsuspending user"),
+                        "preflight must run before any account change")
+
+    def test_b15_7_unverified_unsuspend_aborts(self):
+        import inspect
+        src = inspect.getsource(offb.main)
+        self.assertIn("wait_for_suspended(user_email, False)", src)
+        self.assertIn("atexit.register(restore_original_suspension", src)
+
+
+###############################################################################
+# B16 — Issue #3: a failed transfer must not be followed by licence removal
+###############################################################################
+
+class TestB16TransferFailureHold(OffboardTestCase):
+
+    def test_b16_1_a_phase_that_errors_is_recorded(self):
+        failures = []
+        with offb.record_failure("Drive transfer", failures):
+            offb.summary_error("Drive transfer lost 3 files")
+        self.assertEqual(failures, ["Drive transfer"])
+
+    def test_b16_2_a_clean_phase_is_not_recorded(self):
+        failures = []
+        with offb.record_failure("Drive transfer", failures):
+            offb.summary_action("Transferred 244 files")
+        self.assertEqual(failures, [])
+
+    def test_b16_3_an_exception_still_records_and_propagates(self):
+        failures = []
+        with self.assertRaises(RuntimeError):
+            with offb.record_failure("Email migration", failures):
+                offb.summary_error("boom")
+                raise RuntimeError("boom")
+        self.assertEqual(failures, ["Email migration"])
+
+    def test_b16_4_licence_removal_is_behind_the_hold(self):
+        import inspect
+        src = inspect.getsource(offb.main)
+        # rindex: the scorched-earth short circuit has its own earlier call,
+        # and that path transfers nothing so the hold does not apply to it.
+        self.assertLess(src.index("if transfer_failures and not dry_run"),
+                        src.rindex("remove_licences(user_email"),
+                        "licence removal must sit behind the transfer-failure hold")
+
+
+###############################################################################
+# B17 — Issue #5: containment failure must be visible and acted on
+###############################################################################
+
+class TestB17ContainmentOutcome(OffboardTestCase):
+
+    def _kill(self, gam_side_effect):
+        with mock.patch.object(offb, "run_gam", side_effect=gam_side_effect):
+            return offb.execute_kill_switch(
+                "leaver@yourdomain.com", dry_run=False, is_suspended=False,
+                is_2sv_enrolled=False, has_mailbox=True, turn_off_2sv=False)
+
+    def test_b17_1_failed_password_scramble_is_not_contained(self):
+        def fake(args, **kw):
+            return (False, "Update Failed") if "password" in args else (True, "")
+        result = self._kill(fake)
+        self.assertFalse(result["contained"])
+        self.assertFalse(result["password_scrambled"])
+        self.assertTrue(any("CONTAINMENT INCOMPLETE" in e
+                            for e in offb.summary_errors))
+
+    def test_b17_2_a_clean_kill_switch_reports_contained(self):
+        result = self._kill(lambda args, **kw: (True, ""))
+        self.assertTrue(result["contained"])
+        self.assertFalse(any("CONTAINMENT INCOMPLETE" in e
+                             for e in offb.summary_errors))
+
+    def test_b17_3_deprovision_signout_covers_a_failed_explicit_signout(self):
+        # The bundle in step 3 signs the user out too, so one failing call is
+        # not a containment failure on its own.
+        def fake(args, **kw):
+            return (False, "") if args[:3] == ["user", "leaver@yourdomain.com",
+                                               "signout"] else (True, "")
+        result = self._kill(fake)
+        self.assertTrue(result["signed_out"])
+        self.assertTrue(result["contained"])
+
+    def test_b17_4_no_suspend_is_overridden_when_containment_fails(self):
+        import inspect
+        src = inspect.getsource(offb.main)
+        self.assertIn('force_suspend = not containment.get("contained", False)', src)
+        self.assertIn("skip_suspend = args.no_suspend and not force_suspend", src)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
