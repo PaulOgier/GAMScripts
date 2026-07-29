@@ -187,6 +187,33 @@ Changelog
                         run_gam, so recovered intermediate attempts stay out of the end-of-run
                         summary — previously a run that succeeded on attempt 5 finished
                         reporting "Errors (4)" beside its success line and read as a failure.
+                        DRIVE COMPLETENESS: rclone exits 0 on an incomplete backup, so
+                        verify_drive_backup_complete() now reconciles GAM's file count against
+                        the files on disk. Drive is not a filesystem — two files may share a
+                        name in one folder, and when both export to the same extension the
+                        second overwrites the first ("Untitled document" is the commonest
+                        filename there). Forms and Sites cannot be exported at all and are not
+                        even listed, and a file owned by the user but parented only in someone
+                        else's folder is outside the tree rclone walks. The check names all
+                        three causes and reports the leaver's TRASH separately, since rclone
+                        does not fetch it and deleting the account destroys it. The comparison
+                        queries "trashed = false" and reads GAM's own LAST "Got N" line: it
+                        prints one per page, so the first is a page size, not a file count —
+                        parsing it that way made a 106-file shortfall read as verified.
+                        SHARED DRIVES: check_shared_drives() reports every drive the leaver
+                        organizes and escalates the ones with no other organizer, which nothing
+                        in an offboarding transfers or backs up. A membership read that FAILS
+                        is reported as unknown rather than as proof of sole organizership.
+                        SELF-TRANSFER: preflight_destinations() refuses a destination that
+                        resolves to the leaver, including via one of their aliases. 2SV: the
+                        enforced refusal (GAM exit 50, "required by admin policy") is now
+                        recognised. It aborts nothing else in the deprovision bundle — tokens,
+                        app passwords, backup codes, sign-out and POP/IMAP all complete — so
+                        the run reports containment done and explains that removing the OU
+                        policy, not retrying, is what changes the outcome. The plan no longer
+                        predicts that refusal from the enforcement flag: enforcement follows
+                        the OU and the kill switch moves the user first, so the prediction was
+                        made against the OU being left.
   2026-07-22 - v5.1.0 - Configurable backup location + restore that survives AV-locked
                         messages. NEW --backup-dir PATH sets the root for all backup
                         artefacts (snapshots, mailbox, Drive); the BACKUP_DIRECTORY constant
@@ -283,6 +310,7 @@ Planned Features (not yet implemented)
 """
 
 import argparse
+import contextlib
 import csv
 import io
 import subprocess
@@ -515,9 +543,30 @@ if hasattr(signal, 'SIGTERM'):
 LOG_FILENAME = ""  # Set in main() after args are parsed
 
 
+def _force_utf8_console():
+    """Make stdout/stderr survive non-ASCII filenames.
+
+    On Windows the console streams default to the ANSI code page (cp1252), so
+    logging a Drive filename containing an emoji, CJK, or rclone's encoded
+    control characters raises UnicodeEncodeError inside the logging handler.
+    The logging module swallows that and the line is LOST — precisely the lines
+    naming the files that went missing from a backup. Observed on Windows 11
+    ARM64, 2026-07-29, on "Line one␊line two.docx". The FileHandler is
+    already explicitly UTF-8, so the audit trail was never at risk; this is the
+    console half. errors="replace" because a mangled glyph beats a lost line.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass  # Not a real stream (captured/piped in tests); nothing to do.
+
+
 def setup_logging(log_dir: Optional[Path] = None, user_email: str = "", timestamp: str = ""):
     """Initialise logging with both file and console handlers."""
     global LOG_FILENAME
+
+    _force_utf8_console()
 
     if not timestamp:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -743,6 +792,7 @@ def run_gam(args: List[str], dry_run: bool = True,
             full_cmd,
             capture_output=True,
             text=True,
+            encoding="utf-8", errors="replace",
             timeout=timeout
         )
 
@@ -823,6 +873,7 @@ def run_shell_pipe(cmd_str: str, dry_run: bool = True,
             shell=True,
             capture_output=True,
             text=True,
+            encoding="utf-8", errors="replace",
             timeout=timeout
         )
 
@@ -895,6 +946,7 @@ def run_gyb(args: List[str], dry_run: bool = True,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
             text=True,
+            encoding="utf-8", errors="replace",
             bufsize=1,
             env=env,
         )
@@ -1088,6 +1140,7 @@ def check_dependencies(need_gyb: bool = False, need_rclone: bool = False,
                     [GYB_COMMAND, "--email", user_email, "--action", "quota",
                      "--service-account"],
                     capture_output=True, text=True,
+                    encoding="utf-8", errors="replace",
                     stdin=subprocess.DEVNULL, timeout=30
                 )
                 output = (result.stdout + result.stderr).strip()
@@ -1118,7 +1171,8 @@ def check_dependencies(need_gyb: bool = False, need_rclone: bool = False,
             try:
                 result = subprocess.run(
                     [RCLONE_COMMAND, "listremotes"],
-                    capture_output=True, text=True, timeout=10
+                    capture_output=True, text=True,
+                    encoding="utf-8", errors="replace", timeout=10
                 )
                 if result.returncode == 0:
                     remotes = result.stdout.strip().split('\n')
@@ -1203,13 +1257,19 @@ def preflight_destinations(args, source: Optional[str] = None) -> Dict[str, Opti
     # it: the plan reads normally, GYB would restore the mailbox into itself
     # under new labels, forwarding to self is a loop, and the account is
     # suspended at the end regardless. Refuse rather than execute nonsense.
-    if source:
+    # An ALIAS of the leaver is a different address resolving to the same
+    # mailbox, so a literal comparison misses it — and the alias is the more
+    # plausible mis-pick, being the address the operator was just looking at.
+    if source and any(resolved.values()):
+        same_account = {source.lower()} | {a.lower() for a in _list_aliases(source)}
         self_targeted = sorted({n for n, d in resolved.items()
-                                if d and d.lower() == source.lower()})
+                                if d and d.lower() in same_account})
         if self_targeted:
+            named = sorted({resolved[n] for n in self_targeted})  # type: ignore[misc]
             print_error(
                 f"Destination is the same account being offboarded "
-                f"({source}) for: {', '.join(self_targeted)}."
+                f"({source}, via {', '.join(named)}) for: "
+                f"{', '.join(self_targeted)}."
             )
             print_error(
                 "Transferring a leaver's data to themselves does nothing, "
@@ -1518,18 +1578,30 @@ def collect_plan(args, dest_map: Dict[str, Optional[str]],
     if not is_2sv_enrolled:
         plan["turnoff2sv"] = {"do": False}
     elif args.force:
-        # Non-interactive: attempt only when it can actually succeed. An
-        # enforced user would just produce the exit-50 error we're avoiding.
-        plan["turnoff2sv"] = {"do": not is_2sv_enforced}
+        # Attempt whenever there is something to turn off. Deciding on the
+        # ENFORCED reading was wrong in both directions, because enforcement
+        # follows the OU and the kill switch moves the user first:
+        #   - offboarding OU enforces: plan says attempt, GAM exits 50 anyway
+        #   - home OU enforced, offboarding OU not (the configuration this
+        #     script REQUIRES): plan says skip, and 2SV is left on when the
+        #     move would have made it work.
+        # The refusal is cheap and now handled where it happens, so stop
+        # predicting it. Proved on dev 2026-07-29.
+        plan["turnoff2sv"] = {"do": True}
     else:
         print_info("This user has 2-Step Verification turned ON.")
         if is_2sv_enforced:
             print_warning(
                 "2SV is ENFORCED by policy — either the OU's 2SV setting or a "
-                "2SV-enforcement group (e.g. org2stepverification@...). Turning "
-                "it off WILL fail until that enforcement is removed: move OUs / "
-                "remove the group membership first. The account is suspended at "
-                "the end of offboarding regardless, so leaving 2SV on is safe."
+                "2SV-enforcement group (e.g. org2stepverification@...). "
+                "Turning it off fails with GAM exit 50 ('user is required by "
+                "admin policy to have 2-Step Verification') until that "
+                "enforcement is removed. NOTE: this reading is for the OU the "
+                f"user is in NOW. Enforcement follows the OU and they are "
+                f"moved to {OFFBOARDING_OU} first, so the answer can change "
+                "under it either way — the attempt is made regardless and the "
+                "refusal reported plainly. The account is suspended at the end "
+                "of offboarding either way, so leaving 2SV on is safe."
             )
         else:
             print_info(
@@ -1722,8 +1794,8 @@ def preflight_snapshot(email: str, dry_run: bool, timestamp: str = "") -> Tuple[
 # PHASE 1: KILL SWITCH [CRITICAL]
 ###############################################################################
 
-def _read_2sv_enrolled(email: str) -> Optional[bool]:
-    """Read the user's actual 2SV enrollment state; None if the read fails."""
+def _read_2sv_field(email: str, field: str) -> Optional[bool]:
+    """Read a 2SV state field ("2-step enrolled"/"enforced"); None if unreadable."""
     ok, output = run_gam(
         ["info", "user", email, "quick"],
         dry_run=False,
@@ -1735,9 +1807,34 @@ def _read_2sv_enrolled(email: str) -> Optional[bool]:
         return None
     for line in output.splitlines():
         lower = line.lower()
-        if "2-step enrolled" in lower:
+        if field in lower:
             return "true" in lower
     return None
+
+
+def _read_2sv_enrolled(email: str) -> Optional[bool]:
+    """Read the user's actual 2SV enrollment state; None if the read fails."""
+    return _read_2sv_field(email, "2-step enrolled")
+
+
+def _first_line(text: str) -> str:
+    """First non-blank line of GAM output, for quoting a reason to the user.
+
+    run_gam puts stdout first and stderr after, so a command that only wrote to
+    stderr leaves a leading blank line — quoting line [0] then prints nothing at
+    all. Seen live on dev 2026-07-29: "turnoff2sv skipped: " with no reason.
+    """
+    for line in (text or "").splitlines():
+        if line.strip():
+            return line.strip()
+    return "no reason given"
+
+
+# GAM's exact refusal when policy enforces 2SV (dev, 2026-07-29, exit 50):
+#   "Turn Off 2-Step Verification Failed: 2-Step Verification cannot be
+#    turned off: user is required by admin policy to have 2-Step
+#    Verification ("enforced")"
+_2SV_ENFORCED_ERROR = "required by admin policy"
 
 
 
@@ -1780,6 +1877,13 @@ def execute_kill_switch(email: str, dry_run: bool, is_suspended: bool,
     )
     if success:
         summary_action(f"Moved to OU: {OFFBOARDING_OU}")
+
+    # NB: do NOT re-read 2SV enforcement here to decide anything. Enforcement
+    # follows the OU and we have just changed it, but the user's flag lags the
+    # move — measured on dev 2026-07-29, the OU move landed at 11:54:25 and the
+    # flag had not flipped 6s later at 11:54:31, though it had within 15s.
+    # A read here races that delay and answers for the OU the user left, so
+    # turnoff2sv is simply attempted and the refusal handled where it happens.
     else:
         print_error("CRITICAL: Failed to move user to offboarding OU.")
 
@@ -1818,8 +1922,20 @@ def execute_kill_switch(email: str, dry_run: bool, is_suspended: bool,
              + (", POP/IMAP" if has_mailbox else "")
              + (", 2SV" if do_2sv else ""))
     print_info(f"Step 3/7: Deprovisioning ({label})...")
-    success, output = run_gam(deprov_args, dry_run=dry_run, capture_output=True)
-    if success:
+    success, output = run_gam(deprov_args, dry_run=dry_run, capture_output=True,
+                              non_fatal_patterns=[_2SV_ENFORCED_ERROR])
+    if success and _2SV_ENFORCED_ERROR in (output or "").lower():
+        # GAM exits 50 for the 2SV step alone, but the bundle is not atomic:
+        # ASPs, backup codes, tokens, signout and POP/IMAP all completed first
+        # (verified line by line on dev 2026-07-29). Reporting this as a failed
+        # deprovision would tell the operator containment did not happen.
+        print_warning(
+            f"Deprovision completed EXCEPT turning off 2SV, which policy "
+            f"enforces. Everything else in the bundle succeeded "
+            f"({label.replace(', 2SV', '')}) — containment is done."
+        )
+        summary_action(f"Deprovisioned: {label.replace(', 2SV', '')} (2SV enforced, left on)")
+    elif success:
         summary_action(f"Deprovisioned: {label}")
     # Check for partial failure (backup codes on suspended user)
     if output and "not deprovisioned" in output.lower():
@@ -1869,9 +1985,35 @@ def execute_kill_switch(email: str, dry_run: bool, is_suspended: bool,
             )
             if success or _read_2sv_enrolled(email) is False:
                 summary_action("Turned off 2SV")
-            elif output and ("not enrolled" in output.lower() or "suspended" in output.lower()):
-                print_warning(f"turnoff2sv skipped: {output.splitlines()[0] if output else 'unknown reason'}")
-                summary_warning("turnoff2sv skipped (user not enrolled or suspended)")
+            elif output and "not enrolled" in output.lower():
+                # GAM says there is nothing to turn off, and we only reach here
+                # for a user who WAS enrolled at the start of the run — so the
+                # deprovision in step 3 already did it and the directory read
+                # above was stale. This is the success case, not a skip.
+                # Measured on dev 2026-07-29: deprovision turned 2SV off at
+                # 12:26:12 and `gam info user quick` still said enrolled at
+                # 12:26:22, ten seconds later.
+                print_success("2SV is off (deprovision took effect; the "
+                              "directory read lagged behind it).")
+                summary_action("Turned off 2SV (via deprovision)")
+            elif output and "suspended" in output.lower():
+                print_warning(f"turnoff2sv skipped: {_first_line(output)}")
+                summary_warning("turnoff2sv skipped (account suspended)")
+            elif output and _2SV_ENFORCED_ERROR in output.lower():
+                # Retrying the same command is pointless: policy, not the
+                # account, is refusing. Say what would actually change it.
+                print_warning(
+                    f"2SV cannot be turned off for {email} — policy enforces "
+                    f"it on {OFFBOARDING_OU}. Retrying will fail identically. "
+                    f"Remove the enforcement from that OU (Admin console -> "
+                    f"Security -> Authentication -> 2-Step Verification) if "
+                    f"you need 2SV off; the account is suspended at the end of "
+                    f"offboarding regardless, so leaving it on is safe."
+                )
+                summary_warning(
+                    f"2SV left ON for {email} (enforced by policy on "
+                    f"{OFFBOARDING_OU})"
+                )
             else:
                 print_error(f"turnoff2sv failed and 2SV still reads enrolled for {email}. "
                             f"Retry manually: gam user {email} turnoff2sv")
@@ -2317,6 +2459,7 @@ def transfer_drive(source: str, destination: str, dry_run: bool):
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
             text=True,
+            encoding="utf-8", errors="replace",
             bufsize=1,  # line-buffered so progress appears live
         )
 
@@ -2471,6 +2614,25 @@ def transfer_aliases(source: str, destination: str, dry_run: bool):
         )
 
 
+@contextlib.contextmanager
+def _gyb_db(db_path):
+    """Open GYB's message DB, committing on success and ALWAYS closing it.
+
+    sqlite3's own context manager commits the transaction but does NOT close the
+    connection. On POSIX that is invisible; on Windows the file handle stays
+    open for the life of the process, so the backup directory cannot afterwards
+    be moved, renamed or deleted (WinError 32) and a second process touching the
+    same DB can hit "database is locked". Found on Windows 11 ARM64,
+    2026-07-29 — five call sites, all leaking.
+    """
+    db = sqlite3.connect(db_path)
+    try:
+        with db:
+            yield db
+    finally:
+        db.close()
+
+
 def quarantine_unreadable_messages(backup_path: Path) -> List[str]:
     """
     Move unreadable .eml files out of the GYB backup folder so the restore
@@ -2533,7 +2695,7 @@ def quarantine_unreadable_messages(backup_path: Path) -> List[str]:
             # Windows/POSIX path-separator difference in stored filenames.
             dates: Dict[str, str] = {}
             try:
-                with sqlite3.connect(backup_path / "msg-db.sqlite") as db:
+                with _gyb_db(backup_path / "msg-db.sqlite") as db:
                     for msg_id in skipped:
                         row = db.execute(
                             "SELECT message_internaldate FROM messages "
@@ -2636,7 +2798,7 @@ def quarantine_gyb_locked_file(backup_path: Path, gyb_output: str) -> List[str]:
         if quarantined:
             dates: Dict[str, str] = {}
             try:
-                with sqlite3.connect(backup_path / "msg-db.sqlite") as db:
+                with _gyb_db(backup_path / "msg-db.sqlite") as db:
                     for msg_id in quarantined:
                         row = db.execute(
                             "SELECT message_internaldate FROM messages "
@@ -2814,7 +2976,7 @@ def _restored_count(backup_path: Path, destination: str) -> int:
         db_path = backup_path / f"{destination}-restored.sqlite"
         if not db_path.exists():
             return 0
-        with sqlite3.connect(db_path) as db:
+        with _gyb_db(db_path) as db:
             row = db.execute("SELECT count(*) FROM restored_messages").fetchone()
             return int(row[0]) if row else 0
     except (sqlite3.Error, OSError):
@@ -2841,7 +3003,7 @@ def verify_backup_complete(backup_path: Path) -> Tuple[int, int]:
     Re-running the backup re-fetches anything missing. Returns (db_rows, on_disk).
     """
     try:
-        with sqlite3.connect(backup_path / "msg-db.sqlite") as db:
+        with _gyb_db(backup_path / "msg-db.sqlite") as db:
             rows = int(db.execute("SELECT count(*) FROM messages").fetchone()[0])
     except (sqlite3.Error, OSError):
         return (0, 0)
@@ -2870,7 +3032,7 @@ def count_undated_messages(backup_path: Path) -> int:
     arrives looking new. Returns 0 on any error; never blocks a run.
     """
     try:
-        with sqlite3.connect(backup_path / "msg-db.sqlite") as db:
+        with _gyb_db(backup_path / "msg-db.sqlite") as db:
             row = db.execute(
                 "SELECT count(*) FROM messages WHERE message_internaldate < ?",
                 ("1971-01-01",),
@@ -3241,6 +3403,14 @@ def check_shared_drives(email: str, dry_run: bool) -> List[str]:
         rows = list(csv.DictReader(io.StringIO(
             out[out.index("User,id,name,role"):])))
     except (ValueError, csv.Error):
+        # Never fail silently: an unparseable list is indistinguishable from
+        # "no shared drives" to the operator, and that is the wrong reading.
+        print_warning(
+            f"Could not parse the Shared Drive list for {email} (unexpected "
+            f"GAM output). Check by hand whether they solely organize any "
+            f"before deleting the account."
+        )
+        summary_warning(f"Shared Drive check inconclusive for {email}")
         return []
 
     organized = [r for r in rows if (r.get("role") or "").lower() == "organizer"]
@@ -3249,6 +3419,7 @@ def check_shared_drives(email: str, dry_run: bool) -> List[str]:
         return []
 
     orphaned: List[str] = []
+    unknown: List[str] = []
     for row in organized:
         drive_id, name = row.get("id", ""), row.get("name", "(unnamed)")
         # CSV, not `show drivefileacls`: the text form prints role and
@@ -3260,22 +3431,27 @@ def check_shared_drives(email: str, dry_run: bool) -> List[str]:
                               dry_run=False, capture_output=True, timeout=120,
                               suppress_summary_error=True)
         # Another organizer means the drive stays manageable without the leaver.
+        # A FAILED read is not the same as "no other organizer" — reporting an
+        # unread ACL as orphaned states as fact something we never saw.
+        if not ok_acl:
+            unknown.append(f"{name} ({drive_id})")
+            continue
         others = 0
-        if ok_acl:
-            try:
-                acl_rows = list(csv.DictReader(io.StringIO(
-                    acl[acl.index("Owner,"):])))
-            except (ValueError, csv.Error):
-                acl_rows = []
-            for acl_row in acl_rows:
-                for key, addr in acl_row.items():
-                    m_perm = re.fullmatch(r"permissions\.(\d+)\.emailAddress", key or "")
-                    if not m_perm or not addr:
-                        continue
-                    role = acl_row.get(f"permissions.{m_perm.group(1)}.role", "")
-                    if (addr.lower() != email.lower()
-                            and (role or "").lower() == "organizer"):
-                        others += 1
+        try:
+            acl_rows = list(csv.DictReader(io.StringIO(
+                acl[acl.index("Owner,"):])))
+        except (ValueError, csv.Error):
+            unknown.append(f"{name} ({drive_id})")
+            continue
+        for acl_row in acl_rows:
+            for key, addr in acl_row.items():
+                m_perm = re.fullmatch(r"permissions\.(\d+)\.emailAddress", key or "")
+                if not m_perm or not addr:
+                    continue
+                role = acl_row.get(f"permissions.{m_perm.group(1)}.role", "")
+                if (addr.lower() != email.lower()
+                        and (role or "").lower() == "organizer"):
+                    others += 1
         if others == 0:
             orphaned.append(f"{name} ({drive_id})")
 
@@ -3287,30 +3463,76 @@ def check_shared_drives(email: str, dry_run: bool) -> List[str]:
     if orphaned:
         print_error(
             f"{Colours.RED}{len(orphaned)} Shared Drive(s) have NO other "
-            f"organizer. Deleting this account leaves them unmanageable — no "
-            f"one will be able to add members, change settings, or delete "
-            f"them:{Colours.RESET}"
+            f"organizer. Once this account is deleted no MEMBER can add "
+            f"members, change settings or delete them; recovering one then "
+            f"means a super admin taking it over in Admin console -> Apps -> "
+            f"Google Workspace -> Drive and Docs -> Manage shared drives:"
+            f"{Colours.RESET}"
         )
         for item in orphaned:
             print_error(f"    - {item}")
         print_error(
-            "Add a replacement organizer BEFORE deleting the account:\n"
-            "    gam user <new-organizer> add drivefileacl <driveId> "
+            "Cheaper to fix now. Add a replacement organizer BEFORE deleting "
+            "the account, running it AS the leaver — they are the only "
+            "organizer, and a non-member cannot grant themselves access (GAM "
+            "answers 'Add Failed: Does not exist'):\n"
+            f"    gam user {email} add drivefileacl <driveId> "
             "user <new-organizer> role organizer"
         )
         summary_warning(
             f"{len(orphaned)} Shared Drive(s) left with no organizer other than "
             f"{email}: {'; '.join(orphaned)}"
         )
-    else:
+    elif not unknown:
         summary_warning(
             f"{email} organizes {len(organized)} Shared Drive(s); content not "
             f"backed up or transferred (other organizers remain)"
         )
+    if unknown:
+        print_warning(
+            f"Could not read the membership of {len(unknown)} Shared Drive(s), "
+            f"so whether {email} is their only organizer is UNKNOWN — check "
+            f"each by hand before deleting the account:"
+        )
+        for item in unknown:
+            print_warning(f"    - {item}")
+        summary_warning(
+            f"Shared Drive membership unread for {len(unknown)} drive(s) "
+            f"({'; '.join(unknown)}); sole-organizer status unknown"
+        )
     return orphaned
 
 
-def verify_drive_backup_complete(email: str, backup_path: Path) -> Tuple[int, int]:
+def _parse_gam_got_count(out: str) -> int:
+    """
+    Read the file count out of `gam print filelist` output.
+
+    Uses GAM's own tally rather than counting lines: run_gam merges stderr into
+    stdout and GAM writes its progress there, so a raw line count over-reports.
+
+    GAM prints one "Got N" per PAGE, separated by carriage returns, and N is the
+    running total — so the LAST one is the answer and the first is a page-size
+    reading. Measured on dev 2026-07-29: a 256-file user paged at 100 printed
+    "Got 100\rGot 200\rGot 256". Taking the first match reported 100 for that
+    user, which on a real Drive (pages of 1000) means a 4,800-file backup
+    "verifies" against a Drive read as 1,000 and every shortfall goes unseen.
+    """
+    counts = re.findall(r"Got (\d+) Drive Files/Folders", out)
+    if counts:
+        return int(counts[-1])
+    # Fall back to CSV rows after the header. Only id/mimeType are requested,
+    # so no field can contain an embedded newline — file NAMES can (and one in
+    # the dev fixture does), which would break this. Progress lines carry no
+    # comma, so requiring one keeps any stray stderr line out of the count.
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    header = next((i for i, ln in enumerate(lines) if ln.startswith("Owner,")), None)
+    if header is None:
+        return 0
+    return sum(1 for ln in lines[header + 1:] if "," in ln)
+
+
+def verify_drive_backup_complete(email: str, backup_path: Path,
+                                 duplicates: Optional[List[str]] = None) -> Tuple[int, int]:
     """
     Reconcile the files in the user's Drive against the files rclone wrote.
 
@@ -3324,6 +3546,11 @@ def verify_drive_backup_complete(email: str, backup_path: Path) -> Tuple[int, in
 
     "Untitled document" is the most common filename in Drive, so this is a
     routine case, not a contrived one.
+
+    `duplicates` carries the paths rclone itself named as same-name collisions
+    ("NOTICE: <path>: Duplicate object found in source - ignoring"). When we
+    have them, the warning lists the files that were actually dropped instead of
+    naming three possible causes.
 
     Returns (drive_files, local_files). Counts only, no listing of every file,
     to stay cheap on a large Drive.
@@ -3347,27 +3574,37 @@ def verify_drive_backup_complete(email: str, backup_path: Path) -> Tuple[int, in
         )
         return (0, 0)
 
-    # Use GAM's own tally. run_gam merges stderr into stdout, and GAM writes two
-    # progress lines there ("Getting all...", "Got N..."), so counting output
-    # lines over-reports by exactly those two and invents a shortfall.
-    m = re.search(r"Got (\d+) Drive Files/Folders", out)
-    if m:
-        drive_files = int(m.group(1))
-    else:
-        # Fall back to CSV rows after the header. Only id/mimeType are
-        # requested, so no field can contain an embedded newline — file NAMES
-        # can (and one in the dev fixture does), which would break this.
-        lines = [ln for ln in out.splitlines() if ln.strip()]
-        header = next((i for i, ln in enumerate(lines) if ln.startswith("Owner,")), None)
-        drive_files = len(lines) - header - 1 if header is not None else 0
+    drive_files = _parse_gam_got_count(out)
 
     local_files = sum(1 for p in backup_path.rglob("*") if p.is_file())
 
-    if drive_files and local_files < drive_files:
+    if drive_files and local_files < drive_files and duplicates:
+        # rclone named them, so stop guessing at causes for these ones.
+        print_warning(
+            f"{Colours.RED}Drive backup is SHORT: {drive_files} file(s) owned "
+            f"in Drive but {local_files} on disk ({drive_files - local_files} "
+            f"missing). rclone named {len(duplicates)} of them as same-name "
+            f"collisions and dropped them — on Drive they are distinct file "
+            f"IDs, on disk the second would overwrite the first:{Colours.RESET}"
+        )
+        for item in duplicates:
+            print_warning(f"    - {item}")
+        print_warning(
+            "These are NOT in this backup. Rename them in Drive and re-run, or "
+            "transfer ownership instead. Any remaining shortfall is Forms and "
+            "Sites (not exportable, so never listed) or files owned here but "
+            "parented only in someone else's folder."
+        )
+        summary_warning(
+            f"Drive backup at {backup_path} is short by "
+            f"{drive_files - local_files} file(s); rclone dropped these as "
+            f"same-name collisions: {'; '.join(duplicates)}"
+        )
+    elif drive_files and local_files < drive_files:
         print_warning(
             f"{Colours.RED}Drive backup is SHORT: {drive_files} file(s) owned in "
             f"Drive but {local_files} on disk ({drive_files - local_files} "
-            f"missing). Two causes, in order of likelihood:\n"
+            f"missing). Three causes, in order of likelihood:\n"
             f"  1. Two files share a name in the same folder. On Drive they are "
             f"distinct file IDs; on disk the second overwrites the first, and "
             f"rclone counts that a normal write. Those files are NOT in this "
@@ -3386,8 +3623,16 @@ def verify_drive_backup_complete(email: str, backup_path: Path) -> Tuple[int, in
             f"but Drive lists {drive_files} ({drive_files - local_files} missing, "
             f"likely same-name collisions)"
         )
-    elif drive_files:
+    elif drive_files == local_files:
         print_success(f"Drive backup verified: {local_files} file(s), matches Drive.")
+    elif drive_files:
+        # More on disk than in Drive. Not a loss, but "matches" would be a lie:
+        # usually leftovers from an earlier backup in the same dated folder.
+        print_info(
+            f"Drive backup holds {local_files} file(s) against {drive_files} "
+            f"in Drive. Nothing is missing; the extra files are most likely "
+            f"left over from an earlier backup into the same folder."
+        )
 
     # Trashed files are excluded from the comparison above because rclone does
     # not fetch them. That makes the count honest, but it also means a leaver's
@@ -3399,8 +3644,7 @@ def verify_drive_backup_complete(email: str, backup_path: Path) -> Tuple[int, in
         dry_run=False, capture_output=True, timeout=600,
         suppress_summary_error=True,
     )
-    m_all = re.search(r"Got (\d+) Drive Files/Folders", out_all) if ok_all else None
-    trashed = int(m_all.group(1)) - drive_files if m_all else 0
+    trashed = (_parse_gam_got_count(out_all) - drive_files) if ok_all else 0
     if trashed > 0:
         print_warning(
             f"{trashed} file(s) are in {email}'s TRASH and are NOT in this "
@@ -3460,6 +3704,7 @@ def backup_drive_rclone(email: str, dry_run: bool) -> bool:
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
             text=True,
+            encoding="utf-8", errors="replace",
             bufsize=1,
         )
 
@@ -3474,12 +3719,21 @@ def backup_drive_rclone(email: str, dry_run: bool) -> bool:
         # Matched off per-file "ERROR : <name>: Failed to copy" lines only; the
         # "Attempt N/3" lines name no file and "Errors: N" needs -P.
         failed_files: List[str] = []
+        # rclone NAMES the files it drops to a same-name collision:
+        #   NOTICE: <path>: Duplicate object found in source - ignoring
+        # It is a NOTICE, not an error, and the run still exits 0 — but it is
+        # the exact list the reconciliation can otherwise only guess at.
+        duplicate_files: List[str] = []
 
         def emit(line: str):
             nonlocal last_progress_log, last_summary_line
             line = line.rstrip()
             if not line:
                 return
+            m_dup = re.search(
+                r"NOTICE\s*:\s*(\S.*?):\s*Duplicate object found in source", line)
+            if m_dup and m_dup.group(1) not in duplicate_files:
+                duplicate_files.append(m_dup.group(1))
             m = re.search(r"ERROR\s*:\s*(\S.*?):\s*Failed to copy", line)
             if m:
                 name = m.group(1)
@@ -3527,7 +3781,7 @@ def backup_drive_rclone(email: str, dry_run: bool) -> bool:
             summary_action(f"Drive backed up via rclone to {backup_path}")
             # rclone exiting 0 does not mean every file arrived; same-name
             # collisions overwrite silently. Reconcile before believing it.
-            verify_drive_backup_complete(email, backup_path)
+            verify_drive_backup_complete(email, backup_path, duplicate_files)
             return True
         elif abusive_files and len(failed_files) == len(abusive_files):
             # Only flagged files failed, so the rest of the backup is intact.

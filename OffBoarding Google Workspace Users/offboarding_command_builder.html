@@ -201,6 +201,14 @@
     <strong>Dry-run is the default.</strong> The script makes no changes unless you select <em>Execute</em> mode (which adds <code>--doit</code>). The Copy button stays disabled until the command is valid.
   </div>
 
+  <div class="banner">
+    <strong>Containment always runs (v5.2.0).</strong> In Execute mode there is no combination of options that skips it. Even <code>--backup-drive --no-transfer --no-suspend</code>, which reads like a precautionary backup, still moves the user to the offboarding OU, wipes their recovery email and phone, revokes app passwords and OAuth tokens, signs out every session, scrambles the password and hides them from the directory. That is deliberate — the tool exists so a leaver cannot take data with them mid-migration — but it is irreversible, so choose Execute mode on purpose. The plan the script prints before acting says the same thing.
+  </div>
+
+  <div class="banner">
+    <strong>Shared Drives are reported, never moved.</strong> Their content belongs to the drive, not to a member, so nothing here backs it up or transfers it. Since v5.2.0 the script lists every Shared Drive the leaver organises and flags any where they are the ONLY organiser — delete that account and no member can add members, change settings or delete the drive again, and recovering it means a super admin taking it over from the Admin console. Add a replacement organiser before you delete anyone.
+  </div>
+
   <!-- ============== TARGET ============== -->
   <div class="section">
     <h2>1. User to offboard</h2>
@@ -269,6 +277,7 @@
       <label class="field-label" for="all-to">Default destination for all transfers <span class="hint">— <code>--all-transfer-to</code>. Overridden per-phase below.</span></label>
       <input type="email" id="all-to" placeholder="manager@yourdomain.com" autocomplete="off">
       <span class="field-hint">Where Drive files, emails, aliases, and calendar access go when no per-phase override is set. Usually the departing user's manager. Leave blank only if you're setting individual destinations for every active phase.</span>
+      <span class="field-hint">v5.2.0 pre-flight: the script refuses a destination that is the leaver themselves, including one of their own aliases — transferring to self does nothing and forwarding to self is a mail loop. It also refuses a SUSPENDED destination, because a restore into one fails with a generic <code>backendError</code> that reads exactly like rate limiting and can burn hours before it gives up. Both checks run before anything destructive, so a typo cannot half-offboard someone.</span>
     </div>
     <div class="row">
       <div class="field">
@@ -310,7 +319,7 @@
     <div class="row">
       <div class="check">
         <input type="checkbox" id="backup-drive">
-        <label for="backup-drive"><strong>--backup-drive</strong><span class="check-desc">Local Drive backup via <code>rclone</code> BEFORE the transfer happens. Requires rclone with a configured Google Drive remote. Can be slow for large drives — allow extra time.</span></label>
+        <label for="backup-drive"><strong>--backup-drive</strong><span class="check-desc">Local Drive backup via <code>rclone</code> BEFORE the transfer happens. Requires rclone with a configured Google Drive remote. Can be slow for large drives — allow extra time. <strong>Treat it as a convenience copy, not an archive:</strong> a filesystem cannot hold two files with the same name in one folder, Forms and Sites cannot be exported at all, and files owned by the user but living in someone else's folder are outside the tree rclone walks. Since v5.2.0 the script counts what Drive holds against what reached the disk and names the files rclone dropped, rather than trusting rclone's exit code. If you need a complete copy, transfer ownership instead.</span></label>
       </div>
       <div class="check">
         <input type="checkbox" id="backup-email">
@@ -369,8 +378,9 @@
       <span class="field-hint">Where snapshots, mailbox backups and Drive backups are written. A mailbox backup can reach hundreds of gigabytes, so point this at a local disk and <strong>never inside iCloud, OneDrive, Dropbox or Google Drive</strong> — a synced folder will try to upload all of it.</span>
     </div>
     <div class="field" style="margin-top:10px;">
-      <label class="field-label" for="restore-batch-size">Restore batch size <span class="hint">— <code>--restore-batch-size</code>. Default <code>50</code>, max <code>100</code>.</span></label>
+      <label class="field-label" for="restore-batch-size">Restore batch size <span class="hint">— <code>--restore-batch-size</code>. Default <code>50</code>, must be 1&ndash;100.</span></label>
       <input type="number" id="restore-batch-size" min="1" max="100" placeholder="50" autocomplete="off">
+      <span class="field-hint">GYB rejects anything outside 1&ndash;100 outright, and it does so only when the restore starts — after the mailbox has already been downloaded, which on a large mailbox is hours. Since v5.2.0 the script checks the value when you launch it instead.</span>
       <span class="field-hint">Messages sent per request when restoring mail. Measured on a real mailbox: 1 gives ~1,200 msg/hr, 10 gives ~5,800, 100 gives ~9,100. GYB rejects anything above 100. The script steps this down automatically (100 → 75 → 50 → 25 → 10) if Gmail starts throttling, so the default is a safe starting point.</span>
     </div>
     <div class="field" style="margin-top:10px;">
