@@ -146,6 +146,7 @@
   button.danger:hover:not(:disabled) { background: #962a1f; }
 
   .toggle-inline { font-size: 13px; display: flex; align-items: center; gap: 6px; margin-left: auto; }
+  .toggle-inline select { padding: 6px 8px; font-size: 13px; border: 1px solid #cfd6db; border-radius: 4px; background: white; }
 
   .profile-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .profile-row select, .profile-row input[type="text"] { padding: 7px 9px; font-size: 13px; border: 1px solid #cfd6db; border-radius: 4px; }
@@ -421,6 +422,14 @@
         <input type="checkbox" id="use-python2">
         Use <code>python</code> instead of <code>python3</code>
       </label>
+      <label class="toggle-inline" for="command-shell">
+        Command shell
+        <select id="command-shell">
+          <option value="cmd">Command Prompt (cmd.exe)</option>
+          <option value="powershell">PowerShell</option>
+          <option value="posix">macOS / Linux shell</option>
+        </select>
+      </label>
     </div>
     <span class="field-hint" style="margin-top:6px;">Only tick "Use python" if your system's <code>python</code> command points to Python 3. On most modern systems <code>python</code> is Python 2 or absent — use <code>python3</code> unless you know otherwise.</span>
   </div>
@@ -436,7 +445,9 @@
 (() => {
   'use strict';
 
-  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  // Workspace addresses do not need the full RFC 5322 grammar. Restricting
+  // input to the common unquoted form also rejects shell control characters.
+  const EMAIL_RE = /^[A-Za-z0-9][A-Za-z0-9._+-]*@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/;
   const PROFILE_KEY = 'offboarding_builder_profiles_v1';
 
   const SKIP_FLAGS = [
@@ -476,6 +487,37 @@
     return document.querySelector('input[name="labels"]:checked').value;
   }
   function trimmed(id) { return $(id).value.trim(); }
+
+  function getShell() { return $('command-shell').value; }
+
+  function quoteArg(value) {
+    const shell = getShell();
+    if (shell === 'cmd') {
+      // Windows filenames cannot contain a double quote. Percent and bang are
+      // rejected separately because cmd.exe expands them even inside quotes.
+      if (!/[\s&|<>^()]/.test(value)) return value;
+      // Double trailing backslashes so CommandLineToArgvW does not treat the
+      // closing quote as escaped (for example: "C:\\Backup Folder\\").
+      const trailing = value.match(/\\+$/);
+      const suffix = trailing ? trailing[0] : '';
+      const body = suffix ? value.slice(0, -suffix.length) : value;
+      return `"${body}${suffix}${suffix}"`;
+    }
+    if (shell === 'powershell') {
+      return `'${value.replace(/'/g, "''")}'`;
+    }
+    return `'${value.replace(/'/g, `'"'"'`)}'`;
+  }
+
+  function pathError(id, flag) {
+    const value = trimmed(id);
+    if (!value) return null;
+    if (/[\r\n\0]/.test(value)) return `${flag} cannot contain a line break or null character.`;
+    if (getShell() === 'cmd' && /["%!]/.test(value)) {
+      return `${flag} cannot contain double quotes, percent signs, or exclamation marks in Command Prompt mode. Use an expanded absolute path or select another shell.`;
+    }
+    return null;
+  }
 
   function validEmailOrEmpty(id) {
     const v = trimmed(id);
@@ -540,20 +582,38 @@
     });
 
     const batchSizeVal = trimmed('restore-batch-size');
-    if (batchSizeVal && (!/^[0-9]+$/.test(batchSizeVal) || +batchSizeVal < 1 || +batchSizeVal > 100)) {
-      errors.push('Restore batch size must be a whole number from 1 to 100 — GYB rejects anything above 100.');
-    } else if (batchSizeVal && +batchSizeVal === 1) {
-      notes.push('Batch size 1 uploads one message per request and only saves progress at the end, so a crash restarts from the first message. Use 10 or more unless you have a reason not to.');
+    if (mode !== 'scorched') {
+      if (batchSizeVal && (!/^[0-9]+$/.test(batchSizeVal) || +batchSizeVal < 1 || +batchSizeVal > 100)) {
+        errors.push('Restore batch size must be a whole number from 1 to 100. GYB rejects anything above 100.');
+      } else if (batchSizeVal && +batchSizeVal === 1) {
+        notes.push('Batch size 1 uploads one message per request and only saves progress at the end, so a crash restarts from the first message. Use 10 or more unless you have a reason not to.');
+      }
     }
 
     const reuseVal = trimmed('reuse-email-backup');
+    const pathIds = ['log-dir'];
+    if (mode !== 'scorched' && !reuseVal) pathIds.push('backup-dir');
+    if (mode !== 'scorched') pathIds.push('reuse-email-backup');
+    pathIds.forEach(id => {
+      const flag = '--' + id;
+      const error = pathError(id, flag);
+      if (error) errors.push(error);
+    });
     if (reuseVal) {
-      if (getMode() !== 'exec') {
-        notes.push('--reuse-email-backup only takes effect in Execute mode.');
-      } else if (!$('force').checked) {
-        errors.push('--reuse-email-backup needs --force — a restore-only run cannot answer interactive prompts.');
+      if (mode === 'scorched') {
+        notes.push('--reuse-email-backup is omitted in Scorched earth mode.');
+      } else {
+        if (!trimmed('email-to') && !trimmed('all-to')) {
+          errors.push('--reuse-email-backup requires --email-to or --all-transfer-to.');
+        }
+        if (mode === 'exec' && !$('force').checked) {
+          errors.push('--reuse-email-backup needs --force in Execute mode because a restore-only run cannot answer interactive prompts.');
+        }
+        if (mode === 'dry') {
+          notes.push('--reuse-email-backup will run a dry-run preview of restore-only mode.');
+        }
+        notes.push('Restore-only mode: the mailbox restore runs and every other phase is skipped.');
       }
-      notes.push('Restore-only mode: the mailbox restore runs and every other phase is skipped.');
     }
 
     // Label radio mutual exclusion is enforced by radio inputs; nothing to check.
@@ -591,7 +651,7 @@
     parts.push('offboard_user.py');
 
     const userVal = trimmed('user');
-    if (userVal) parts.push('--user', userVal);
+    if (userVal) parts.push('--user', quoteArg(userVal));
 
     const mode = getMode();
     if (mode === 'exec') {
@@ -601,14 +661,22 @@
       parts.push('--doit', '--force', '--scorched-earth');
     }
 
+    const reuseBackup = trimmed('reuse-email-backup');
+    const restoreOnly = mode !== 'scorched' && !!reuseBackup;
+
     if (mode !== 'scorched') {
-      if ($('no-transfer').checked) parts.push('--no-transfer');
-      if ($('unsuspend').checked) parts.push('--unsuspend');
+      if (!restoreOnly && $('no-transfer').checked) parts.push('--no-transfer');
+      if (!restoreOnly && $('unsuspend').checked) parts.push('--unsuspend');
 
       // Destinations only meaningful outside scorched-earth and (mostly)
       // outside --no-transfer; the script still accepts them but they're
       // ignored under --no-transfer, so we omit them for cleanliness.
-      if (!$('no-transfer').checked) {
+      if (restoreOnly) {
+        const emailTo = trimmed('email-to');
+        const allTo = trimmed('all-to');
+        if (emailTo && EMAIL_RE.test(emailTo)) parts.push('--email-to', quoteArg(emailTo));
+        else if (allTo && EMAIL_RE.test(allTo)) parts.push('--all-transfer-to', quoteArg(allTo));
+      } else if (!$('no-transfer').checked) {
         const destMap = [
           ['all-to', '--all-transfer-to'],
           ['drive-to', '--drive-to'],
@@ -619,19 +687,21 @@
         ];
         destMap.forEach(([id, flag]) => {
           const v = trimmed(id);
-          if (v && EMAIL_RE.test(v)) parts.push(flag, v);
+          if (v && EMAIL_RE.test(v)) parts.push(flag, quoteArg(v));
         });
       }
       // --forward-alias-to is end-of-run guidance; safe regardless of --no-transfer.
       const fwdAlias = trimmed('forward-alias-to');
-      if (fwdAlias && EMAIL_RE.test(fwdAlias)) parts.push('--forward-alias-to', fwdAlias);
+      if (!restoreOnly && fwdAlias && EMAIL_RE.test(fwdAlias)) parts.push('--forward-alias-to', quoteArg(fwdAlias));
 
-      if ($('backup-drive').checked) parts.push('--backup-drive');
-      if ($('backup-email').checked) parts.push('--backup-email');
+      if (!restoreOnly && $('backup-drive').checked) parts.push('--backup-drive');
+      if (!restoreOnly && $('backup-email').checked) parts.push('--backup-email');
 
-      SKIP_FLAGS.forEach(id => {
-        if ($(id).checked) parts.push('--' + id);
-      });
+      if (!restoreOnly) {
+        SKIP_FLAGS.forEach(id => {
+          if ($(id).checked) parts.push('--' + id);
+        });
+      }
 
       const labelMode = getLabelMode();
       if (labelMode === 'strip') parts.push('--strip-labels');
@@ -639,25 +709,15 @@
     }
 
     const logDir = trimmed('log-dir');
-    if (logDir) {
-      const needsQuotes = /[^\w./:-]/.test(logDir);
-      parts.push('--log-dir', needsQuotes ? `'${logDir}'` : logDir);
-    }
+    if (logDir) parts.push('--log-dir', quoteArg(logDir));
 
     const backupDir = trimmed('backup-dir');
-    if (backupDir) {
-      const needsQuotes = /[^\w./:-]/.test(backupDir);
-      parts.push('--backup-dir', needsQuotes ? `'${backupDir}'` : backupDir);
-    }
+    if (backupDir && !restoreOnly && mode !== 'scorched') parts.push('--backup-dir', quoteArg(backupDir));
 
     const batchSize = trimmed('restore-batch-size');
-    if (batchSize) parts.push('--restore-batch-size', batchSize);
+    if (batchSize && mode !== 'scorched') parts.push('--restore-batch-size', batchSize);
 
-    const reuseBackup = trimmed('reuse-email-backup');
-    if (reuseBackup) {
-      const needsQuotes = /[^\w./:@-]/.test(reuseBackup);
-      parts.push('--reuse-email-backup', needsQuotes ? `'${reuseBackup}'` : reuseBackup);
-    }
+    if (restoreOnly) parts.push('--reuse-email-backup', quoteArg(reuseBackup));
 
     return parts.join(' ');
   }
@@ -732,6 +792,7 @@
       labels: getLabelMode(),
       force: $('force').checked,
       use_python2: $('use-python2').checked,
+      command_shell: getShell(),
       text: {},
       bool: {},
     };
@@ -750,6 +811,7 @@
     document.querySelector(`input[name="labels"][value="${snap.labels || 'ask'}"]`).checked = true;
     $('force').checked = !!snap.force;
     $('use-python2').checked = !!snap.use_python2;
+    $('command-shell').value = ['cmd', 'powershell', 'posix'].includes(snap.command_shell) ? snap.command_shell : 'cmd';
     Object.entries(snap.text || {}).forEach(([id, v]) => { if ($(id)) $(id).value = v; });
     Object.entries(snap.bool || {}).forEach(([id, v]) => { if ($(id)) $(id).checked = !!v; });
     // Clear the scorched-earth confirm field — never restore it.
@@ -781,10 +843,11 @@
 
   $('reset').addEventListener('click', () => {
     if (!confirm('Reset all fields to defaults?')) return;
-    document.querySelectorAll('input[type="email"], input[type="text"]').forEach(el => el.value = '');
+    document.querySelectorAll('input[type="email"], input[type="text"], input[type="number"]').forEach(el => el.value = '');
     document.querySelectorAll('input[type="checkbox"]').forEach(el => el.checked = false);
     document.querySelector('input[name="mode"][value="dry"]').checked = true;
     document.querySelector('input[name="labels"][value="ask"]').checked = true;
+    $('command-shell').value = 'cmd';
     render();
   });
 
