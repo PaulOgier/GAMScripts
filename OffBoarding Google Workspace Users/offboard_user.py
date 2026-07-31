@@ -3859,13 +3859,27 @@ def backup_drive_rclone(email: str, dry_run: bool) -> bool:
         proc.wait()
 
         if proc.returncode == 0:
-            print_success(f"Drive backed up to: {backup_path}")
             if last_summary_line:
                 print_info(f"  {last_summary_line}")
-            summary_action(f"Drive backed up via rclone to {backup_path}")
             # rclone exiting 0 does not mean every file arrived; same-name
             # collisions overwrite silently. Reconcile before believing it.
-            verify_drive_backup_complete(email, backup_path, duplicate_files)
+            drive_files, local_files = verify_drive_backup_complete(
+                email, backup_path, duplicate_files)
+            if drive_files and local_files < drive_files:
+                missing = drive_files - local_files
+                print_error(
+                    f"Drive backup verification FAILED: {missing} file(s) "
+                    "are missing. Licences will be retained so the backup can "
+                    "be retried."
+                )
+                summary_error(
+                    f"Drive backup incomplete: {local_files} of "
+                    f"{drive_files} file(s) reached {backup_path} "
+                    f"({missing} missing)"
+                )
+                return False
+            print_success(f"Drive backed up to: {backup_path}")
+            summary_action(f"Drive backed up via rclone to {backup_path}")
             return True
         elif abusive_files and len(failed_files) == len(abusive_files):
             # Only flagged files failed, so the rest of the backup is intact.

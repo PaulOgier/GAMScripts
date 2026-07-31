@@ -20,6 +20,7 @@ without re-testing live.
 import builtins
 import contextlib
 import importlib.util
+import io
 import logging
 import subprocess
 import sys
@@ -878,6 +879,9 @@ class TestB9DriveBackupReconciliation(unittest.TestCase):
 
     def setUp(self):
         offb.summary_warnings.clear()
+        offb.summary_actions.clear()
+        offb.summary_errors.clear()
+        offb.exit_code = 0
         self.tmp = tempfile.TemporaryDirectory()
         self.b = Path(self.tmp.name)
 
@@ -971,6 +975,48 @@ class TestB9DriveBackupReconciliation(unittest.TestCase):
             self.assertEqual(offb.verify_drive_backup_complete("u@d.com", self.b),
                              (0, 0))
         self.assertFalse(offb.summary_warnings)
+
+    def test_b9_9_short_backup_returns_false_and_records_error(self):
+        class Proc:
+            returncode = 0
+            stdout = io.StringIO("")
+
+            def wait(self):
+                return 0
+
+        failures = []
+        with mock.patch.object(offb, "BACKUP_DIRECTORY", self.b), \
+             mock.patch.object(offb.subprocess, "Popen", return_value=Proc()), \
+             mock.patch.object(offb, "verify_drive_backup_complete",
+                               return_value=(3, 1)):
+            with offb.record_failure("Drive backup", failures):
+                result = offb.backup_drive_rclone("u@d.com", dry_run=False)
+
+        self.assertFalse(result)
+        self.assertEqual(failures, ["Drive backup"])
+        self.assertTrue(any("incomplete" in e.lower()
+                            for e in offb.summary_errors))
+        self.assertFalse(any("backed up via rclone" in a.lower()
+                             for a in offb.summary_actions))
+
+    def test_b9_10_complete_backup_still_succeeds(self):
+        class Proc:
+            returncode = 0
+            stdout = io.StringIO("")
+
+            def wait(self):
+                return 0
+
+        with mock.patch.object(offb, "BACKUP_DIRECTORY", self.b), \
+             mock.patch.object(offb.subprocess, "Popen", return_value=Proc()), \
+             mock.patch.object(offb, "verify_drive_backup_complete",
+                               return_value=(3, 3)):
+            result = offb.backup_drive_rclone("u@d.com", dry_run=False)
+
+        self.assertTrue(result)
+        self.assertFalse(offb.summary_errors)
+        self.assertTrue(any("backed up via rclone" in a.lower()
+                            for a in offb.summary_actions))
 
 
 SD_LIST = ("Getting all Shared Drives for leaver@yourdomain.com\n"
