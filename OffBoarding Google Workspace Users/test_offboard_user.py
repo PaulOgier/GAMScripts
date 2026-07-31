@@ -545,6 +545,62 @@ class TestA8VerifyUserFixtures(OffboardTestCase):
                             for w in offb.summary_warnings))
 
 
+class TestB18AdminAccountGate(OffboardTestCase):
+
+    ADMIN = {"_is_admin": "True"}
+    USER = {"_is_admin": "False"}
+
+    def test_b18_1_admin_is_blocked_by_default(self):
+        with self.assertRaises(offb.AdminAccountSafetyError):
+            offb.enforce_admin_account_gate(
+                "admin@yourdomain.com", self.ADMIN,
+                allow_admin_account=False)
+
+    def test_b18_2_force_does_not_implicitly_bypass_gate(self):
+        import inspect
+        parameters = inspect.signature(
+            offb.enforce_admin_account_gate).parameters
+        self.assertNotIn("force", parameters)
+
+    def test_b18_3_dedicated_override_allows_admin(self):
+        offb.enforce_admin_account_gate(
+            "admin@yourdomain.com", self.ADMIN,
+            allow_admin_account=True)
+        self.assertTrue(any("OVERRIDDEN" in w for w in offb.summary_warnings))
+
+    def test_b18_4_normal_user_passes_quietly(self):
+        with mock.patch.object(offb, "print_error") as printed:
+            offb.enforce_admin_account_gate(
+                "user@yourdomain.com", self.USER,
+                allow_admin_account=False)
+        printed.assert_not_called()
+        self.assertFalse(offb.summary_warnings)
+
+    def test_b18_5_remediation_uses_role_assignment_id(self):
+        printed = []
+        with mock.patch.object(offb, "print_error", printed.append):
+            with self.assertRaises(offb.AdminAccountSafetyError):
+                offb.enforce_admin_account_gate(
+                    "admin@yourdomain.com", self.ADMIN,
+                    allow_admin_account=False)
+        output = "\n".join(printed)
+        self.assertIn("gam print admins user admin@yourdomain.com", output)
+        self.assertIn("gam delete admin <roleAssignmentId>", output)
+
+    def test_b18_6_gate_runs_immediately_after_verification(self):
+        import inspect
+        src = inspect.getsource(offb.main)
+        self.assertLess(src.index("enforce_admin_account_gate("),
+                        src.index("preflight_destinations("))
+        self.assertLess(src.index("enforce_admin_account_gate("),
+                        src.index("execute_kill_switch("))
+
+    def test_b18_7_override_is_explicit_cli_flag(self):
+        import inspect
+        self.assertIn('"--allow-admin-account"',
+                      inspect.getsource(offb.parse_args))
+
+
 class TestB1BatchLadder(unittest.TestCase):
     """
     The restore batch-size fallback used when Gmail throttles a run.
