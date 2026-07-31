@@ -442,6 +442,11 @@ rclone version
 
 ### 3.2 Create a Drive remote that uses the service account JSON
 
+The remote name must match `RCLONE_REMOTE` in `offboard_user.py`. The
+script defaults to `workspace`, so the steps below use that name. If you
+choose another name, update `RCLONE_REMOTE` in the script before running
+an offboarding.
+
 Run the interactive config:
 
 ```cmd
@@ -453,7 +458,7 @@ Answer the prompts as follows:
 | Prompt | Answer |
 |---|---|
 | `n) New remote` | `n` |
-| `name>` | `gdrive` |
+| `name>` | `workspace` |
 | `Storage>` | `drive` (Google Drive) |
 | `client_id>` | *(leave blank, not used with a service account)* |
 | `client_secret>` | *(leave blank)* |
@@ -464,14 +469,14 @@ Answer the prompts as follows:
 | Other advanced prompts | accept defaults (Enter) |
 | `Use auto config?` | `n` (not relevant for SA) |
 | `Configure as shared drive?` | `n` (unless you want one; answer `y` and pick the team drive) |
-| `Keep this "gdrive" remote?` | `y` |
+| `Keep this "workspace" remote?` | `y` |
 | Exit | `q` |
 
 The resulting `rclone.conf` (in `%APPDATA%\rclone\rclone.conf`) should look
 like:
 
 ```ini
-[gdrive]
+[workspace]
 type = drive
 scope = drive
 service_account_file = C:\GAMConfig\oauth2service.json
@@ -481,7 +486,7 @@ impersonate = super-admin@yourdomain.com
 ### 3.3 rclone smoke test
 
 ```cmd
-rclone lsd gdrive:
+rclone lsd workspace:
 ```
 
 Should list the top-level folders of the impersonated user's Drive.
@@ -498,7 +503,7 @@ Open a **fresh** Command Prompt and run:
 python --version
 gam info domain
 gyb --action quota --email <super-admin@yourdomain.com> --service-account
-rclone lsd gdrive:
+rclone lsd workspace:
 ```
 
 If all four succeed, the shared-service-account setup is working and you
