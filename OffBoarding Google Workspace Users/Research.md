@@ -1,16 +1,26 @@
 # Offboarding Research & Reference Links
 
+> Last verified: 31 July 2026 against `offboard_user.py` v5.3.0 and the
+> linked upstream documentation. Third-party examples are historical
+> references and may use obsolete GAM syntax.
+
 ## 1. GAM Onboarding Script (adamme)
 [github.com/adamme/gam-scripts — onboard_user.sh](https://github.com/adamme/gam-scripts/blob/master/onboard_user.sh)
 
-Bash script that automates new employee onboarding using GAM — creates user accounts, assigns them to OUs, and adds them to Google Groups based on department and employment type. Useful as a counterpart reference to the offboarding workflow.
+Bash script that automates employee onboarding using GAM. It creates the
+account, assigns an organisational unit based on employment type, and adds
+the user to office and optionally selected Google Groups. Useful as a
+counterpart reference to the offboarding workflow.
 
 ---
 
 ## 2. GAM Offboarding Script — Alternative (adamme)
 [github.com/adamme/gam-scripts — offboard_user_alternative.sh](https://github.com/adamme/gam-scripts/blob/master/offboard_user_alternative.sh)
 
-Bash script that automates offboarding by transferring email, calendar, and Drive data to the departing user's manager, removing mobile device access, disabling authentication, and removing the user from all Google Groups.
+Bash script that automates offboarding by transferring Calendar and Drive
+data to the departing user's manager, delegating mailbox access, wiping
+managed mobile accounts, revoking authentication access, and removing the
+user from Google Groups.
 
 ---
 
@@ -52,7 +62,12 @@ Reads the user's full state (`info user`, `print groups`, `print aliases`, `show
 - GAM — [Users - Gmail - Send As/Signature/Vacation](https://github.com/GAM-team/GAM/wiki/Users-Gmail-Send-As-Signature-Vacation)
 
 ## Phase 1 — Kill Switch (Containment)
-Moves the user to the Offboarding OU, wipes recovery email/phone, deprovisions tokens, resets the password, and hides from the GAL (`update user org`, `update user recoveryemail/recoveryphone`, `deprovision popimap signout`, `update user password random`, `update user gal off`).
+Moves the user to the Offboarding OU, wipes recovery details, deprovisions
+credentials, forces session sign-out, conditionally disables 2SV and POP/IMAP
+access, randomises the password, and hides the user from the GAL (`update user
+org`, `update user recoveryemail/recoveryphone`, `deprovision`, `signout`,
+`turnoff2sv`, `update user password random changepassword on`, `update user gal
+off`).
 - GAM — [Users](https://github.com/GAM-team/GAM/wiki/Users)
 - GAM — [Organizational Units](https://github.com/GAM-team/GAM/wiki/Organizational-Units)
 - GAM — [Users - Deprovision](https://github.com/GAM-team/GAM/wiki/Users-Deprovision)
@@ -67,11 +82,15 @@ Removes the user from all Google Groups (`user <email> print groups`, `user <ema
 - GAM — [Users - Group Membership](https://github.com/GAM-team/GAM/wiki/Users-Group-Membership)
 
 ## Phase 4 — Delegate Cleanup
-Removes mailbox delegates (`show delegates`, `delete delegate`).
+Removes inbound delegates who can access the departing user's mailbox (`show
+delegates`, `delete delegate`). Outbound delegations, where the departing user
+can access another mailbox, are reported for manual cleanup.
 - GAM — [Users - Gmail - Delegates](https://github.com/GAM-team/GAM/wiki/Users-Gmail-Delegates)
 
 ## Phase 5 — Licence Removal
-Frees the paid seat (`print licenses`, `delete license <SKU>`).
+Lists and attempts to remove each assigned licence (`print licenses`, `delete
+license <SKU>`). Auto-assigned licences are reported for manual removal in the
+Admin Console.
 - GAM — [Licenses](https://github.com/GAM-team/GAM/wiki/Licenses)
 
 ## Phase 6 — Data Transfers & Backups
