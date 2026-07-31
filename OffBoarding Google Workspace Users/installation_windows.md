@@ -514,9 +514,9 @@ tens or hundreds of thousands, three flags matter.
 
 ### Where the backup is written — `--backup-dir`
 
-```powershell
-python3 offboard_user.py --doit --user leaver@yourdomain.com `
-  --email-to successor@yourdomain.com `
+```cmd
+python3 offboard_user.py --doit --user leaver@yourdomain.com ^
+  --email-to successor@yourdomain.com ^
   --backup-dir C:\offboarding_backups
 ```
 
@@ -530,7 +530,7 @@ default.
 
 ### How fast the restore runs — `--restore-batch-size`
 
-```powershell
+```cmd
 python3 offboard_user.py ... --restore-batch-size 100
 ```
 
@@ -553,9 +553,9 @@ Gmail starts throttling.
 
 ### Resuming a restore that died — `--reuse-email-backup`
 
-```powershell
-python3 offboard_user.py --doit --force --user leaver@yourdomain.com `
-  --email-to successor@yourdomain.com `
+```cmd
+python3 offboard_user.py --doit --force --user leaver@yourdomain.com ^
+  --email-to successor@yourdomain.com ^
   --reuse-email-backup C:\offboarding_backups/mailboxes/leaver@yourdomain.com_20260721
 ```
 
