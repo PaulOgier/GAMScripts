@@ -134,12 +134,13 @@ they paste cleanly.
     a standard user is blocked by UAC. If you genuinely cannot get admin,
     install under `%USERPROFILE%` (e.g. `C:\Users\<you>\GAM7`) instead and
     update every path in the guide accordingly.
-  - **Machine-wide environment variables.** The `setx ... /M` commands
-    write to the *system* PATH and to `GAMCFGDIR` so any user /
-    scheduled task on the box sees them. `/M` requires an **elevated
-    Command Prompt** (right-click → *Run as administrator*). Without
-    admin, drop the `/M` flag. Variables are then written to your user
-    profile only and will not be visible to services or other users.
+  - **Machine-wide environment variables.** Adding entries to the
+    *system* `Path` and creating `GAMCFGDIR` requires administrator
+    rights. The guide uses the Windows Environment Variables editor so
+    it updates the machine and user values separately. Without admin,
+    use the **User variables** section instead; those values will not be
+    visible to services, scheduled tasks running as another user, or
+    other interactive users.
   - **Creating a symbolic link (§2.2).** The `mklink` step that points
     GYB at GAM's `oauth2service.json` needs an elevated prompt unless
     Windows Developer Mode is on (Settings → Privacy & security → For
@@ -197,18 +198,32 @@ other two tools will reuse.
      `oauth2.txt`, `oauth2service.json`).
    - `C:\GAMWork` is the default working directory for CSV
      imports/exports.
-4. Set PATH and the GAM config env var **permanently** (machine-level).
-   This step needs an **elevated Command Prompt** (right-click cmd →
-   *Run as administrator*) because `/M` writes to the system
-   environment:
-   ```cmd
-   setx PATH "%PATH%;C:\GAM7" /M
-   setx GAMCFGDIR "C:\GAMConfig" /M
-   ```
-   Close **every** Command Prompt window and open a fresh one so the
-   new environment is picked up. If you don't have admin, drop the
-   `/M`; the variables will be set for your user only.
-5. Please close your cmd terminal and then open a new one (non-elevated is fine). 
+4. Add GAM to `Path` and create the GAM config environment variable
+   **permanently**:
+
+   > **Do not use `setx PATH "%PATH%;..."`.** `setx` expands variable
+   > references and crops values longer than 1,024 characters, which can
+   > permanently corrupt an existing `Path`. It can also copy the combined
+   > user and system path from an elevated shell back into the system value.
+
+   1. Open the environment editor:
+      ```cmd
+      rundll32 sysdm.cpl,EditEnvironmentVariables
+      ```
+   2. Under **System variables**, select `Path` → **Edit** → **New**, add
+      `C:\GAM7`, then click **OK**.
+   3. Under **System variables**, click **New** and enter:
+      - Variable name: `GAMCFGDIR`
+      - Variable value: `C:\GAMConfig`
+   4. Click **OK** to close every dialog.
+
+   If you do not have admin rights, make both changes under **User
+   variables** instead. Do not copy the full value shown by `echo %PATH%`
+   into either section.
+
+   Close **every** Command Prompt window and open a fresh one so the new
+   environment is picked up.
+5. From the fresh Command Prompt (non-elevated is fine), verify GAM:
    ```cmd
    gam version
    gam config drive_dir C:\GAMWork verify
@@ -353,12 +368,10 @@ Both should return real data. GAM7 is done.
 1. Open the [GYB releases page](https://github.com/GAM-team/got-your-back/releases/latest)
    and download the Windows 64-bit zip.
 2. Extract to `C:\GYB\` (you should have `C:\GYB\gyb.exe`).
-3. Add to PATH (run from an **elevated Command Prompt** because of `/M`;
-   drop `/M` if you don't have admin):
-   ```cmd
-   setx PATH "%PATH%;C:\GYB" /M
-   ```
-   Close all cmd windows and open a fresh one.
+3. Open the Environment Variables editor as in §1.1. Under **System
+   variables**, edit `Path` and add `C:\GYB` as a new entry. If you do not
+   have admin rights, add it under **User variables** instead. Close all
+   cmd windows and open a fresh one.
 
 ### 2.2 Connect GYB to GAM's service account
 
@@ -429,11 +442,9 @@ winget install Rclone.Rclone
 
 Or manually, download the Windows zip from
 [rclone.org/downloads](https://rclone.org/downloads/), extract to
-`C:\rclone\`, and add to PATH (elevated cmd; drop `/M` if no admin):
-
-```cmd
-setx PATH "%PATH%;C:\rclone" /M
-```
+`C:\rclone\`, then open the Environment Variables editor as in §1.1 and
+add `C:\rclone` as a new entry under the system `Path`. If you do not have
+admin rights, add it under the user `Path` instead.
 
 Verify in a fresh cmd window:
 ```cmd
@@ -655,11 +666,13 @@ Admin console. Add another organiser before deleting anyone.
 
 - **`gam` / `gyb` / `rclone` not recognized.** PATH update did not take
   effect. Close *all* cmd windows and open a new one. Verify with
-  `echo %PATH%`.
+  `echo %PATH%`. If the tool directory is absent, add it again through
+  the Environment Variables editor as described in §1.1; never rebuild
+  `Path` with `setx PATH "%PATH%;..."`.
 - **`gam` writes to the wrong folder.** `GAMCFGDIR` is not set or not
   in your session. Run `echo %GAMCFGDIR%` (or `set GAMCFGDIR` to see
-  if it's defined) and re-do `setx GAMCFGDIR "C:\GAMConfig" /M` from
-  an elevated cmd if blank.
+  if it is defined). If blank, create it again through the Environment
+  Variables editor as described in §1.1.
 - **GYB: "service account not authorized for scope ..."** Go back to
   §1.4 and re-run `gam user ... update serviceaccount`, making sure
   the Gmail (`https://mail.google.com/`) scope is selected.
@@ -671,8 +684,6 @@ Admin console. Add another organiser before deleting anyone.
   `C:\GAMConfig\oauth2service.json`. GYB picks up the new key
   automatically if you used a symlink in §2.2; otherwise re-copy the
   file. rclone needs no change; it reads the path on every call.
-- **`setx` truncates PATH.** `setx` cuts PATH longer than 1024 chars.
-  Edit it via **System Properties → Environment Variables** instead.
 - **Antivirus quarantines `gam.exe`.** Some AV products flag GAM
   because it makes many Google API calls. Add `C:\GAM7\` to the AV
   exclusion list.
