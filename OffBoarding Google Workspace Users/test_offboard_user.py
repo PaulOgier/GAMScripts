@@ -1063,6 +1063,46 @@ class TestB11SharedDrives(unittest.TestCase):
                 offb.check_shared_drives("leaver@yourdomain.com", dry_run=True), [])
         rg.assert_not_called()
 
+    def test_b11_9_strict_check_blocks_known_orphan(self):
+        with mock.patch.object(offb, "run_gam",
+                               side_effect=[(True, SD_LIST), (True, SD_ACL_SOLE)]):
+            with self.assertRaises(offb.SharedDriveSafetyError):
+                offb.check_shared_drives(
+                    "leaver@yourdomain.com", dry_run=False,
+                    require_safe_deletion=True)
+
+    def test_b11_10_strict_check_blocks_inconclusive_acl(self):
+        with mock.patch.object(offb, "run_gam",
+                               side_effect=[(True, SD_LIST), (False, "")]):
+            with self.assertRaises(offb.SharedDriveSafetyError):
+                offb.check_shared_drives(
+                    "leaver@yourdomain.com", dry_run=False,
+                    require_safe_deletion=True)
+
+    def test_b11_11_scorched_earth_checks_before_user_deletion(self):
+        import inspect
+        src = inspect.getsource(offb.main)
+        scorched = src[src.index("if args.scorched_earth:"):]
+        self.assertLess(
+            scorched.index("check_shared_drives(user_email, dry_run"),
+            scorched.index("delete_user(user_email, dry_run)"))
+        self.assertIn("not args.allow_shared_drive_orphaning", scorched)
+
+    def test_b11_12_override_allows_known_orphan(self):
+        with mock.patch.object(offb, "run_gam",
+                               side_effect=[(True, SD_LIST), (True, SD_ACL_SOLE)]):
+            orphaned = offb.check_shared_drives(
+                "leaver@yourdomain.com", dry_run=False,
+                require_safe_deletion=False)
+        self.assertEqual(orphaned, ["Client Contracts (0ABC123)"])
+
+    def test_b11_13_override_is_a_dedicated_cli_flag(self):
+        import inspect
+        src = inspect.getsource(offb.parse_args)
+        self.assertIn('"--allow-shared-drive-orphaning"', src)
+        self.assertIn(
+            "args.allow_shared_drive_orphaning and not args.scorched_earth", src)
+
 
 class _Args:
     """Minimal stand-in for the argparse namespace preflight_destinations reads."""

@@ -3452,7 +3452,12 @@ def setup_forwarding(email: str, forward_to: str, dry_run: bool):
 # Downloads the user's entire Drive to local disk before any transfers.
 ###############################################################################
 
-def check_shared_drives(email: str, dry_run: bool) -> List[str]:
+class SharedDriveSafetyError(RuntimeError):
+    """Raised when deleting a user could orphan a Shared Drive."""
+
+
+def check_shared_drives(email: str, dry_run: bool,
+                        require_safe_deletion: bool = False) -> List[str]:
     """
     Report Shared Drives the leaver organizes, flagging any they organize ALONE.
 
@@ -3467,7 +3472,9 @@ def check_shared_drives(email: str, dry_run: bool) -> List[str]:
     automatic answer to who should inherit it. So this reports and instructs,
     the same way the mail-capture block does.
 
-    Returns the names of drives left without another organizer.
+    Returns the names of drives left without another organizer.  When
+    require_safe_deletion is true, an orphaned drive or an inconclusive check
+    raises SharedDriveSafetyError so callers cannot continue with deletion.
     """
     if dry_run:
         print_info("DRY RUN: would check Shared Drive memberships")
@@ -3481,6 +3488,9 @@ def check_shared_drives(email: str, dry_run: bool) -> List[str]:
             f"Could not list Shared Drives for {email}; check by hand whether "
             f"they solely organize any before deleting the account."
         )
+        if require_safe_deletion:
+            raise SharedDriveSafetyError(
+                "Shared Drive list could not be read; user deletion blocked")
         return []
 
     try:
@@ -3495,6 +3505,9 @@ def check_shared_drives(email: str, dry_run: bool) -> List[str]:
             f"before deleting the account."
         )
         summary_warning(f"Shared Drive check inconclusive for {email}")
+        if require_safe_deletion:
+            raise SharedDriveSafetyError(
+                "Shared Drive list could not be parsed; user deletion blocked")
         return []
 
     organized = [r for r in rows if (r.get("role") or "").lower() == "organizer"]
@@ -3584,6 +3597,12 @@ def check_shared_drives(email: str, dry_run: bool) -> List[str]:
             f"Shared Drive membership unread for {len(unknown)} drive(s) "
             f"({'; '.join(unknown)}); sole-organizer status unknown"
         )
+    if require_safe_deletion and (orphaned or unknown):
+        if orphaned:
+            reason = f"{len(orphaned)} Shared Drive(s) have no other organizer"
+        else:
+            reason = f"{len(unknown)} Shared Drive membership check(s) were inconclusive"
+        raise SharedDriveSafetyError(f"{reason}; user deletion blocked")
     return orphaned
 
 
@@ -4280,6 +4299,11 @@ def parse_args():
         help="DANGER: Kill switch, remove groups/licences, suspend, then "
              "permanently DELETE the user. No backups, no transfers. "
              "Requires --doit and --force. You must type the email to confirm.")
+    mode_grp.add_argument(
+        "--allow-shared-drive-orphaning", action="store_true",
+        help="DANGER: With --scorched-earth, allow deletion even when a Shared "
+             "Drive has no other organizer or its membership cannot be read. "
+             "Use only after manually arranging Shared Drive administration.")
 
     # --- Skip flags ---
     skip_grp = parser.add_argument_group("Skip options")
@@ -4368,6 +4392,9 @@ def parse_args():
             f"(got {args.restore_batch_size}); GYB rejects anything outside "
             f"that range. Use {RESTORE_BATCH_SIZE} unless you have a reason."
         )
+
+    if args.allow_shared_drive_orphaning and not args.scorched_earth:
+        parser.error("--allow-shared-drive-orphaning requires --scorched-earth")
 
     if args.scorched_earth:
         if not args.doit:
@@ -4674,6 +4701,34 @@ def main():
     # SCORCHED EARTH: Short circuit after kill switch
     # =========================================================================
     if args.scorched_earth:
+        # Unlike normal offboarding, scorched-earth permanently removes the
+        # account.  Prove its Shared Drives have another organizer before any
+        # irreversible cleanup; a warning after deletion is too late.
+        with PhaseTimer("Shared Drive deletion safety check"):
+            try:
+                if args.allow_shared_drive_orphaning and not dry_run:
+                    message = (
+                        "Shared Drive deletion safety interlock OVERRIDDEN by "
+                        "--allow-shared-drive-orphaning"
+                    )
+                    print_warning(message)
+                    summary_warning(message)
+                check_shared_drives(user_email, dry_run,
+                                    require_safe_deletion=(
+                                        not args.allow_shared_drive_orphaning))
+            except SharedDriveSafetyError as e:
+                print_error(str(e))
+                summary_error(str(e))
+                print_summary(dry_run)
+                sys.exit(exit_code)
+            except Exception as e:
+                message = ("Shared Drive safety check failed unexpectedly; "
+                           f"user deletion blocked: {e}")
+                print_error(message)
+                summary_error(message)
+                print_summary(dry_run)
+                sys.exit(exit_code)
+
         with PhaseTimer("Group removal"):
             try:
                 remove_groups(user_email, dry_run)
