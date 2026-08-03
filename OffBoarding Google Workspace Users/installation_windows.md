@@ -281,31 +281,35 @@ gam user <super-admin@yourdomain.com> update serviceaccount
 ```
 
 You'll see a numbered scope picker. Items already selected are shown as
-`[*]`; unselected as `[ ]`. The list runs `0)` through `49)` in current
-GAM7 builds.
+`[*]`; unselected as `[ ]`. **Do not rely on the option numbers:** GAM
+adds and removes APIs over time, so the number beside a scope can change
+between releases. Find scopes by their exact labels instead.
 
-The defaults already cover all three tools, so you don't need to
-change anything. The items to verify are checked:
+The defaults normally cover the GAM scopes needed by all three tools.
+Regardless of their current numbers, verify that these exact labels are
+checked:
 
-| # | Scope (exact label from the picker) | Required by | Default? |
-|---|---|---|---|
-| 22 | `Drive API (supports readonly)` | rclone | `[*]` yes |
-| 29 | `Gmail API - Full Access (Labels, Messages)` | GYB (backup + restore, incl. delete) | `[*]` yes |
+| Scope (exact label from the picker) | Required OAuth scope | Required by |
+|---|---|---|
+| `Drive API (supports readonly)` | `https://www.googleapis.com/auth/drive` | rclone |
+| `Gmail API - Full Access (Labels, Messages)` | `https://mail.google.com/` | GYB backup and restore, including delete |
 
 Leave the other `[*]` defaults as-is. They're what GAM itself needs.
 
 Things to **leave unchecked** (do not toggle them on):
 
-- `23) Drive API - write todrive data - has access to all Drive`: GAM's
+- `Drive API - write todrive data - has access to all Drive`: GAM's
   internal `todrive` feature, not used by rclone.
-- `31) Gmail API - Full Access - readonly`: superseded by 29.
-- `32) Gmail API - Send Messages - including todrive`: not needed.
+- `Gmail API - Full Access - readonly`: superseded by the full-access
+  Gmail selection above.
+- `Gmail API - Send Messages - including todrive`: not needed.
 
 Optional (only tick if you know you need it):
 
-- `30) Gmail API - Full Access (Labels, Messages) except delete message`
+- `Gmail API - Full Access (Labels, Messages) except delete message`
   is selected by default and is harmless. If you want the minimal
-  surface, you can uncheck it since 29 is a superset.
+  surface, you can uncheck it because the full-access selection above
+  is a superset.
 
 Press `c` (or whatever the picker prompts) to **continue** with the
 current selection. GAM will print an Admin Console URL.
@@ -321,10 +325,20 @@ Console visit, so this is a one-trip task instead of two:
    you on the **Domain-wide Delegation** edit page for your service
    account, with the GAM-selected scopes already filled into the
    **OAuth scopes** field.
-2. In that last empty field, **add** the two GYB scopes, do *not* replace the list:
+2. Confirm that the resulting **OAuth scopes** field contains these five
+   exact URLs. GAM supplies the Drive, Gmail, and user-info scopes; add
+   the two GYB-only scopes if they are missing. Do *not* replace the
+   existing list:
    ```
-   https://www.googleapis.com/auth/apps.groups.migration,https://www.googleapis.com/auth/drive.appdata
+   https://www.googleapis.com/auth/drive
+   https://mail.google.com/
+   https://www.googleapis.com/auth/userinfo.email
+   https://www.googleapis.com/auth/apps.groups.migration
+   https://www.googleapis.com/auth/drive.appdata
    ```
+
+   The Admin Console expects a comma-separated list; the URLs are shown
+   one per line here so each can be checked without overlooking one.
 
 3. Click **Authorize**.
 
@@ -346,9 +360,12 @@ Wait ~1 minute for DWD to propagate, then verify every scope is live:
 gam user <super-admin@yourdomain.com> check serviceaccount
 ```
 
-All GAM scopes should show **PASS**. If any show **FAIL**, re-run
-`gam user ... update serviceaccount` and re-authorise in the printed
-URL. Remember to re-append the two GYB scopes.
+Confirm that the checks associated with the exact `Drive API (supports
+readonly)` and `Gmail API - Full Access (Labels, Messages)` labels show
+**PASS**; all other selected GAM scopes should pass too. Do not compare
+their option numbers. If any show **FAIL**, re-run `gam user ... update
+serviceaccount`, select by label, and re-authorise in the printed URL.
+Then confirm the five delegated scope URLs above are still present.
 
 ### 1.5 GAM7 smoke test
 
