@@ -102,6 +102,14 @@ Please keep new scripts consistent with the existing style: PEP 8, a clear heade
 
 ---
 
+## 🙏 Credits
+
+[**Gavin-X**](https://github.com/Gavin-X) read `offboard_user.py` closely and filed five defects against it: [#2](https://github.com/PaulOgier/GAMScripts/issues/2), a preflight failure could leave a suspended account active; [#3](https://github.com/PaulOgier/GAMScripts/issues/3), failed transfers did not stop licence removal and suspension; [#4](https://github.com/PaulOgier/GAMScripts/issues/4), source and destination could be the same account; [#5](https://github.com/PaulOgier/GAMScripts/issues/5), a containment failure could leave an account accessible; and [#6](https://github.com/PaulOgier/GAMScripts/issues/6), dead code and confusing phase numbering. They also opened PRs [#7](https://github.com/PaulOgier/GAMScripts/pull/7) and [#8](https://github.com/PaulOgier/GAMScripts/pull/8) with proposed fixes. All five were valid, and all five are fixed in v5.2.0 and v5.3.0. Most of them ended a run in a state the operator could not see, which is the kind of bug you only find by reading the code rather than running it. Thank you.
+
+They came back for a second round: seven more reports (issues [#9](https://github.com/PaulOgier/GAMScripts/issues/9)–[#15](https://github.com/PaulOgier/GAMScripts/issues/15)) spanning the script, the Windows installation guide, and the command builder, this time with seven working pull requests ([#20](https://github.com/PaulOgier/GAMScripts/pull/20)–[#26](https://github.com/PaulOgier/GAMScripts/pull/26)) — including the admin-account safety gate that headlines v5.4.0. All seven PRs were merged as submitted after review and a live test round. Thank you again.
+
+---
+
 ## 📜 License
 
 Distributed under the Apache-2.0 license. See `LICENSE` for more information.
