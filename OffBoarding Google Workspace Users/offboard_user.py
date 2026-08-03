@@ -1408,6 +1408,42 @@ def verify_user(email: str) -> Optional[Dict[str, str]]:
     return user_info
 
 
+class AdminAccountSafetyError(RuntimeError):
+    """Raised when offboarding is attempted while admin roles remain."""
+
+
+def enforce_admin_account_gate(email: str, user_info: Dict[str, str],
+                               allow_admin_account: bool) -> None:
+    """Refuse to offboard a privileged account without a deliberate override."""
+    if user_info.get('_is_admin', 'False') != 'True':
+        return
+
+    print_error(
+        "ADMIN ACCOUNT SAFETY HOLD: this user still has Google Workspace "
+        "administrator privileges. No offboarding changes have been made."
+    )
+    print_error(
+        "List every assigned role and its roleAssignmentId, remove each role, "
+        "then rerun offboarding:\n"
+        f"    gam print admins user {email}\n"
+        "    gam delete admin <roleAssignmentId>"
+    )
+
+    if allow_admin_account:
+        message = (
+            "Admin account safety hold OVERRIDDEN by --allow-admin-account; "
+            "administrator roles will NOT be revoked by this script"
+        )
+        print_warning(message)
+        summary_warning(message)
+        return
+
+    raise AdminAccountSafetyError(
+        "User still has administrator privileges; offboarding blocked. "
+        "Remove all role assignments or rerun with --allow-admin-account."
+    )
+
+
 ###############################################################################
 # INTERACTIVE PROMPTS [RECOMMENDED]
 ###############################################################################
@@ -4280,6 +4316,11 @@ def parse_args():
         help="DANGER: Kill switch, remove groups/licences, suspend, then "
              "permanently DELETE the user. No backups, no transfers. "
              "Requires --doit and --force. You must type the email to confirm.")
+    mode_grp.add_argument(
+        "--allow-admin-account", action="store_true",
+        help="DANGER: Continue even when the target still has Super Admin or "
+             "delegated admin privileges. This script does not revoke those "
+             "roles; remove them first unless this override is intentional.")
 
     # --- Skip flags ---
     skip_grp = parser.add_argument_group("Skip options")
@@ -4482,6 +4523,18 @@ def main():
     if user_info is None:
         print_error("User verification failed. Aborting.")
         sys.exit(2)
+
+    # Privileged roles survive password resets and suspension and become live
+    # again if the account is restored or unsuspended.  Gate before every
+    # possible mutation, including destination checks and temporary unsuspend.
+    try:
+        enforce_admin_account_gate(
+            user_email, user_info, args.allow_admin_account)
+    except AdminAccountSafetyError as e:
+        print_error(str(e))
+        summary_error(str(e))
+        print_summary(dry_run)
+        sys.exit(exit_code)
 
     is_suspended = user_info.get('_is_suspended', 'False') == 'True'
     temp_unsuspended = False
