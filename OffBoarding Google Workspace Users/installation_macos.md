@@ -508,6 +508,13 @@ Restores from a backup you already have and skips the download and every other
 phase. Re-running a restore is safe: Gmail discards messages it already holds,
 so nothing is duplicated.
 
+Since v5.4.0 you rarely need this flag for a simple retry: a plain re-run that
+finds an earlier mailbox backup folder for the same user offers to resume into
+it instead of re-downloading (under `--force` it resumes automatically when the
+folder is 30 days old or less, and starts fresh when it is older). Use
+`--reuse-email-backup` when you want to skip every other phase and only finish
+the restore.
+
 ### Before you start a big one
 
 - **Check the destination is not suspended and has Gmail.** Both failures waste
@@ -574,6 +581,15 @@ Admin console. Add another organiser before deleting anyone.
 - **Restore fails immediately with "Mail service not enabled".** The
   destination has no Gmail licence. Assign one with
   `gam user <destination> add license 1010020020`, then wait a minute.
+  Since v5.4.0 the script checks this up front and refuses to start the
+  download, so hitting it mid-restore means the licence was removed during
+  the run or the destination account is only minutes old.
+- **The run aborts immediately with "ADMIN ACCOUNT SAFETY HOLD".** The user
+  still holds Super Admin or delegated-admin roles, which survive the password
+  scramble and suspension. Remove them first — the script prints the exact
+  `gam print admins user <email>` and `gam delete admin <roleAssignmentId>`
+  commands — or re-run with `--allow-admin-account` if keeping the roles is a
+  deliberate decision (v5.4.0).
 - **A few old messages arrive dated today.** Their sender wrote an unusable
   `Date:` header, so Gmail stamps them with the time of the restore. It affects
   a handful of messages and cannot be fixed — mention it if the recipient asks.

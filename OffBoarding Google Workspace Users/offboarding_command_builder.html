@@ -245,6 +245,11 @@
       </div>
     </div>
 
+    <div class="check" style="margin-top:10px;">
+      <input type="checkbox" id="allow-admin-account">
+      <label for="allow-admin-account"><strong>--allow-admin-account</strong> — override the admin-account safety hold. <span class="check-desc">Since v5.4.0 the script refuses to offboard a user who still holds Super Admin or delegated-admin roles: privileged roles survive the password scramble and suspension, and come back to life if the account is ever restored. The right fix is to remove the roles first (the script prints the exact <code>gam print admins</code> / <code>gam delete admin</code> commands). Tick this only when keeping the roles is a deliberate decision — the script never revokes them for you, and <code>--force</code> does NOT imply this flag.</span></label>
+    </div>
+
     <div id="scorched-panel" class="scorched-panel" style="display:none;">
       <h3>⚠ Scorched earth — permanent deletion</h3>
       <p>This permanently <strong>DELETES</strong> the user after killing access, removing groups/licences, and suspending. No backups, no transfers — even if you set them. <code>--no-snapshot</code> is forced on by the script.</p>
@@ -376,7 +381,7 @@
     <div class="field" style="margin-top:10px;">
       <label class="field-label" for="backup-dir">Backup directory <span class="hint">— <code>--backup-dir</code>. Default <code>./offboarding_backups</code>.</span></label>
       <input type="text" id="backup-dir" placeholder="./offboarding_backups" autocomplete="off">
-      <span class="field-hint">Where snapshots, mailbox backups and Drive backups are written. A mailbox backup can reach hundreds of gigabytes, so point this at a local disk and <strong>never inside iCloud, OneDrive, Dropbox or Google Drive</strong> — a synced folder will try to upload all of it.</span>
+      <span class="field-hint">Where snapshots, mailbox backups and Drive backups are written. A mailbox backup can reach hundreds of gigabytes, so point this at a local disk and <strong>never inside iCloud, OneDrive, Dropbox or Google Drive</strong> — a synced folder will try to upload all of it. Since v5.4.0 a re-run that finds an earlier mailbox backup here offers to resume into it instead of re-downloading (under <code>--force</code> it resumes automatically when the folder is 30 days old or less).</span>
     </div>
     <div class="field" style="margin-top:10px;">
       <label class="field-label" for="restore-batch-size">Restore batch size <span class="hint">— <code>--restore-batch-size</code>. Default <code>50</code>, must be 1&ndash;100.</span></label>
@@ -661,6 +666,8 @@
       parts.push('--doit', '--force', '--scorched-earth');
     }
 
+    if ($('allow-admin-account').checked) parts.push('--allow-admin-account');
+
     const reuseBackup = trimmed('reuse-email-backup');
     const restoreOnly = mode !== 'scorched' && !!reuseBackup;
 
@@ -801,7 +808,7 @@
       'forward-to','forward-alias-to','log-dir','backup-dir',
       'restore-batch-size','reuse-email-backup'
     ].forEach(id => { snap.text[id] = $(id).value; });
-    ['no-transfer','unsuspend','backup-drive','backup-email', ...SKIP_FLAGS]
+    ['no-transfer','unsuspend','backup-drive','backup-email','allow-admin-account', ...SKIP_FLAGS]
       .forEach(id => { snap.bool[id] = $(id).checked; });
     return snap;
   }

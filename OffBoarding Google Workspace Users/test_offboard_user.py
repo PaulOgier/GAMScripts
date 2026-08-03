@@ -1457,5 +1457,138 @@ class TestB17ContainmentOutcome(OffboardTestCase):
         self.assertIn("skip_suspend = args.no_suspend and not force_suspend", src)
 
 
+
+
+class TestB19MahatiRunFixes(OffboardTestCase):
+    """Fixes from the Mahati (udank.shah) production run and the 2026-08-03
+    dev round: mailbox-less email destination caught in preflight, backup
+    folder reuse on re-run, exit-56 drive transfer as warning, honest restore
+    attempt counts."""
+
+    def test_b19_1_gmail_disabled_detected_despite_gam_failure(self):
+        """gam exits 73 (ok=False) for a mailbox-less user; the 'not enabled'
+        text must still block the restore."""
+        def fake(args, **kw):
+            if "gmailprofile" in args:
+                return (False, "User: d@x, Gmail Service/App not enabled")
+            return (True, "")
+        with mock.patch.object(offb, "run_gam", side_effect=fake):
+            ready = offb.check_restore_destination_ready(
+                "d@x", Path("/nonexistent"), dry_run=False)
+        self.assertFalse(ready)
+        self.assertTrue(any("Gmail not enabled" in e for e in offb.summary_errors))
+
+    def test_b19_2_preflight_blocks_mailboxless_email_destination(self):
+        import argparse
+        args = argparse.Namespace(
+            no_drive=True, no_email=False, no_alias=True, no_calendar=True,
+            no_forward=True, drive_to=None, email_to="dest@x", alias_to=None,
+            calendar_to=None, forward_to=None, all_transfer_to=None, force=True)
+        def fake(cmd, **kw):
+            if "gmailprofile" in cmd:
+                return (False, "Gmail Service/App not enabled")
+            return (True, "First Name: D\nAccount Suspended: False")
+        with mock.patch.object(offb, "run_gam", side_effect=fake), \
+             mock.patch.object(offb, "_list_aliases", return_value=[]):
+            with self.assertRaises(SystemExit) as cm:
+                offb.preflight_destinations(args, source="leaver@x")
+        self.assertEqual(cm.exception.code, 2)
+
+    @staticmethod
+    def _dated_backup(root, days_ago):
+        from datetime import datetime, timedelta
+        stamp = (datetime.now() - timedelta(days=days_ago)).strftime("%Y%m%d")
+        folder = root / "mailboxes" / f"leaver@x_{stamp}"
+        folder.mkdir(parents=True)
+        (folder / "msg-db.sqlite").touch()
+        return folder
+
+    def test_b19_3_force_resumes_recent_folder(self):
+        """A next-day --force re-run must resume into the existing backup
+        folder, not mint a new dated one and re-download the whole mailbox."""
+        with tempfile.TemporaryDirectory() as td:
+            old = self._dated_backup(Path(td), days_ago=2)
+            with mock.patch.object(offb, "BACKUP_DIRECTORY", Path(td)):
+                chosen = offb._select_email_backup_path("leaver@x", force=True)
+        self.assertEqual(chosen, old)
+
+    def test_b19_3b_force_starts_fresh_when_folder_is_stale(self):
+        """A folder past REUSE_BACKUP_MAX_AGE_DAYS is likely a previous
+        engagement (rehire case) — under --force it must NOT be resumed."""
+        with tempfile.TemporaryDirectory() as td:
+            old = self._dated_backup(Path(td), days_ago=40)
+            with mock.patch.object(offb, "BACKUP_DIRECTORY", Path(td)):
+                chosen = offb._select_email_backup_path("leaver@x", force=True)
+        self.assertNotEqual(chosen, old)
+
+    def test_b19_3c_interactive_prompt_decides(self):
+        with tempfile.TemporaryDirectory() as td:
+            old = self._dated_backup(Path(td), days_ago=2)
+            with mock.patch.object(offb, "BACKUP_DIRECTORY", Path(td)), \
+                 mock.patch.object(offb, "prompt_yes_no", return_value=True):
+                self.assertEqual(
+                    offb._select_email_backup_path("leaver@x"), old)
+            with mock.patch.object(offb, "BACKUP_DIRECTORY", Path(td)), \
+                 mock.patch.object(offb, "prompt_yes_no", return_value=False):
+                fresh = offb._select_email_backup_path("leaver@x")
+        self.assertNotEqual(fresh, old)
+
+    def test_b19_3d_declined_same_day_folder_gets_distinct_name(self):
+        """Declining reuse of a folder named for TODAY must not hand back
+        the same path under a different intention."""
+        with tempfile.TemporaryDirectory() as td:
+            old = self._dated_backup(Path(td), days_ago=0)
+            with mock.patch.object(offb, "BACKUP_DIRECTORY", Path(td)), \
+                 mock.patch.object(offb, "prompt_yes_no", return_value=False):
+                fresh = offb._select_email_backup_path("leaver@x")
+        self.assertNotEqual(fresh, old)
+
+    def test_b19_4_backup_path_ignores_foreign_and_empty_folders(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "mailboxes" / "leaver@x_email_20260701").mkdir(parents=True)
+            empty = root / "mailboxes" / "leaver@x_20260702"
+            empty.mkdir()  # no msg-db.sqlite: not a resumable GYB backup
+            with mock.patch.object(offb, "BACKUP_DIRECTORY", root):
+                chosen = offb._select_email_backup_path("leaver@x", force=True)
+        self.assertNotEqual(chosen.name, "leaver@x_email_20260701")
+        self.assertNotEqual(chosen, empty)
+        self.assertRegex(chosen.name, r"^leaver@x_\d{8}$")
+
+    def test_b19_5_drive_transfer_exit_56_is_warning_not_error(self):
+        """Exit 56 = non-owned files skipped; must not block licence removal
+        (ticket 10077)."""
+        proc = mock.MagicMock()
+        proc.stdout = iter(["Got 3 Drive Files/Folders for Source User\n",
+                            "Ownership Transferred to User: ok\n"])
+        proc.returncode = 56
+        proc.wait = mock.MagicMock()
+        with mock.patch.object(offb, "run_gam", return_value=(True, "First Name: D")), \
+             mock.patch.object(offb.subprocess, "Popen", return_value=proc):
+            offb.transfer_drive("leaver@x", "dest@x", dry_run=False)
+        self.assertFalse(offb.summary_errors)
+        self.assertTrue(any("exit 56" in w for w in offb.summary_warnings))
+
+    def test_b19_6_drive_transfer_other_exit_still_error(self):
+        proc = mock.MagicMock()
+        proc.stdout = iter([])
+        proc.returncode = 1
+        proc.wait = mock.MagicMock()
+        with mock.patch.object(offb, "run_gam", return_value=(True, "First Name: D")), \
+             mock.patch.object(offb.subprocess, "Popen", return_value=proc):
+            offb.transfer_drive("leaver@x", "dest@x", dry_run=False)
+        self.assertTrue(any("Drive transfer failed" in e for e in offb.summary_errors))
+
+    def test_b19_7_restore_failure_reports_actual_attempts(self):
+        source = inspect_getsource(offb.migrate_email)
+        self.assertIn('f"Email restore to {destination} FAILED after {attempt} "',
+                      source)
+
+
+def inspect_getsource(fn):
+    import inspect
+    return inspect.getsource(fn)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

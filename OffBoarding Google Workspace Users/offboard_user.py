@@ -42,7 +42,7 @@ YOU ASSUME ALL RISK ASSOCIATED WITH THE USE OF THIS SOFTWARE.
 Author:       Paul Ogier
 Created:      2023-06-22
 Updated:      2026-07-13
-Version:      5.3.0
+Version:      5.4.0
 Status:       Production
 Python:       3.8+
 Dependencies: GAM ADV X (GAM7), GYB (optional), rclone (optional), PyYAML (optional)
@@ -151,6 +151,34 @@ Changelog
   2026-05-07 - v4.4.0 - Added startup version check against remote VERSION file (CHECK_FOR_UPDATES toggle, fail-silent); restored author/contact header with Outsource House copyright and three Udemy course links; aligned in-script licence reference with the repo LICENSE (Apache 2.0) and added a plain-English summary emphasising attribution retention.
   2026-05-13 - v4.5.0 - BREAKING: renamed --transfer-to to --all-transfer-to. Added per-phase destination flags (--drive-to, --email-to, --alias-to, --calendar-to, --forward-to) that override the global default; precedence is phase-specific > --all-transfer-to > interactive prompt. Added upfront destination resolution and validation before any phase runs: under --force, any non-skipped phase without a resolvable destination aborts the run with a clear error instead of half-offboarding.
   2026-05-14 - v4.6.0 - Added end-of-run MANUAL ACTION block surfacing admin-console instructions for durable mail capture (alias / recipient address map / group) since GAM cannot configure recipient address map and Gmail-level forwarding stops on suspension/deletion; new --forward-alias-to flag explicitly nominates the successor printed in the block (falls back to --forward-to then --all-transfer-to), no automated change is made. Guide gains a "Mail capture after suspension" section and the order-of-operations list flags forwarding's suspension limitation.
+  2026-08-03 - v5.4.0 - Admin-account gate (Gavin-X, PR #26 / issue #10): offboarding a user
+                        who still holds Super Admin or delegated-admin roles now aborts
+                        before any mutation with the exact gam commands to list and remove
+                        the role assignments; --allow-admin-account is the deliberate
+                        override, and --force does NOT imply it. Plus four field fixes from
+                        the Mahati production run and the 2026-08-03 dev round:
+                        EMAIL DESTINATION MAILBOX: preflight now probes the email
+                        destination's gmailprofile and aborts if Gmail is not enabled —
+                        previously an unlicensed destination passed validation and the
+                        restore failed with "Mail service not enabled" only AFTER the full
+                        mailbox download (hours on a real leaver). The equivalent check in
+                        check_restore_destination_ready() also fired only when gam exited 0,
+                        but gam exits 73 for mailbox-less users; it now matches the output
+                        text regardless of exit status. BACKUP RESUME: the mailbox backup
+                        folder is date-stamped, so a re-run on a later day minted a fresh
+                        folder and re-downloaded the entire mailbox; when a prior backup
+                        folder exists the script now offers to resume into it (interactive
+                        prompt showing its age; under --force it auto-resumes folders up
+                        to 30 days old and starts fresh beyond that, since an older folder
+                        is likely a previous engagement whose restore would resurrect
+                        long-deleted mail).
+                        DRIVE EXIT 56: gam's transfer drive exits 56 when files the source
+                        could access but not own were skipped; that was reported as a hard
+                        failure and blocked licence removal behind a transfer that lost
+                        nothing (a week on ticket 10077) — now a warning naming the count
+                        moved, with a verify instruction. HONEST ATTEMPT COUNT: a restore
+                        failure summary reported the 20-attempt ceiling even when the stall
+                        bail-out stopped after 3; it now reports the attempts actually run.
   2026-07-29 - v5.3.0 - Three state-safety defects reported by Gavin-X (issues #2, #3, #5),
                         all in the same shape: the run ended in a state nobody could see.
                         SUSPENSION STATE: destinations are now validated BEFORE the temporary
@@ -357,7 +385,7 @@ import shutil
 
 # [IMPORTANT] Current local script version. Bumped on each release.
 # Compared against the remote VERSION file to detect updates.
-SCRIPT_VERSION = "5.3.0"
+SCRIPT_VERSION = "5.4.0"
 
 # [OPTIONAL] Check for a newer script version on startup.
 # When True (default), the script makes a single 3-second HTTP request to
@@ -1285,7 +1313,48 @@ def preflight_destinations(args, source: Optional[str] = None) -> Dict[str, Opti
                 sys.exit(2)
             seen[cache_key] = True
 
+    # The email destination needs an actual MAILBOX, not just a directory
+    # entry: GYB restores into an unlicensed (Cloud Identity) user fail every
+    # batch with "Mail service not enabled" — and without this check that only
+    # surfaces AFTER the full mailbox download, which on a real leaver is
+    # hours.
+    email_dest = resolved.get("email")
+    if email_dest:
+        reason = _email_mailbox_missing(email_dest)
+        if reason:
+            print_error(
+                f"Email destination {email_dest} has no usable Gmail mailbox "
+                f"({reason}). The mailbox restore would fail after the full "
+                f"backup download. Assign a Workspace licence and wait for "
+                f"the mailbox to provision, or skip with --no-email."
+            )
+            sys.exit(2)
+
     return resolved
+
+
+def _email_mailbox_missing(email: str) -> Optional[str]:
+    """Return why `email` cannot receive a GYB restore, or None if it can.
+
+    The probe is `show gmailprofile`, matched on its OUTPUT TEXT, not its
+    exit status: for a settled unlicensed user gam FAILS (exit 73) with
+    "Gmail Service/App not enabled" in the output, so gating on success made
+    the check a no-op. Verified live on dev 2026-08-03.
+
+    Known blind spot, also verified live: for the first minutes after a user
+    is CREATED, gmailprofile (and even `gyb --action quota`) succeed for an
+    unlicensed user, and `info user`'s "Mailbox is setup" field is no help —
+    it stays False on licensed, provably restorable mailboxes. A brand-new
+    unlicensed destination therefore slips this preflight; it is still
+    caught by the same check re-run at restore time, after the download,
+    when the state has settled.
+    """
+    _, profile = run_gam(["user", email, "show", "gmailprofile"],
+                         dry_run=False, capture_output=True, timeout=60,
+                         suppress_summary_error=True)
+    if "not enabled" in profile.lower():
+        return "Gmail service not enabled"
+    return None
 
 
 # Verifies that a destination user exists before attempting transfers.
@@ -2622,6 +2691,25 @@ def transfer_drive(source: str, destination: str, dry_run: bool):
                     + (f" ({file_count} file(s)/folder(s))"
                        if file_count is not None else "")
                 )
+        elif proc.returncode == 56:
+            # GAM exits 56 when some of the files it listed could not be
+            # transferred — normally files the source can ACCESS but does not
+            # OWN (ownership of someone else's file cannot move). The files
+            # the source did own transferred fine, per the confirmations
+            # counted above. Reporting this as a hard failure blocked licence
+            # removal behind a "failed" transfer that lost nothing (a week on
+            # ticket 10077), so it is a warning with a verify instruction.
+            print_warning(
+                f"Drive transfer finished with exit 56: {file_count} owned "
+                f"file(s)/folder(s) transferred; files {source} could access "
+                f"but did not own were skipped (their ownership cannot move)."
+            )
+            summary_warning(
+                f"Drive transfer to {destination} completed with skips "
+                f"(exit 56, {file_count} owned file(s) moved; non-owned files "
+                f"skipped). Spot-check the successor's Drive before removing "
+                f"licences."
+            )
         else:
             print_error(f"Drive transfer failed (exit {proc.returncode}): {cmd_str}")
             summary_error(f"Drive transfer failed: {source} -> {destination}")
@@ -2994,16 +3082,12 @@ def check_restore_destination_ready(destination: str, backup_path: Path,
     if dry_run:
         return True
 
-    # Probe Gmail directly rather than reading licence metadata: `gam info user`
-    # intermittently renders an assigned SKU as "Not available/incomplete".
-    ok, profile = run_gam(["user", destination, "show", "gmailprofile"],
-                          dry_run=False, capture_output=True, timeout=60,
-                          suppress_summary_error=True)
-    if ok and "not enabled" in profile.lower():
+    reason = _email_mailbox_missing(destination)
+    if reason:
         print_error(
-            f"Destination {destination} has no Gmail service enabled. Every "
-            f"message import would fail with 'Mail service not enabled'. "
-            f"Assign a Workspace licence to the account first."
+            f"Destination {destination} has no usable Gmail mailbox "
+            f"({reason}). Every message import would fail with 'Mail service "
+            f"not enabled'. Assign a Workspace licence to the account first."
         )
         summary_error(f"Email restore to {destination} skipped: Gmail not enabled")
         return False
@@ -3162,8 +3246,69 @@ def count_undated_messages(backup_path: Path) -> int:
         return 0
 
 
+# How old (days) an existing mailbox backup folder may be and still be
+# reused WITHOUT asking, under --force. Retried offboardings span days;
+# a folder older than this is far more likely a previous engagement
+# (e.g. a rehire's first offboarding), and resuming into one would
+# restore mail the user has long since deleted.
+REUSE_BACKUP_MAX_AGE_DAYS = 30
+
+
+def _select_email_backup_path(source: str, force: bool = False) -> Path:
+    """Pick the mailbox backup folder, offering to resume an existing one.
+
+    The folder name is date-stamped, so a re-run on a LATER day used to mint a
+    fresh folder and GYB re-downloaded the entire mailbox from scratch instead
+    of resuming — on the 107 GB Mahati mailbox that was a full lost day. When
+    a prior backup folder for this user exists (identified by msg-db.sqlite),
+    ask the operator whether to resume into it; under --force, resume
+    automatically if it is recent (REUSE_BACKUP_MAX_AGE_DAYS) and start
+    fresh if it is older.
+    """
+    mailboxes = BACKUP_DIRECTORY / "mailboxes"
+    # Match only this function's own folders (<source>_YYYYMMDD, plus the
+    # _HHMMSS suffix a declined same-day prompt adds), not the backup-email
+    # phase's <source>_email_YYYYMMDD siblings.
+    prior = sorted(
+        p for p in mailboxes.glob(f"{source}_*")
+        if re.fullmatch(re.escape(source) + r"_\d{8}(_\d{6})?", p.name)
+        and (p / "msg-db.sqlite").exists()
+    )
+    if prior:
+        newest = prior[-1]
+        stamp = re.search(r"_(\d{8})", newest.name).group(1)  # type: ignore[union-attr]
+        age_days = (datetime.now() - datetime.strptime(stamp, "%Y%m%d")).days
+        if force:
+            reuse = age_days <= REUSE_BACKUP_MAX_AGE_DAYS
+            print_info(
+                f"Found existing mailbox backup {newest.name} "
+                f"({age_days} day(s) old): "
+                + (f"resuming into it (--force, within "
+                   f"{REUSE_BACKUP_MAX_AGE_DAYS} days)." if reuse else
+                   f"older than {REUSE_BACKUP_MAX_AGE_DAYS} days, starting a "
+                   f"fresh download instead.")
+            )
+        else:
+            reuse = prompt_yes_no(
+                f"Found an existing mailbox backup {newest.name} "
+                f"({age_days} day(s) old). Resume into it (GYB skips "
+                f"already-downloaded messages) instead of downloading "
+                f"from scratch?",
+                default=True,
+            )
+        if reuse:
+            return newest
+    fresh = mailboxes / f"{source}_{datetime.now().strftime('%Y%m%d')}"
+    if fresh.exists():
+        # Declined reuse on the same day the existing folder is named for:
+        # a fresh folder needs a distinct name or GYB resumes anyway.
+        fresh = mailboxes / f"{source}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    return fresh
+
+
 def migrate_email(source: str, destination: str, dry_run: bool, strip_labels: bool = True,
-                  reuse_backup: Optional[Path] = None, batch_size: int = RESTORE_BATCH_SIZE):
+                  reuse_backup: Optional[Path] = None, batch_size: int = RESTORE_BATCH_SIZE,
+                  force: bool = False):
     """
     [OPTIONAL] Back up and restore email using GYB.
 
@@ -3204,7 +3349,7 @@ def migrate_email(source: str, destination: str, dry_run: bool, strip_labels: bo
             return
         print_info(f"Reusing existing backup (skipping download): {backup_path}")
     else:
-        backup_path = BACKUP_DIRECTORY / "mailboxes" / f"{source}_{datetime.now().strftime('%Y%m%d')}"
+        backup_path = _select_email_backup_path(source, force=force)
         if not dry_run:
             backup_path.mkdir(parents=True, exist_ok=True)
 
@@ -3327,8 +3472,11 @@ def migrate_email(source: str, destination: str, dry_run: bool, strip_labels: bo
             )
     if not success and not dry_run:
         print_error(f"Email restore failed; backup retained at {backup_path}")
+        # `attempt` is the number actually run — the stall bail-out usually
+        # stops well before the ceiling, and reporting the ceiling here made
+        # a 3-attempt failure read as 20.
         summary_error(
-            f"Email restore to {destination} FAILED after {MAX_RESTORE_ATTEMPTS} "
+            f"Email restore to {destination} FAILED after {attempt} "
             f"attempt(s); backup retained at {backup_path}. Re-run the same gyb "
             f"restore command (resume is on by default) or re-run this script. "
             f"If AV keeps locking messages mid-restore, add an on-access-scan "
@@ -4572,7 +4720,8 @@ def main():
         with PhaseTimer("Email migration"):
             try:
                 migrate_email(user_email, email_dest, dry_run, strip_labels=strip_labels,
-                              reuse_backup=reuse_backup, batch_size=args.restore_batch_size)
+                              reuse_backup=reuse_backup, batch_size=args.restore_batch_size,
+                              force=args.force)
             except Exception as e:
                 print_error(f"Email migration failed: {e}")
                 summary_error(f"Email exception: {e}")
@@ -4864,7 +5013,8 @@ def main():
                 record_failure("Email migration", transfer_failures):
             try:
                 migrate_email(user_email, email_dest, dry_run, strip_labels=strip_labels,
-                              reuse_backup=reuse_backup, batch_size=args.restore_batch_size)
+                              reuse_backup=reuse_backup, batch_size=args.restore_batch_size,
+                              force=args.force)
             except Exception as e:
                 print_error(f"Email migration failed: {e}")
                 summary_error(f"Email exception: {e}")
