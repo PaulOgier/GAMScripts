@@ -329,7 +329,7 @@
       </div>
       <div class="check">
         <input type="checkbox" id="backup-email">
-        <label for="backup-email"><strong>--backup-email</strong><span class="check-desc">Local email backup via <code>GYB</code> before migration. This is a raw archive — you can't restore from it directly without additional steps. Requires GYB installed and authorised.</span></label>
+        <label for="backup-email"><strong>--backup-email</strong><span class="check-desc">Local email backup via <code>GYB</code> before migration. This is a raw archive — you can't restore from it directly without additional steps. Requires GYB installed and authorised. Since v5.5.0, when the email migration also runs the mailbox is downloaded ONCE: the migration's retained backup serves as the archive.</span></label>
       </div>
     </div>
   </div>
@@ -381,7 +381,7 @@
     <div class="field" style="margin-top:10px;">
       <label class="field-label" for="backup-dir">Backup directory <span class="hint">— <code>--backup-dir</code>. Default <code>./offboarding_backups</code>.</span></label>
       <input type="text" id="backup-dir" placeholder="./offboarding_backups" autocomplete="off">
-      <span class="field-hint">Where snapshots, mailbox backups and Drive backups are written. A mailbox backup can reach hundreds of gigabytes, so point this at a local disk and <strong>never inside iCloud, OneDrive, Dropbox or Google Drive</strong> — a synced folder will try to upload all of it. Since v5.4.0 a re-run that finds an earlier mailbox backup here offers to resume into it instead of re-downloading (under <code>--force</code> it resumes automatically when the folder is 30 days old or less).</span>
+      <span class="field-hint">Where snapshots, mailbox backups and Drive backups are written. A mailbox backup can reach hundreds of gigabytes, so point this at a local disk and <strong>never inside iCloud, OneDrive, Dropbox or Google Drive</strong> — a synced folder will try to upload all of it. Since v5.4.0 a re-run that finds an earlier mailbox backup here offers to resume into it instead of re-downloading (under <code>--force</code> it resumes automatically when the folder is 30 days old or less); since v5.5.0 Drive backups resume the same way, and the mailbox size is checked against free disk space before the download starts.</span>
     </div>
     <div class="field" style="margin-top:10px;">
       <label class="field-label" for="restore-batch-size">Restore batch size <span class="hint">— <code>--restore-batch-size</code>. Default <code>50</code>, must be 1&ndash;100.</span></label>

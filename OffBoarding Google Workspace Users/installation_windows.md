@@ -45,7 +45,7 @@ they paste cleanly.
     box.
 
   **If you missed "Add to PATH" on the first run:** open Settings →
-  Apps → Installed apps → find Python 3.14 → `⋯` → **Modify** → Next →
+  Apps → Installed apps → find your Python entry → `⋯` → **Modify** → Next →
   on the *Advanced Options* screen, tick **"Add Python to environment
   variables"** → Install. Then close all cmd windows and open a fresh
   one.
@@ -69,7 +69,7 @@ they paste cleanly.
      ```cmd
      python --version
      ```
-     Should now print `Python 3.14.x`.
+     Should now print the version you installed.
 
   **Gotcha — `python3` does not exist on Windows.** The `python3`
   command is a Unix/macOS convention. The python.org installer only
@@ -116,7 +116,7 @@ they paste cleanly.
   python3 --version
   ```
 
-  Should print `Python 3.14.x`. From here on, every example in the
+  Should print the installed version. From here on, every example in the
   repo's docs that says `python3 offboard_user.py ...` will run as-is on
   this Windows box — same command, same behaviour as the macOS and
   Linux admins on the team.
@@ -187,9 +187,16 @@ other two tools will reuse.
 
 1. Open the [GAM7 releases page](https://github.com/GAM-team/GAM/releases/latest)
    and download the **Windows 64-bit zip** (asset name like
-   `gam-<version>-windows-x86_64.zip`). GAM7 does not ship as an MSI or
-   via winget, so use the zip.
-2. Extract it to `C:\GAM7\`. You should end up with `C:\GAM7\gam.exe`.
+   `gam-<version>-windows-x86_64.zip`). GAM7 also ships an `.exe` setup
+   installer; this guide uses the zip so every path is explicit.
+2. Extract the zip. It contains a top-level `gam7` folder, so a plain
+   extract to `C:\GAM7\` gives you `C:\GAM7\gam7\gam.exe` — and the
+   PATH entry below would then find nothing. Move the **contents** of
+   the inner `gam7` folder up so you end up with `C:\GAM7\gam.exe`
+   directly, then delete the empty inner folder. Verify:
+   ```cmd
+   dir C:\GAM7\gam.exe
+   ```
 3. Create the two companion folders the wiki convention uses:
    ```cmd
    mkdir C:\GAMConfig C:\GAMWork
@@ -383,8 +390,17 @@ Both should return real data. GAM7 is done.
 ### 2.1 Install GYB
 
 1. Open the [GYB releases page](https://github.com/GAM-team/got-your-back/releases/latest)
-   and download the Windows 64-bit zip.
-2. Extract to `C:\GYB\` (you should have `C:\GYB\gyb.exe`).
+   and download the Windows 64-bit zip (a `.msi` installer also exists;
+   this guide uses the zip for the same explicit-paths reason as §1.1).
+2. Extract the zip. Like GAM's, it contains a top-level `gyb` folder,
+   so extract and then move the **contents** of the inner `gyb` folder
+   up so you end up with `C:\GYB\gyb.exe` directly (not
+   `C:\GYB\gyb\gyb.exe`). This matters beyond PATH: §2.2's symlink must
+   sit in the same folder as `gyb.exe`, because GYB looks for its
+   credentials next to its own binary. Verify:
+   ```cmd
+   dir C:\GYB\gyb.exe
+   ```
 3. Open the Environment Variables editor as in §1.1. Under **System
    variables**, edit `Path` and add `C:\GYB` as a new entry. If you do not
    have admin rights, add it under **User variables** instead. Close all
@@ -534,9 +550,20 @@ gyb --action quota --email <super-admin@yourdomain.com> --service-account
 rclone lsd workspace:
 ```
 
-If all four succeed, the shared-service-account setup is working and you
-can run the offboarding script. See `offboarding_test_setup_guide.md` to
-build a safe test environment before pointing it at a real user.
+If all four succeed, the shared-service-account setup is working.
+
+One tenant-side prerequisite remains before the offboarding script will
+run: an OU named **`/Offboarding`** must exist (the script moves leavers
+into it and refuses to start if it is missing, printing the exact
+remediation). Create it once per tenant in the Admin console, or with:
+
+```cmd
+gam create org "Offboarding" description "Offboarded users" parent /
+```
+
+(A different OU name works too — edit `OFFBOARDING_OU` near the top of
+the script.) See `offboarding_test_setup_guide.md` to build a safe test
+environment before pointing the script at a real user.
 
 ---
 
@@ -589,7 +616,7 @@ Gmail starts throttling.
 ```cmd
 python3 offboard_user.py --doit --force --user leaver@yourdomain.com ^
   --email-to successor@yourdomain.com ^
-  --reuse-email-backup C:\offboarding_backups/mailboxes/leaver@yourdomain.com_20260721
+  --reuse-email-backup C:\offboarding_backups\mailboxes\leaver@yourdomain.com_20260721
 ```
 
 Restores from a backup you already have and skips the download and every other
@@ -602,6 +629,20 @@ it instead of re-downloading (under `--force` it resumes automatically when the
 folder is 30 days old or less, and starts fresh when it is older). Use
 `--reuse-email-backup` when you want to skip every other phase and only finish
 the restore.
+
+v5.5.0 extends the same thinking to the rest of a big run:
+
+- **Drive backups resume too.** A `--backup-drive` re-run offers to sync into
+  the newest prior Drive backup folder — rclone only downloads new or changed
+  files — with the same 30-day cap under `--force`.
+- **Disk space is checked up front.** Before the GYB download starts, the
+  mailbox size (estimated from Google's storage figures) is compared with the
+  free space on the backup volume: larger than the free space aborts the run,
+  over 80% of it warns. Fix by freeing space or pointing `--backup-dir` at a
+  bigger volume.
+- **`--backup-email` plus a migration downloads once.** When both run, the
+  migration's retained GYB backup serves as the local archive; the separate
+  archive download is skipped and the summary names the folder.
 
 ### Before you start a big one
 
@@ -681,11 +722,17 @@ Admin console. Add another organiser before deleting anyone.
   indistinguishable in the log. Check with
   `gam info user <destination> quick` and look for `Account Suspended: True`.
 - **Restore fails immediately with "Mail service not enabled".** The
-  destination has no Gmail licence. Assign one with
-  `gam user <destination> add license 1010020020`, then wait a minute.
+  destination has no Gmail licence. Assign one your tenant owns —
+  list what you have with `gam print licenses`, then
+  `gam user <destination> add license <sku>` — and wait a minute.
   Since v5.4.0 the script checks this up front and refuses to start the
   download, so hitting it mid-restore means the licence was removed during
   the run or the destination account is only minutes old.
+- **The run aborts at preflight because the mailbox is larger than the free
+  disk space.** New in v5.5.0: the estimated mailbox size is compared with
+  free space on the backup volume before the download starts, because
+  filling the disk hours into an overnight run was the alternative. Free up
+  space or pass `--backup-dir` pointing at a bigger volume.
 - **The run aborts immediately with "ADMIN ACCOUNT SAFETY HOLD".** The user
   still holds Super Admin or delegated-admin roles, which survive the password
   scramble and suspension. Remove them first — the script prints the exact
@@ -713,7 +760,9 @@ Admin console. Add another organiser before deleting anyone.
   Variables editor as described in §1.1.
 - **GYB: "service account not authorized for scope ..."** Go back to
   §1.4 and re-run `gam user ... update serviceaccount`, making sure
-  the Gmail (`https://mail.google.com/`) scope is selected.
+  the Gmail (`https://mail.google.com/`) scope is selected. Also
+  double-check the two GYB-only scopes are appended in the Admin
+  Console (§1.4 subsection).
 - **rclone: `failed to configure token: invalid_grant`.** The
   `impersonate` user does not exist, or domain-wide delegation is not
   authorised. Re-run §1.4 with the Drive scope selected.

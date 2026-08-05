@@ -789,18 +789,25 @@ class TestB5SuspendedDestination(unittest.TestCase):
 
 
 class TestB6BackupCompleteness(unittest.TestCase):
-    """Backup DB row count must match the .eml files actually on disk."""
+    """Backup DB row count must match the .eml files actually on disk.
+
+    Since the issue-#11-shaped fix, a shortfall is CLASSIFIED: messages in
+    the sibling _quarantined/ folder are deliberate exclusions, and only a
+    shortfall beyond those is an error (which holds licence removal via
+    record_failure at the call sites).
+    """
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.b = Path(self.tmp.name) / "bk"
         (self.b / "2026" / "1").mkdir(parents=True)
         offb.summary_warnings.clear()
+        offb.summary_errors.clear()
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def _make(self, rows, files):
+    def _make(self, rows, files, quarantined=0):
         import sqlite3
         with offb._gyb_db(self.b / "msg-db.sqlite") as db:
             db.execute("CREATE TABLE messages(message_num INTEGER PRIMARY KEY, "
@@ -809,19 +816,47 @@ class TestB6BackupCompleteness(unittest.TestCase):
                            [(i, f"2026/1/{i}.eml", "2026-01-01") for i in range(1, rows + 1)])
         for i in range(1, files + 1):
             (self.b / "2026" / "1" / f"{i}.eml").write_bytes(b"x")
+        if quarantined:
+            qdir = self.b.parent / f"{self.b.name}_quarantined"
+            qdir.mkdir()
+            for i in range(quarantined):
+                (qdir / f"q{i}.eml").write_bytes(b"x")
 
     def test_b6_1_matching_backup_passes_quietly(self):
         self._make(5, 5)
         self.assertEqual(offb.verify_backup_complete(self.b), (5, 5))
         self.assertFalse(offb.summary_warnings)
+        self.assertFalse(offb.summary_errors)
 
-    def test_b6_2_short_backup_warns(self):
+    def test_b6_2_genuine_shortfall_is_an_error_not_a_warning(self):
+        # Nothing quarantined, so 2 messages are simply gone: an error, so
+        # record_failure holds licence removal and the Gmail access a
+        # re-download needs survives.
         self._make(5, 3)
         self.assertEqual(offb.verify_backup_complete(self.b), (5, 3))
-        self.assertTrue(any("missing" in w for w in offb.summary_warnings))
+        self.assertTrue(any("missing" in e for e in offb.summary_errors))
 
     def test_b6_3_missing_db_returns_zeroes(self):
         self.assertEqual(offb.verify_backup_complete(self.b / "nope"), (0, 0))
+
+    def test_b6_4_quarantine_accounted_shortfall_is_clean(self):
+        # All 2 missing files are in the sibling quarantine folder: that is
+        # the tooling doing its job (malware never restored), not data loss.
+        self._make(5, 3, quarantined=2)
+        offb.verify_backup_complete(self.b)
+        self.assertFalse(offb.summary_errors)
+        self.assertFalse(offb.summary_warnings)
+
+    def test_b6_5_shortfall_beyond_quarantine_still_errors(self):
+        self._make(5, 2, quarantined=2)
+        offb.verify_backup_complete(self.b)
+        self.assertTrue(any("missing 1" in e for e in offb.summary_errors))
+
+    def test_b6_6_extra_files_on_disk_warn_only(self):
+        self._make(3, 5)
+        offb.verify_backup_complete(self.b)
+        self.assertFalse(offb.summary_errors)
+        self.assertTrue(any("more .eml" in w for w in offb.summary_warnings))
 
 
 # Real `gam user <u> show gmailprofile` output, dev.osh.co.za 2026-07-28.
@@ -1583,6 +1618,239 @@ class TestB19MahatiRunFixes(OffboardTestCase):
         source = inspect_getsource(offb.migrate_email)
         self.assertIn('f"Email restore to {destination} FAILED after {attempt} "',
                       source)
+
+
+class TestB20InteractiveDestinationGuards(unittest.TestCase):
+    """Interactively typed destinations get the same guards as flag-supplied
+    ones: the self-transfer/alias refusal and the email-mailbox probe.
+
+    Before this, only preflight_destinations (the flag path) ran them — an
+    operator typing the leaver's own alias at the plan prompt got a mailbox
+    restored into itself, and an unlicensed destination failed only after the
+    full multi-hour download.
+    """
+
+    def test_b20_1_leavers_alias_is_refused_then_reasks(self):
+        with mock.patch.object(offb, "prompt_email",
+                               side_effect=["leaver.alias@x", "successor@x"]), \
+             mock.patch.object(offb, "validate_destination", return_value=True), \
+             mock.patch.object(offb, "_list_aliases",
+                               return_value=["leaver.alias@x"]):
+            got = offb._plan_email("Email dest", source="leaver@x")
+        self.assertEqual(got, "successor@x")
+
+    def test_b20_2_leaver_literal_is_refused(self):
+        with mock.patch.object(offb, "prompt_email",
+                               side_effect=["LEAVER@x", "successor@x"]), \
+             mock.patch.object(offb, "validate_destination", return_value=True), \
+             mock.patch.object(offb, "_list_aliases", return_value=[]):
+            got = offb._plan_email("Drive dest", source="leaver@x")
+        self.assertEqual(got, "successor@x")
+
+    def test_b20_3_mailboxless_email_dest_is_refused_then_reasks(self):
+        with mock.patch.object(offb, "prompt_email",
+                               side_effect=["nolic@x", "successor@x"]), \
+             mock.patch.object(offb, "validate_destination", return_value=True), \
+             mock.patch.object(offb, "_list_aliases", return_value=[]), \
+             mock.patch.object(offb, "_email_mailbox_missing",
+                               side_effect=["Gmail service not enabled", None]):
+            got = offb._plan_email("Email dest", source="leaver@x",
+                                   needs_mailbox=True)
+        self.assertEqual(got, "successor@x")
+
+    def test_b20_4_mailbox_probe_not_run_for_non_email_prompts(self):
+        with mock.patch.object(offb, "prompt_email", return_value="successor@x"), \
+             mock.patch.object(offb, "validate_destination", return_value=True), \
+             mock.patch.object(offb, "_list_aliases", return_value=[]), \
+             mock.patch.object(offb, "_email_mailbox_missing") as probe:
+            offb._plan_email("Drive dest", source="leaver@x")
+        probe.assert_not_called()
+
+    def test_b20_5_collect_plan_wires_source_and_mailbox_probe(self):
+        args = _PlanArgs(no_drive=True, no_alias=True, no_calendar=True,
+                         no_forward=True, force=False)
+        dest_map = {k: None for k in
+                    ("drive", "email", "alias", "calendar", "forward")}
+        with mock.patch.object(offb, "prompt_yes_no", return_value=True), \
+             mock.patch.object(offb, "_plan_email",
+                               return_value="successor@x") as pe:
+            offb.collect_plan(args, dest_map, False, False, source="leaver@x")
+        pe.assert_called_once_with("Email migration destination email",
+                                   source="leaver@x", needs_mailbox=True)
+
+
+class TestB21BackupAndExit56Holds(OffboardTestCase):
+    """Failures before licence removal must be loud enough to hold it.
+
+    Two silent-swallow paths from the 2026-08-05 audit: exit 56 with zero
+    transfer confirmations read as benign skips, and --backup-email never
+    reconciling msg-db against disk (the only copy on an archive-only
+    offboarding).
+    """
+
+    def test_b21_1_exit56_zero_moved_is_an_error(self):
+        proc = mock.MagicMock()
+        proc.stdout = iter(["Got 3 Drive Files/Folders for Source User\n"])
+        proc.returncode = 56
+        proc.wait = mock.MagicMock()
+        with mock.patch.object(offb, "run_gam", return_value=(True, "First Name: D")), \
+             mock.patch.object(offb.subprocess, "Popen", return_value=proc):
+            offb.transfer_drive("leaver@x", "dest@x", dry_run=False)
+        self.assertTrue(any("0 files" in e for e in offb.summary_errors))
+
+    def test_b21_2_exit56_with_moves_still_a_warning(self):
+        proc = mock.MagicMock()
+        proc.stdout = iter(["Ownership Transferred to User: ok\n"])
+        proc.returncode = 56
+        proc.wait = mock.MagicMock()
+        with mock.patch.object(offb, "run_gam", return_value=(True, "First Name: D")), \
+             mock.patch.object(offb.subprocess, "Popen", return_value=proc):
+            offb.transfer_drive("leaver@x", "dest@x", dry_run=False)
+        self.assertFalse(offb.summary_errors)
+        self.assertTrue(any("exit 56" in w for w in offb.summary_warnings))
+
+    def test_b21_3_backup_email_only_fails_on_short_backup(self):
+        def short_verify(path):
+            offb.summary_error(f"Backup at {path} is missing 2 message(s)")
+            return (5, 3)
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(offb, "BACKUP_DIRECTORY", Path(tmp)), \
+             mock.patch.object(offb, "run_gyb", return_value=(True, "")), \
+             mock.patch.object(offb, "verify_backup_complete",
+                               side_effect=short_verify):
+            ok = offb.backup_email_only("leaver@x", dry_run=False)
+        self.assertFalse(ok)
+        self.assertFalse(any("backed up via GYB" in a for a in offb.summary_actions))
+
+    def test_b21_4_backup_email_only_verified_clean_succeeds(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(offb, "BACKUP_DIRECTORY", Path(tmp)), \
+             mock.patch.object(offb, "run_gyb", return_value=(True, "")), \
+             mock.patch.object(offb, "verify_backup_complete",
+                               return_value=(5, 5)):
+            ok = offb.backup_email_only("leaver@x", dry_run=False)
+        self.assertTrue(ok)
+        self.assertTrue(any("backed up via GYB" in a for a in offb.summary_actions))
+
+
+class TestB22NoSuspendCrashGuard(OffboardTestCase):
+    """The atexit re-suspend guard must cover --no-suspend runs that die.
+
+    Only a run that REACHES the suspension phase makes an informed
+    --no-suspend choice to leave the account active; a crash or Ctrl+C
+    before that must re-suspend. The waiver flag is set exactly there.
+    """
+
+    def setUp(self):
+        super().setUp()
+        offb.no_suspend_contract_waived = False
+
+    def tearDown(self):
+        offb.no_suspend_contract_waived = False
+        super().tearDown()
+
+    def test_b22_1_guard_resuspends_when_not_waived(self):
+        with mock.patch.object(offb, "read_suspended", return_value=False), \
+             mock.patch.object(offb, "run_gam", return_value=(True, "")) as rg, \
+             mock.patch.object(offb, "wait_for_suspended", return_value=True):
+            self.assertTrue(offb.restore_original_suspension("leaver@x"))
+        rg.assert_called()
+
+    def test_b22_2_guard_stands_down_after_normal_no_suspend_completion(self):
+        offb.no_suspend_contract_waived = True
+        with mock.patch.object(offb, "run_gam") as rg:
+            self.assertTrue(offb.restore_original_suspension("leaver@x"))
+        rg.assert_not_called()
+
+    def test_b22_3_registration_is_unconditional(self):
+        # The old code guarded atexit.register behind `if not args.no_suspend`,
+        # which left a crashed --no-suspend run's account silently active.
+        source = inspect_getsource(offb.main)
+        self.assertIn("atexit.register(restore_original_suspension", source)
+        idx = source.index("atexit.register(restore_original_suspension")
+        preceding = source[:idx].rsplit("\n", 3)[-3:]
+        self.assertFalse(any("if not args.no_suspend" in line
+                             for line in preceding))
+
+
+DRIVESETTINGS_FIXTURE = """User: leaver@x
+  limit: 329.85 TB
+  usage: 12.5 GB
+  usageInDrive: 2.5 GB
+  usageInDriveTrash: 0.5 GB
+"""
+
+
+class TestB23BackupSizing(OffboardTestCase):
+    """Disk-space preflight estimate and Drive backup folder resume."""
+
+    def test_b23_1_mailbox_estimate_subtracts_drive_usage(self):
+        with mock.patch.object(offb, "run_gam",
+                               return_value=(True, DRIVESETTINGS_FIXTURE)):
+            est = offb._estimate_mailbox_bytes("leaver@x")
+        gb = 1024 ** 3
+        self.assertEqual(est, int(12.5 * gb) - int(2.5 * gb) - int(0.5 * gb))
+
+    def test_b23_2_mailbox_estimate_none_when_unparseable(self):
+        with mock.patch.object(offb, "run_gam", return_value=(True, "garbage")):
+            self.assertIsNone(offb._estimate_mailbox_bytes("leaver@x"))
+        with mock.patch.object(offb, "run_gam", return_value=(False, "")):
+            self.assertIsNone(offb._estimate_mailbox_bytes("leaver@x"))
+
+    def test_b23_3_drive_backup_resumes_recent_folder_under_force(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(offb, "BACKUP_DIRECTORY", Path(tmp)):
+            stamp = offb.datetime.now().strftime("%Y%m%d")
+            prior = Path(tmp) / "drive" / f"leaver@x_{stamp}"
+            prior.mkdir(parents=True)
+            (prior / "somefile.pdf").write_bytes(b"x")
+            got = offb._select_drive_backup_path("leaver@x", force=True)
+            self.assertEqual(got, prior)
+
+    def test_b23_4_drive_backup_old_folder_starts_fresh_under_force(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(offb, "BACKUP_DIRECTORY", Path(tmp)):
+            old = Path(tmp) / "drive" / "leaver@x_20200101"
+            old.mkdir(parents=True)
+            (old / "somefile.pdf").write_bytes(b"x")
+            got = offb._select_drive_backup_path("leaver@x", force=True)
+            self.assertNotEqual(got, old)
+
+    def test_b23_5_empty_prior_folder_is_not_offered(self):
+        # An empty date-stamped folder (e.g. an aborted mkdir-only run)
+        # carries nothing to resume into.
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(offb, "BACKUP_DIRECTORY", Path(tmp)), \
+             mock.patch.object(offb, "prompt_yes_no") as p:
+            stamp = offb.datetime.now().strftime("%Y%m%d")
+            (Path(tmp) / "drive" / f"leaver@x_{stamp}").mkdir(parents=True)
+            offb._select_drive_backup_path("leaver@x", force=False)
+        p.assert_not_called()
+
+
+class TestB24TerminalFailFast(unittest.TestCase):
+    """Terminal 4xx refusals stop the restore loop on attempt 1, not 3.
+
+    2026-08-03 dev round: a failedPrecondition burned three attempts, each
+    with a full quarantine re-scan of the corpus, before the stall bail-out
+    fired. The first response already decided the outcome.
+    """
+
+    def test_b24_1_terminal_markers_detected(self):
+        self.assertEqual(offb._looks_terminal("... failedPrecondition ..."),
+                         "failedPrecondition")
+        self.assertEqual(offb._looks_terminal("Mail service not enabled"),
+                         "Mail service not enabled")
+        self.assertIsNone(offb._looks_terminal("rateLimitExceeded, Backing off"))
+        self.assertIsNone(offb._looks_terminal(""))
+
+    def test_b24_2_throttle_markers_stay_retryable(self):
+        # The two classifiers must never overlap: a marker in both would
+        # step the batch down AND kill the loop.
+        for m in ("rateLimitExceeded", "userRateLimitExceeded",
+                  "quotaExceeded", "Backing off", "backendError"):
+            self.assertIsNone(offb._looks_terminal(m))
+            self.assertTrue(offb._looks_rate_limited(m))
 
 
 def inspect_getsource(fn):

@@ -33,8 +33,9 @@ persistent environment changes. If you're still on bash, substitute
   - **python.org installer** (preferred for predictable versioning).
     Download the *macOS 64-bit universal2 installer* from
     [python.org/downloads/macos](https://www.python.org/downloads/macos/),
-    run the `.pkg`, and it adds `python3` to PATH automatically by
-    writing into `/etc/paths.d/`. Open a fresh Terminal afterwards.
+    run the `.pkg`, and it puts `python3` on PATH (symlinks in
+    `/usr/local/bin`, plus its "Update Shell Profile" step). Open a
+    fresh Terminal afterwards.
   - **Homebrew** — `brew install python` works if you already use
     Homebrew, but this guide avoids it for two reasons. First, parity
     with the Windows guide. Second, and more importantly, recent
@@ -90,8 +91,9 @@ other two tools will reuse.
 
 GAM7 ships an official installer for macOS that detects your
 architecture (arm64 on Apple Silicon), downloads the right binary,
-extracts to `~/bin/gam7/`, and edits your shell rc file to add `~/bin/gam7`
-to PATH and set `GAMCFGDIR=~/.gam/gam7`.
+extracts to `~/bin/gam7/`, and adds an `alias gam=...` line to your
+shell rc file. It does **not** put `~/bin/gam7` on PATH and does not
+set `GAMCFGDIR`.
 
 ```bash
 bash <(curl -s -S -L https://git.io/gam-install) -l
@@ -102,6 +104,16 @@ The `-l` flag tells the installer to update to the **latest version**,
 and §1.3), and use the **default install path** `$HOME/bin`. When it
 finishes, **close Terminal and open a fresh window** so the rc-file
 changes take effect.
+
+Now add `~/bin/gam7` to PATH. **This step is required, not optional:**
+the alias the installer wrote only works when you type `gam` in an
+interactive shell. The offboarding script locates its tools through
+PATH (`shutil.which`), so without this line every run fails preflight
+with "GAM7 not found in PATH" even though `gam` works at your prompt.
+
+```bash
+echo 'export PATH="$HOME/bin/gam7:$PATH"' >> ~/.zshrc && source ~/.zshrc
+```
 
 Verify:
 
@@ -183,31 +195,35 @@ gam user <super-admin@yourdomain.com> update serviceaccount
 ```
 
 You'll see a numbered scope picker. Items already selected are shown as
-`[*]`; unselected as `[ ]`. The list runs `0)` through `49)` in current
-GAM7 builds.
+`[*]`; unselected as `[ ]`. **Do not rely on the option numbers:** GAM
+adds and removes APIs over time, so the number beside a scope can change
+between releases. Find scopes by their exact labels instead.
 
-The defaults already cover all three tools, so you don't need to
-change anything. The items to verify are checked:
+The defaults normally cover the GAM scopes needed by all three tools.
+Regardless of their current numbers, verify that these exact labels are
+checked:
 
-| # | Scope (exact label from the picker) | Required by | Default? |
-|---|---|---|---|
-| 22 | `Drive API (supports readonly)` | rclone | `[*]` yes |
-| 29 | `Gmail API - Full Access (Labels, Messages)` | GYB (backup + restore, incl. delete) | `[*]` yes |
+| Scope (exact label from the picker) | Required OAuth scope | Required by |
+|---|---|---|
+| `Drive API (supports readonly)` | `https://www.googleapis.com/auth/drive` | rclone |
+| `Gmail API - Full Access (Labels, Messages)` | `https://mail.google.com/` | GYB backup and restore, including delete |
 
 Leave the other `[*]` defaults as-is. They're what GAM itself needs.
 
 Things to **leave unchecked** (do not toggle them on):
 
-- `23) Drive API - write todrive data - has access to all Drive`: GAM's
+- `Drive API - write todrive data - has access to all Drive`: GAM's
   internal `todrive` feature, not used by rclone.
-- `31) Gmail API - Full Access - readonly`: superseded by 29.
-- `32) Gmail API - Send Messages - including todrive`: not needed.
+- `Gmail API - Full Access - readonly`: superseded by the full-access
+  Gmail selection above.
+- `Gmail API - Send Messages - including todrive`: not needed.
 
 Optional (only tick if you know you need it):
 
-- `30) Gmail API - Full Access (Labels, Messages) except delete message`
+- `Gmail API - Full Access (Labels, Messages) except delete message`
   is selected by default and is harmless. If you want the minimal
-  surface, you can uncheck it since 29 is a superset.
+  surface, you can uncheck it because the full-access selection above
+  is a superset.
 
 Press `c` (or whatever the picker prompts) to **continue** with the
 current selection. GAM will print an Admin Console URL.
@@ -223,10 +239,20 @@ Console visit, so this is a one-trip task instead of two:
    you on the **Domain-wide Delegation** edit page for your service
    account, with the GAM-selected scopes already filled into the
    **OAuth scopes** field.
-2. In that last empty field, **add** the two GYB scopes, do *not* replace the list:
+2. Confirm that the resulting **OAuth scopes** field contains these five
+   exact URLs. GAM supplies the Drive, Gmail, and user-info scopes; add
+   the two GYB-only scopes if they are missing. Do *not* replace the
+   existing list:
    ```
-   https://www.googleapis.com/auth/apps.groups.migration,https://www.googleapis.com/auth/drive.appdata
+   https://www.googleapis.com/auth/drive
+   https://mail.google.com/
+   https://www.googleapis.com/auth/userinfo.email
+   https://www.googleapis.com/auth/apps.groups.migration
+   https://www.googleapis.com/auth/drive.appdata
    ```
+
+   The Admin Console expects a comma-separated list; the URLs are shown
+   one per line here so each can be checked without overlooking one.
 
 3. Click **Authorize**.
 
@@ -289,7 +315,7 @@ installer ran). Add it manually and reload the shell:
 echo 'export PATH="$HOME/bin/gyb:$PATH"' >> ~/.zshrc && source ~/.zshrc
 ```
 
-Then re-run `gyb --version` it should now print the version.
+Then re-run `gyb --version`; it should now print the version.
 
 ### 2.2 Connect GYB to GAM's service account
 
@@ -360,9 +386,8 @@ chmod +x ~/bin/rclone
 rm -rf rclone.zip rclone-*-osx-arm64
 ```
 
-Make sure `~/bin` is on PATH. The GAM/GYB installers already added
-`~/bin/gam7` and `~/bin/gyb` to `~/.zshrc`, but not `~/bin` itself.
-Append it:
+Make sure `~/bin` is on PATH. §1.1 and §2.1 already put `~/bin/gam7`
+and `~/bin/gyb` there, but not `~/bin` itself. Append it:
 
 ```bash
 echo 'export PATH="$HOME/bin:$PATH"' >> ~/.zshrc
@@ -383,6 +408,11 @@ xattr -d com.apple.quarantine ~/bin/rclone
 
 ### 3.2 Create a Drive remote that uses the service account JSON
 
+The remote name must match `RCLONE_REMOTE` in `offboard_user.py`. The
+script defaults to `workspace`, so the steps below use that name. If you
+choose another name, update `RCLONE_REMOTE` in the script before running
+an offboarding.
+
 Run the interactive config:
 
 ```bash
@@ -394,28 +424,28 @@ Answer the prompts as follows:
 | Prompt                       | Answer                                                                                                                                                          |
 | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `n) New remote`              | `n`                                                                                                                                                             |
-| `name>`                      | `gdrive`                                                                                                                                                        |
+| `name>`                      | `workspace`                                                                                                                                                     |
 | `Storage>`                   | `drive` (Google Drive)                                                                                                                                          |
 | `client_id>`                 | *(leave blank — not used with a service account)*                                                                                                               |
 | `client_secret>`             | *(leave blank)*                                                                                                                                                 |
 | `scope>`                     | `1` (full `drive`)                                                                                                                                              |
-| `service_account_file>`      | `~/.gam/oauth2service.json` (or wherever `$GAMCFGDIR` points — use the **absolute** path, not `$GAMCFGDIR`, since rclone doesn't expand env vars in its config) |
+| `service_account_file>`      | `/Users/<you>/.gam/oauth2service.json` (or wherever `$GAMCFGDIR` points — type the **absolute** path: rclone expands neither `~` nor env vars in its config)    |
 | `Edit advanced config?`      | `y` — we need to set `impersonate`                                                                                                                              |
 | `impersonate>`               | `<super-admin@yourdomain.com>` (the user the SA should act as)                                                                                                  |
 | Other advanced prompts       | accept defaults (Enter)                                                                                                                                         |
 | `Use auto config?`           | `n` (not relevant for SA)                                                                                                                                       |
 | `Configure as shared drive?` | `n` (unless you want one — answer `y` and pick the team drive)                                                                                                  |
-| `Keep this "gdrive" remote?` | `y`                                                                                                                                                             |
+| `Keep this "workspace" remote?` | `y`                                                                                                                                                          |
 | Exit                         | `q`                                                                                                                                                             |
 
 The resulting `rclone.conf` (at `~/.config/rclone/rclone.conf`) should
 look like:
 
 ```ini
-[gdrive]
+[workspace]
 type = drive
 scope = drive
-service_account_file = ~/.gam/oauth2service.json
+service_account_file = /Users/<you>/.gam/oauth2service.json
 impersonate = super-admin@yourdomain.com
 team_drive = 
 ```
@@ -426,7 +456,7 @@ team_drive =
 ### 3.3 rclone smoke test
 
 ```bash
-rclone lsd gdrive:
+rclone lsd workspace:
 ```
 
 Should list the top-level folders of the impersonated user's Drive.
@@ -443,12 +473,23 @@ Open a **fresh** Terminal window and run:
 python3 --version
 gam info domain
 gyb --action quota --email <super-admin@yourdomain.com> --service-account
-rclone lsd gdrive:
+rclone lsd workspace:
 ```
 
-If all four succeed, the shared-service-account setup is working and you
-can run the offboarding script. See `offboarding_test_setup_guide.md` to
-build a safe test environment before pointing it at a real user.
+If all four succeed, the shared-service-account setup is working.
+
+One tenant-side prerequisite remains before the offboarding script will
+run: an OU named **`/Offboarding`** must exist (the script moves leavers
+into it and refuses to start if it is missing, printing the exact
+remediation). Create it once per tenant in the Admin console, or with:
+
+```bash
+gam create org "Offboarding" description "Offboarded users" parent /
+```
+
+(A different OU name works too — edit `OFFBOARDING_OU` near the top of
+the script.) See `offboarding_test_setup_guide.md` to
+build a safe test environment before pointing the script at a real user.
 
 ---
 
@@ -515,6 +556,20 @@ folder is 30 days old or less, and starts fresh when it is older). Use
 `--reuse-email-backup` when you want to skip every other phase and only finish
 the restore.
 
+v5.5.0 extends the same thinking to the rest of a big run:
+
+- **Drive backups resume too.** A `--backup-drive` re-run offers to sync into
+  the newest prior Drive backup folder — rclone only downloads new or changed
+  files — with the same 30-day cap under `--force`.
+- **Disk space is checked up front.** Before the GYB download starts, the
+  mailbox size (estimated from Google's storage figures) is compared with the
+  free space on the backup volume: larger than the free space aborts the run,
+  over 80% of it warns. Fix by freeing space or pointing `--backup-dir` at a
+  bigger volume.
+- **`--backup-email` plus a migration downloads once.** When both run, the
+  migration's retained GYB backup serves as the local archive; the separate
+  archive download is skipped and the summary names the folder.
+
 ### Before you start a big one
 
 - **Check the destination is not suspended and has Gmail.** Both failures waste
@@ -579,11 +634,17 @@ Admin console. Add another organiser before deleting anyone.
   indistinguishable in the log. Check with
   `gam info user <destination> quick` and look for `Account Suspended: True`.
 - **Restore fails immediately with "Mail service not enabled".** The
-  destination has no Gmail licence. Assign one with
-  `gam user <destination> add license 1010020020`, then wait a minute.
+  destination has no Gmail licence. Assign one your tenant owns —
+  list what you have with `gam print licenses`, then
+  `gam user <destination> add license <sku>` — and wait a minute.
   Since v5.4.0 the script checks this up front and refuses to start the
   download, so hitting it mid-restore means the licence was removed during
   the run or the destination account is only minutes old.
+- **The run aborts at preflight because the mailbox is larger than the free
+  disk space.** New in v5.5.0: the estimated mailbox size is compared with
+  free space on the backup volume before the download starts, because
+  filling the disk hours into an overnight run was the alternative. Free up
+  space or pass `--backup-dir` pointing at a bigger volume.
 - **The run aborts immediately with "ADMIN ACCOUNT SAFETY HOLD".** The user
   still holds Super Admin or delegated-admin roles, which survive the password
   scramble and suspension. Remove them first — the script prints the exact
