@@ -144,6 +144,9 @@ Distributed under the Apache-2.0 license. See `LICENSE` for more information.
 
 ## 📧 Contact
 
-Paul Ogier / OSH.co.za and Taming.Tech - paul@osh.co.za https://osh.co.za/?utm_source=github&utm_medium=readme&utm_campaign=gamscripts&utm_content=contact paul@taming.tech https://taming.tech/?utm_source=github&utm_medium=readme&utm_campaign=gamscripts&utm_content=contact
+Paul Ogier, OSH.co.za and Taming.Tech.
+
+* [paul@osh.co.za](mailto:paul@osh.co.za) / [osh.co.za](https://osh.co.za/?utm_source=github&utm_medium=readme&utm_campaign=gamscripts&utm_content=contact)
+* [paul@taming.tech](mailto:paul@taming.tech) / [taming.tech](https://taming.tech/?utm_source=github&utm_medium=readme&utm_campaign=gamscripts&utm_content=contact)
 
 
