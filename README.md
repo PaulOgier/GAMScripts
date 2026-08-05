@@ -82,6 +82,32 @@ Here is a breakdown of the available scripts. Each script is designed to solve a
     python3 split_csv.py <input_file.csv>
     ```
 
+<br>
+
+### **3. GYB Mailbox Tools (`gyb_backup_doctor.py`, `gyb_header_scan.py`)**
+
+* **Description**: Two read-only utilities for inspecting [GYB (Got Your Back)](https://github.com/GAM-team/got-your-back) mailbox backups. `gyb_backup_doctor.py` reports whether a folder is really a GYB backup, how much of it is on disk, and how far each restore got. `gyb_header_scan.py` finds the messages whose headers exceed Gmail's import limit and names the files.
+* **Best For**: Checking a mailbox backup before you rely on it, and diagnosing a restore that either died halfway or finished suspiciously fast. Useful alongside `offboard_user.py`, but they work on any GYB backup.
+* **Key Features**:
+  * Names the "restore did nothing" trap: GYB treats a folder as a backup purely by the presence of `msg-db.sqlite`, and without it `--action restore` finds nothing and exits `0` in seconds
+  * Reconciles the message database against the `.eml` files on disk, so an incomplete backup is caught before it becomes an incomplete migration
+  * Accounts for quarantined files separately, so a handled antivirus quarantine does not read as data loss
+  * Reports restore progress per destination from GYB's own resume database
+  * Finds the single oversized header that aborts a restore without GYB ever saying which message it was
+  * Read-only throughout: databases are opened in SQLite `ro` mode and backups are never written to
+* **Usage**:
+    ```bash
+    # Check a backup before trusting it
+    python3 gyb_backup_doctor.py /path/to/GYB-GMail-Backup-user@domain.com
+
+    # Also probe every file for antivirus locks
+    python3 gyb_backup_doctor.py --probe-reads /path/to/backup
+
+    # Find messages Gmail will reject on import
+    python3 gyb_header_scan.py /path/to/backup
+    ```
+* **Additional Requirements**: None beyond Python 3. Standard library only, and GYB itself is not needed to run them. See `GYB Mailbox Tools/README.md` for what to do with each answer.
+
 ---
 
 ## 🤝 Contributing
