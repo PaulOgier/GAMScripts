@@ -108,6 +108,37 @@ Here is a breakdown of the available scripts. Each script is designed to solve a
     ```
 * **Additional Requirements**: None beyond Python 3. Standard library only, and GYB itself is not needed to run them. See `GYB Mailbox Tools/README.md` for what to do with each answer.
 
+<br>
+
+### **4. Tenant Scoping Audit (`tenant_scope.py`)**
+
+* **Description**: A read-only Google Workspace tenant audit in a single Python file. Collects tenant and security-posture data through GAM7, runs a findings engine over it, and renders a self-contained HTML report (print it for a PDF) with plain-English "what this means" and "what to do" copy per finding.
+* **Best For**: Day-one scoping of a tenant you have just taken over, a pre-migration or security-uplift baseline, and due-diligence gap reports when a company is being acquired and the buyer wants to know where the holes are.
+* **Key Features**:
+  * Read-only throughout, with one opt-in exception (`--grant-temp-access`) that grants itself Shared Drive access, scans, and removes the grant again
+  * Preflight confirms the tenant (primary domain + customer ID) before anything is collected, so you never audit the wrong tenant
+  * Findings ranked CRITICAL to INFO: public files, external forwarding, admins without 2SV, orphaned Shared Drives, dormant licensed accounts, per-OU 2SV policy gaps, licence waste, admin-role sprawl, and more
+  * Every finding traceable to a raw CSV; anything that could not be checked is listed in the report rather than silently absent
+  * Resumable runs: skip the heavy Drive scans on the first pass, rerun with `--run-dir` later and only the missing modules execute
+  * Per-domain MX/SPF/DKIM/DMARC checks via tamingdns.com, with a dns.google fallback
+  * 104 unit tests, standard library only, Windows/macOS/Linux
+* **Usage**:
+    ```bash
+    # Show the module registry
+    python3 tenant_scope.py --list
+
+    # Default audit (tiers 1-3 + DNS)
+    python3 tenant_scope.py --admin admin@yourdomain.com
+
+    # Skip the heavy Drive scans, fill them in later
+    python3 tenant_scope.py --admin admin@yourdomain.com --skip-tier 3
+    python3 tenant_scope.py --admin admin@yourdomain.com --run-dir <dir>
+
+    # Re-render the report from collected data, no GAM calls
+    python3 tenant_scope.py --render-only --run-dir <dir>
+    ```
+* **Additional Requirements**: None beyond Python 3 and an authorised GAM7. See `Tenant Scoping Audit/README.md` for the full check list and the safety posture.
+
 ---
 
 ## 🤝 Contributing
