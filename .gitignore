@@ -31,3 +31,6 @@ research/
 # Per-client session recovery notes. Contain real client mailbox data and
 # addresses; this repo is public. Local-only, never on GitHub.
 OffBoarding Google Workspace Users/SESSION_RECOVERY_*.md
+
+# Tenant audit run data (real tenant CSVs; never on GitHub).
+Tenant Scoping Audit/tenant_audit_runs/
