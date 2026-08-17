@@ -108,20 +108,102 @@ unscanned drives) is listed in the report. Absence of a finding never means
 ## Usage
 
 ```
-python3 tenant_scope.py --list                        # show the module registry
-python3 tenant_scope.py --admin admin@yourdomain.com  # default audit (tiers 1-3 + DNS)
-python3 tenant_scope.py --admin admin@yourdomain.com --full            # add tier 4
-python3 tenant_scope.py --admin admin@yourdomain.com --skip-tier 3     # skip heavy Drive scans
-python3 tenant_scope.py --admin admin@yourdomain.com --only users,groups,dns
-python3 tenant_scope.py --admin admin@yourdomain.com --run-dir <dir>   # resume a run
-python3 tenant_scope.py --render-only --run-dir <dir>  # re-render, no GAM calls
-python3 tenant_scope.py --admin admin@yourdomain.com --dry-run  # print commands only
+python3 tenant_scope.py --admin admin@yourdomain.com
 ```
+
+That is the whole thing: tiers 1 to 3 plus the DNS checks, into a new
+timestamped run directory, with the report opened at the end.
+
+### Every flag
+
+| Flag | What it does |
+|---|---|
+| `--admin <email>` | The auditing admin. Verifies the service account's DWD scopes in the preflight, and is the account the Shared Drive scans run as. Without it those scans are skipped and per-user modules run unverified. |
+| `--list` | Print the module registry (key, title, tier) and exit. |
+| `--full` | Add the tier-4 modules: Gmail filters, vacation responders, managed browsers, Alert Center, context-aware access. |
+| `--only <keys>` | Comma-separated module keys; everything else is skipped. |
+| `--skip <keys>` | Comma-separated module keys to skip. |
+| `--skip-tier <n>` | Skip a whole tier, e.g. `--skip-tier 3` to leave out the heavy Drive scans. |
+| `--no-dns` | Skip the DNS checks. |
+| `--include-suspended` | Include suspended accounts in the per-user scans. Default is active accounts only, and the report says which. |
+| `--skip-never-logged-in` | Exclude accounts that have never signed in from the per-user scans. |
+| `--grant-temp-access` | The one write in the script. See below. |
+| `--output-dir <dir>` | Where run directories are created. Default `./tenant_audit_runs/`. |
+| `--run-dir <dir>` | Resume an existing run. Completed modules are skipped. |
+| `--render-only` | Re-run the checks and rebuild the report from a `--run-dir`, with no GAM calls at all. |
+| `--dry-run` | Print every GAM command without executing it. |
+| `--no-open` | Don't open the report in a browser when the run finishes. |
+| `--yes` | Skip the interactive tenant confirmation. The identity is still logged. |
+
+### Worked examples
+
+```
+python3 tenant_scope.py --list
+python3 tenant_scope.py --admin admin@yourdomain.com --full
+python3 tenant_scope.py --admin admin@yourdomain.com --skip-tier 3
+python3 tenant_scope.py --admin admin@yourdomain.com --only users,groups,dns
+python3 tenant_scope.py --admin admin@yourdomain.com --run-dir <dir>
+python3 tenant_scope.py --render-only --run-dir <dir>
+python3 tenant_scope.py --admin admin@yourdomain.com --dry-run
+python3 tenant_scope.py --admin admin@yourdomain.com --grant-temp-access
+python3 tenant_scope.py --admin admin@yourdomain.com --skip-never-logged-in --no-open --yes
+```
+
+**Overnight on a large tenant.** `--skip-tier 3` first for the quick picture,
+then the same run directory again without the skip so only the Drive scans
+execute:
+
+```
+python3 tenant_scope.py --admin admin@yourdomain.com --skip-tier 3
+python3 tenant_scope.py --admin admin@yourdomain.com --run-dir tenant_audit_runs/tenant_audit_<stamp>
+```
+
+**Re-render after a fix.** If a check itself was wrong, you do not need to
+collect anything again:
+
+```
+python3 tenant_scope.py --render-only --run-dir tenant_audit_runs/tenant_audit_<stamp>
+```
+
+**Scheduled or headless.** `--yes` answers the tenant prompt, `--no-open`
+leaves the browser alone:
+
+```
+python3 tenant_scope.py --admin admin@yourdomain.com --yes --no-open
+```
+
+**A tenant full of accounts nobody has ever used.** `--skip-never-logged-in`
+drops them from the per-user scans, and the report states how many were
+excluded. It is off by default because an admin-set forward on an account
+nobody has ever signed into is exactly the thing an audit should find:
+
+```
+python3 tenant_scope.py --admin admin@yourdomain.com --skip-never-logged-in
+```
+
+**Shared Drives the admin is not a member of.** `filelist` has no admin-access
+mode, so a non-member scan returns zero rows and looks clean. Those drives are
+reported UNSCANNED unless you pass `--grant-temp-access`, which adds the
+auditing admin as organizer, scans, and removes the grant again:
+
+```
+python3 tenant_scope.py --admin admin@yourdomain.com --grant-temp-access --only shareddrive_external
+```
+
+### How a run behaves
 
 The preflight confirms the tenant (primary domain + customer ID) with you
 before anything is collected, because auditing the wrong tenant is the worst
 silent failure this kind of tool can have. `--yes` skips the prompt but still logs
 the identity.
+
+Timeouts scale with the size of the tenant, and per-user scans run as a
+threaded GAM batch over an explicit list of the accounts being audited rather
+than one sequential pass over every mailbox. GAM's own progress counters are
+echoed to the console every 30 seconds during a long scan, so a Drive
+enumeration that runs for hours doesn't look like a hang. If a command is
+killed by its timeout, the rows collected up to that point are kept and the
+module is marked partial rather than discarded.
 
 Each run writes into its own timestamped directory under
 `./tenant_audit_runs/` (change with `--output-dir`). Runs are resumable:

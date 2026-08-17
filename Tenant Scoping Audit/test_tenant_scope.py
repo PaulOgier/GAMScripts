@@ -9,6 +9,7 @@ resume. No GAM calls are made anywhere in here.
 
 import argparse
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,10 +21,28 @@ def make_args(**overrides):
     base = dict(admin="admin@example.com", output_dir=None, run_dir=None,
                 list=False, only=None, skip=None, skip_tier=None, full=False,
                 no_dns=False, include_suspended=False,
+                skip_never_logged_in=False, no_open=True,
                 grant_temp_access=False, render_only=False, dry_run=False,
                 yes=True)
     base.update(overrides)
     return argparse.Namespace(**base)
+
+
+def setUpModule():
+    """Silence the script's console output for the whole suite.
+
+    With no logger configured, _emit falls back to print(), so running the
+    tests emitted a STAGE 2 CHECK block full of CRITICAL findings from
+    fixture data. A tester read that as a report on their own tenant
+    (Kim Nilsson, 2026-08-17).
+    """
+    global _emit_original
+    _emit_original = ts._emit
+    ts._emit = lambda level, text: None
+
+
+def tearDownModule():
+    ts._emit = _emit_original
 
 
 class CtxTestCase(unittest.TestCase):
@@ -106,6 +125,25 @@ boss@example.com,False,False,2026-08-01T10:00:00Z,True,True,,True,False,Business
         self.write_csv("asps", """User,codeId,name,creationTime
 user@example.com,1,Old mail app,2025-01-01T00:00:00Z""")
         self.assertEqual([], ts.check_admin_asps(self.ctx))
+
+    def test_zero_count_rows_are_not_asps(self):
+        """GAM emits one `user,0` row per user when nobody holds an ASP;
+        counting rows flagged every account in a clean tenant (2026-08-17)."""
+        self.write_csv("users", f"""{USERS_HEADER}
+boss@example.com,False,False,2026-08-01T10:00:00Z,True,True,,True,False,Business""")
+        self.write_csv("asps", """User,asps
+boss@example.com,0
+user@example.com,0""")
+        self.assertEqual([], ts.check_admin_asps(self.ctx))
+        self.assertEqual([], ts._asp_rows(self.ctx))
+
+    def test_nonzero_count_row_counts_as_asp(self):
+        self.write_csv("users", f"""{USERS_HEADER}
+boss@example.com,False,False,2026-08-01T10:00:00Z,True,True,,True,False,Business""")
+        self.write_csv("asps", """User,asps
+boss@example.com,2""")
+        ids = self.finding_ids(ts.check_admin_asps(self.ctx))
+        self.assertIn("admin-asps", ids)
 
 
 class TestForwardingChecks(CtxTestCase):
@@ -1091,6 +1129,203 @@ class TestDohFallbackParsing(unittest.TestCase):
         self.assertTrue(result["checks"]["spf"]["present"])
         self.assertFalse(result["checks"]["dkim"]["present"])
         self.assertFalse(result["checks"]["dmarc"]["present"])
+
+
+class TestBatchedPartialCoverage(CtxTestCase):
+    """A forked scan exits 0 even when a mailbox failed inside a child."""
+
+    def run_collect(self, rc, out, err):
+        mod = dict(key="imap", args=["print", "imap"])
+        captured = {}
+        original = ts.run_gam
+        ts.run_gam = lambda args, **kw: (rc, out, err)
+        try:
+            captured = ts.collect_simple(self.ctx, mod)
+        finally:
+            ts.run_gam = original
+        return captured
+
+    def test_exit_zero_with_a_failed_mailbox_is_partial(self):
+        status, rows, note = self.run_collect(
+            0, "User,enabled\na@example.com,True\n",
+            "Getting IMAP for b@example.com\n"
+            "User: b@example.com, Gmail Service/App not enabled\n")
+        self.assertEqual("partial", status)
+        self.assertEqual(1, rows)
+        self.assertIn("b@example.com", note)
+
+    def test_clean_exit_zero_is_still_ok(self):
+        status, rows, note = self.run_collect(
+            0, "User,enabled\na@example.com,True\n", "Getting IMAP settings\n")
+        self.assertEqual("ok", status)
+        self.assertEqual("", note)
+
+
+class TestRowsCache(CtxTestCase):
+    def test_rows_parsed_once_then_cached(self):
+        self.write_csv("groups", "email,name\na@example.com,A")
+        calls = []
+        original = ts.read_csv_rows
+        ts.read_csv_rows = lambda p: (calls.append(p.name), original(p))[1]
+        try:
+            self.ctx.rows("groups")
+            self.ctx.rows("groups")
+            self.assertEqual(["groups.csv"], calls)
+            # re-collecting the module must drop the cached copy
+            self.write_csv("groups", "email,name\nb@example.com,B\nc@example.com,C")
+            self.assertEqual(2, len(self.ctx.rows("groups")))
+        finally:
+            ts.read_csv_rows = original
+
+
+class TestRunGamStreaming(unittest.TestCase):
+    """run_gam streams stderr and keeps partial stdout when a command is killed."""
+
+    SCRIPT = ("import sys, time\n"
+              "print('User,thing')\n"
+              "for i in range(3):\n"
+              "    print(f'row{i},x'); sys.stdout.flush()\n"
+              "    print(f'Got {i} files...', file=sys.stderr, flush=True)\n"
+              "if '--hang' in sys.argv:\n"
+              "    time.sleep(30)\n")
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.script = Path(self._tmp.name) / "fake_gam.py"
+        self.script.write_text(self.SCRIPT, encoding="utf-8")
+        self._gam = ts.GAM_PATH
+        ts.GAM_PATH = sys.executable
+
+    def tearDown(self):
+        ts.GAM_PATH = self._gam
+        self._tmp.cleanup()
+
+    def test_stdout_and_stderr_both_captured(self):
+        rc, out, err = ts.run_gam([str(self.script)], timeout=30)
+        self.assertEqual(0, rc)
+        self.assertEqual(4, len(out.strip().splitlines()))
+        self.assertEqual(3, len(err.strip().splitlines()))
+
+    def test_timeout_keeps_the_rows_already_collected(self):
+        rc, out, err = ts.run_gam([str(self.script), "--hang"], timeout=2)
+        self.assertEqual(-1, rc)
+        self.assertEqual(4, len(out.strip().splitlines()))
+        self.assertEqual("Timed out after 2s", err.strip().splitlines()[-1])
+
+
+class TestUserScanArgs(CtxTestCase):
+    SCAN_USERS = f"""{USERS_HEADER}
+live@example.com,False,False,2026-08-01T10:00:00Z,True,True,,False,False,Business
+never@example.com,False,False,Never,True,True,,False,False,Business
+gone@example.com,True,False,2026-08-01T10:00:00Z,True,True,,False,False,Business"""
+
+    def setUp(self):
+        super().setUp()
+        self.write_csv("users", self.SCAN_USERS)
+        self.mod = dict(key="sendas",
+                        args=["all", "users", "print", "sendas", "compact"])
+
+    def test_rewrites_to_csvfile_batch_with_redirect(self):
+        args, out = ts.user_scan_args(self.ctx, self.mod)
+        self.assertEqual(str(self.run_dir.resolve() / "sendas.csv"), str(out))
+        self.assertEqual(["config", "auto_batch_min"], args[:2])
+        self.assertIn("multiprocess", args)
+        self.assertIn("num_threads", args)
+        # the tail survives, and `all users` is gone
+        self.assertEqual(["print", "sendas", "compact"], args[-3:])
+        self.assertNotIn("all", args)
+        listing = [a for a in args if a.endswith(":primaryEmail")][0]
+        self.assertTrue(Path(listing.split(":primary")[0]).exists())
+
+    def test_suspended_and_never_login_excluded_when_asked(self):
+        self.ctx.args.skip_never_logged_in = True
+        listing = ts.scan_user_list(self.ctx)
+        emails = [r["primaryEmail"] for r in ts.read_csv_rows(listing)]
+        self.assertEqual(["live@example.com"], emails)
+        self.assertEqual(1, self.ctx.manifest["meta"]["skipped_never_logged_in"])
+
+    def test_never_login_kept_by_default(self):
+        listing = ts.scan_user_list(self.ctx)
+        emails = [r["primaryEmail"] for r in ts.read_csv_rows(listing)]
+        self.assertEqual(["live@example.com", "never@example.com"], emails)
+
+    def test_falls_back_to_all_users_without_users_csv(self):
+        (self.run_dir / "users.csv").unlink()
+        self.ctx.set_module("users", "empty", 0)
+        args, out = ts.user_scan_args(self.ctx, self.mod)
+        self.assertEqual(self.mod["args"], args)
+        self.assertIsNone(out)
+
+    def test_backupcodes_keeps_threading_but_drops_the_redirect(self):
+        """Live codes must never reach disk via GAM's own CSV writer."""
+        mod = dict(key="backupcodes",
+                   args=["all", "users", "print", "backupcodes"])
+        args, _ = ts.user_scan_args(self.ctx, mod)
+        cut = args.index("redirect")
+        stripped = args[:cut] + args[cut + 4:]
+        self.assertNotIn("redirect", stripped)
+        self.assertNotIn("multiprocess", stripped)
+        self.assertIn("num_threads", stripped)
+        self.assertEqual(["print", "backupcodes"], stripped[-2:])
+        self.assertTrue(any(a.endswith(":primaryEmail") for a in stripped))
+
+    def test_backupcodes_never_forks(self):
+        """No redirect means no merge, so a fork interleaves child headers
+        into the data: 4 mailboxes came back as 7 rows (dev tenant, 2026-08-17).
+        """
+        mod = [m for m in ts.MODULES if m["key"] == "backupcodes"][0]
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = ts.RunContext(Path(tmp), make_args())
+            (Path(tmp) / "users.csv").write_text(
+                "primaryEmail,suspended,archived,lastLoginTime\n"
+                "a@example.com,False,False,Never\n", encoding="utf-8")
+            ctx.set_module("users", "ok", 1)
+            args = ts.collect_backupcodes_args(ctx, mod)
+        self.assertEqual("0", args[args.index("auto_batch_min") + 1])
+        self.assertNotIn("redirect", args)
+
+    def test_non_user_module_untouched(self):
+        mod = dict(key="groups", args=["print", "groups"])
+        args, out = ts.user_scan_args(self.ctx, mod)
+        self.assertEqual(["print", "groups"], args)
+        self.assertIsNone(out)
+
+
+class TestModuleTimeout(CtxTestCase):
+    def test_all_users_scan_scales_with_tenant_size(self):
+        self.ctx.manifest["meta"]["user_count"] = 2000
+        mod = dict(key="sendas", args=["all", "users", "print", "sendas"])
+        self.assertEqual(20000, ts.module_timeout(self.ctx, mod, 900))
+
+    def test_small_tenant_keeps_the_floor(self):
+        self.ctx.manifest["meta"]["user_count"] = 37
+        mod = dict(key="sendas", args=["all", "users", "print", "sendas"])
+        self.assertEqual(900, ts.module_timeout(self.ctx, mod, 900))
+
+    def test_non_per_user_module_is_untouched(self):
+        self.ctx.manifest["meta"]["user_count"] = 2000
+        mod = dict(key="groups", args=["print", "groups"], timeout=600)
+        self.assertEqual(600, ts.module_timeout(self.ctx, mod, 900))
+
+
+class TestOpenReport(unittest.TestCase):
+    def setUp(self):
+        self.opened = []
+        self.original = ts.webbrowser.open
+        ts.webbrowser.open = lambda url: self.opened.append(url) or True
+
+    def tearDown(self):
+        ts.webbrowser.open = self.original
+
+    def test_opens_as_file_uri(self):
+        args = argparse.Namespace(no_open=False)
+        self.assertTrue(ts.open_report(Path("/tmp/x/audit_report.html"), args))
+        self.assertEqual(["file:///tmp/x/audit_report.html"], self.opened)
+
+    def test_no_open_flag_respected(self):
+        args = argparse.Namespace(no_open=True)
+        self.assertFalse(ts.open_report(Path("/tmp/x/audit_report.html"), args))
+        self.assertEqual([], self.opened)
 
 
 if __name__ == "__main__":

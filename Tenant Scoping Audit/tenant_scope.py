@@ -131,10 +131,13 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import webbrowser
 from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
@@ -144,7 +147,7 @@ from typing import Dict, List, Optional, Tuple
 # CONFIGURATION
 ###############################################################################
 
-SCRIPT_VERSION = "1.3.7"
+SCRIPT_VERSION = "1.4.0"
 
 # [OPTIONAL] Startup check against the remote VERSION file. Fail-silent.
 CHECK_FOR_UPDATES = True
@@ -353,6 +356,27 @@ def locate_gam() -> Optional[str]:
     return None
 
 
+PROGRESS_EVERY = 30   # seconds between GAM progress lines echoed to the console
+
+
+def _echo_progress(pipe, collected: List[str]):
+    """Keep every stderr line, echo one every PROGRESS_EVERY seconds.
+
+    A Shared Drive scan can run for hours with nothing on screen, which reads
+    as a hang. GAM's own counters are the honest progress signal, so show
+    them - throttled, and only once a command has been running long enough
+    that silence would worry someone.
+    """
+    last = time.time()
+    for line in pipe:
+        collected.append(line)
+        now = time.time()
+        if line.strip() and now - last >= PROGRESS_EVERY:
+            last = now
+            _emit('info', "    " + line.strip()[:120])
+    pipe.close()
+
+
 def run_gam(args: List[str], timeout: int = 900,
             dry_run: bool = False) -> Tuple[int, str, str]:
     """Run one GAM command, shell=False, returning (rc, stdout, stderr).
@@ -367,12 +391,34 @@ def run_gam(args: List[str], timeout: int = 900,
         return 0, "", ""
     _emit('info', "Running: " + " ".join(cmd))
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=timeout)
-        return result.returncode, result.stdout, result.stderr
-    except subprocess.TimeoutExpired:
-        return -1, "", f"Timed out after {timeout}s"
+        # stdout goes to a temp file rather than a pipe: a large Drive scan
+        # can outrun a pipe buffer, and a file survives the kill on timeout so
+        # partial results are still returned. stderr is read live so GAM's
+        # "Got N files..." counters reach the console during a long scan.
+        with tempfile.TemporaryFile(mode="w+", encoding="utf-8",
+                                    errors="replace") as out_fh:
+            proc = subprocess.Popen(
+                cmd, stdout=out_fh, stderr=subprocess.PIPE, text=True,
+                encoding="utf-8", errors="replace")
+            collected: List[str] = []
+            reader = threading.Thread(target=_echo_progress,
+                                      args=(proc.stderr, collected),
+                                      daemon=True)
+            reader.start()
+            timed_out = False
+            try:
+                rc = proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                rc, timed_out = -1, True
+                proc.wait()
+            reader.join(timeout=5)
+            out_fh.seek(0)
+            out = out_fh.read()
+        err = "".join(collected)
+        if timed_out:
+            err = (err + f"\nTimed out after {timeout}s").strip()
+        return rc, out, err
     except FileNotFoundError:
         return -2, "", f"GAM not found at {GAM_PATH}"
     except Exception as exc:  # keep one module failure from killing the run
@@ -559,10 +605,12 @@ MODULES: List[Dict] = [
     dict(key="mydrive_external", title="My Drive files shared externally",
          tier=3, args=None, collector="mydrive_external",
          scopes=[SCOPE_DRIVE], timeout=3600),
+    # Applied per drive, not per module. 3600s killed a single large drive
+    # mid-scan on a 660GB drive (2026-08-17) and lost every row for it.
     dict(key="shareddrive_external",
          title="Shared Drive files shared externally", tier=3,
          args=None, collector="sd_external",
-         scopes=[SCOPE_DRIVE], timeout=3600),
+         scopes=[SCOPE_DRIVE], timeout=14400),
     dict(key="sharedwithme_external",
          title="Files shared in from outside (inbound)", tier=3,
          args=None, collector="swm_external",
@@ -641,6 +689,7 @@ class RunContext:
             "internal_domains", [])
         self.admin: str = args.admin or self.manifest["meta"].get("admin", "")
         self.failed_scopes: List[str] = []
+        self._rows_cache: Dict[str, List[Dict[str, str]]] = {}
 
     def save(self):
         self.manifest["meta"]["internal_domains"] = self.internal_domains
@@ -652,6 +701,7 @@ class RunContext:
         return self.manifest["modules"].get(key, {}).get("status", "")
 
     def set_module(self, key: str, status: str, rows: int = 0, note: str = ""):
+        self._rows_cache.pop(key, None)
         self.manifest["modules"][key] = {
             "status": status, "rows": rows, "note": note,
             "completed_at": datetime.now().isoformat(timespec="seconds")}
@@ -661,7 +711,17 @@ class RunContext:
         return self.run_dir / f"{key}.csv"
 
     def rows(self, key: str) -> List[Dict[str, str]]:
-        return read_csv_rows(self.csv_path(key))
+        """Parsed rows for a module, cached.
+
+        The checks engine reads users.csv 13 times and policies.csv 5 times in
+        one pass. Harmless on a 37-user tenant; on a few thousand users the
+        heavy CSVs run to hundreds of MB and every re-read is a silent stall.
+        set_module drops the entry, so a module collected after its file was
+        read never serves a stale one.
+        """
+        if key not in self._rows_cache:
+            self._rows_cache[key] = read_csv_rows(self.csv_path(key))
+        return self._rows_cache[key]
 
     def stderr_log(self, key: str, text: str):
         """GAM progress output goes to a side log, keeping the console and
@@ -937,17 +997,116 @@ def audited_users(ctx: RunContext) -> List[str]:
     return users
 
 
+PER_USER_TIMEOUT_SECONDS = 10   # per mailbox, for whole-tenant `all users` scans
+
+
+def module_timeout(ctx: RunContext, mod: Dict, default: int) -> int:
+    """Module timeout, scaled by tenant size for whole-tenant scans.
+
+    `gam all users print ...` walks every mailbox inside one process, so a
+    flat 900s is ample at 40 users and kills the module outright on a larger
+    tenant - losing every row, not just the slow ones (reported by Kim
+    Nilsson, 2026-08-17). A timeout is a ceiling, not a budget: raising it
+    costs nothing on a tenant that finishes early.
+    """
+    base = mod.get("timeout", default)
+    args = mod.get("args") or []
+    if [a.lower() for a in args[:2]] != ["all", "users"]:
+        return base
+    users = ctx.manifest["meta"].get("user_count", 0)
+    return max(base, users * PER_USER_TIMEOUT_SECONDS)
+
+
+AUTO_BATCH_MIN = 10   # users in one command before GAM forks it into a batch
+SCAN_THREADS = 20     # GAM processes per batch; gam.cfg default is 5
+NEVER_LOGGED_IN = ("", "never", "1970-01-01t00:00:00.000z")
+
+
+def scan_user_list(ctx: RunContext) -> Optional[Path]:
+    """Write the mailbox list for the per-user scans, or None to use `all users`.
+
+    Returns None when users.csv has not been collected yet, so a lone
+    `--only sendas` still works.
+    """
+    if not ctx.rows("users"):
+        return None
+    wanted = set(audited_users(ctx))
+    emails = []
+    skipped_never = 0
+    for row in ctx.rows("users"):
+        email = col(row, "primaryEmail")
+        if email not in wanted:
+            continue
+        last = col(row, "lastLoginTime").strip().lower()
+        if ctx.args.skip_never_logged_in and last[:24] in NEVER_LOGGED_IN:
+            skipped_never += 1
+            continue
+        emails.append(email)
+    if not emails:
+        return None
+    path = ctx.run_dir / "_scan_users.csv"
+    write_rows(path, [{"primaryEmail": e} for e in emails])
+    ctx.manifest["meta"]["scanned_users"] = len(emails)
+    ctx.manifest["meta"]["skipped_never_logged_in"] = skipped_never
+    return path
+
+
+def user_scan_args(ctx: RunContext, mod: Dict) -> Tuple[List[str], Optional[Path]]:
+    """Rewrite an `all users` command into a parallel batch over a user list.
+
+    Three changes, all needed together:
+      - `csvfile <list>:primaryEmail` replaces `all users`, so the scan covers
+        the accounts we chose rather than every mailbox in the tenant.
+      - `config auto_batch_min/num_threads` makes GAM fork the scan. Left at
+        the gam.cfg defaults (0 and 5) a multi-user print runs sequentially in
+        one process: 3000 mailboxes at ~0.9s each is 45 minutes.
+      - `redirect csv <file> multiprocess` collects the children's output.
+        Without `multiprocess` the parent redirect does not follow the forks
+        and the file comes back empty; without the redirect at all, a timeout
+        throws away every row collected so far.
+
+    The redirect path must be absolute - GAM resolves a relative one against
+    drive_dir, not the working directory.
+    """
+    args = list(mod["args"])
+    if [a.lower() for a in args[:2]] != ["all", "users"]:
+        return args, None
+    listing = scan_user_list(ctx)
+    if listing is None:
+        return args, None
+    out_path = ctx.csv_path(mod["key"]).resolve()
+    return (["config", "auto_batch_min", str(AUTO_BATCH_MIN),
+             "num_threads", str(SCAN_THREADS),
+             "redirect", "csv", str(out_path), "multiprocess",
+             "csvfile", f"{listing.resolve()}:primaryEmail"] + args[2:],
+            out_path)
+
+
 def collect_simple(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
-    rc, out, err = run_gam(list(mod["args"]),
-                           timeout=mod.get("timeout", 900),
+    args, out_path = user_scan_args(ctx, mod)
+    rc, out, err = run_gam(args,
+                           timeout=module_timeout(ctx, mod, 900),
                            dry_run=ctx.args.dry_run)
     ctx.stderr_log(mod["key"], err)
     if ctx.args.dry_run:
         return "dry-run", 0, ""
+    if out_path is not None:
+        # GAM wrote the CSV itself; read it back so the handling below (and a
+        # timeout's partial file) goes through exactly one code path.
+        out = out_path.read_text(encoding="utf-8") if out_path.exists() else ""
+    per_user_skips = any(marker in (err + out)
+                         for marker in PER_USER_SKIP_MARKERS)
     if rc == 0 or (rc == 60 and is_header_only(out)):
         # Exit 60 with a header-only CSV is GAM for "no rows", not a failure.
         ctx.csv_path(mod["key"]).write_text(out, encoding="utf-8")
         rows = max(0, len([ln for ln in out.strip().splitlines() if ln.strip()]) - 1)
+        if per_user_skips:
+            # A batched scan exits 0 even when a mailbox failed: the failure
+            # happened in a child process. Only stderr carries it, so without
+            # this the module reports full coverage over a short result.
+            note = [ln for ln in err.strip().splitlines()
+                    if any(m in ln for m in PER_USER_SKIP_MARKERS)]
+            return "partial", rows, f"some users failed - {note[-1].strip()}"
         return ("empty" if rows == 0 else "ok"), rows, ""
     if mod["key"] == "caalevels" and CAALEVELS_AUTH_ERROR in (out + err):
         return "skipped", 0, ("not authorised: service account needs the "
@@ -955,8 +1114,6 @@ def collect_simple(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
     if mod["key"] == "browsers" and BROWSERS_AUTH_ERROR in (out + err):
         return "skipped", 0, ("not authorised: Chrome browser management "
                               "access is missing for this admin/API")
-    per_user_skips = any(marker in (err + out)
-                         for marker in PER_USER_SKIP_MARKERS)
     if is_header_only(out) and per_user_skips:
         # Some users were skipped and the rest simply had nothing to report:
         # partial coverage over an empty result, not a module failure.
@@ -976,10 +1133,34 @@ def collect_simple(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
     return "error", 0, f"exit {rc}: {note[0]}"
 
 
+def collect_backupcodes_args(ctx: RunContext, mod: Dict) -> List[str]:
+    """The user list and an explicit no-fork, no-redirect command.
+
+    Two things this module must not do, both for the same reason - GAM writing
+    this CSV itself would put live backup codes on disk:
+      - no `redirect csv`, so the output stays on stdout where only the count
+        is kept;
+      - and therefore no fork, because each child writes its own CSV header to
+        stdout and nothing merges them. Four mailboxes came back as seven rows
+        on the dev tenant (2026-08-17) before this was pinned to 0.
+    """
+    args, _ = user_scan_args(ctx, mod)
+    if "redirect" in args:
+        cut = args.index("redirect")
+        args = args[:cut] + args[cut + 4:]   # redirect csv <path> multiprocess
+    if "auto_batch_min" in args:
+        args[args.index("auto_batch_min") + 1] = "0"
+    return args
+
+
 def collect_backupcodes(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
-    """Backup codes come back as LIVE codes; only the count may touch disk."""
-    rc, out, err = run_gam(list(mod["args"]),
-                           timeout=mod.get("timeout", 900),
+    """Backup codes come back as LIVE codes; only the count may touch disk.
+
+    Takes the user list and threading from user_scan_args but never its
+    redirect: GAM writing this CSV itself would put live codes on disk.
+    """
+    rc, out, err = run_gam(collect_backupcodes_args(ctx, mod),
+                           timeout=module_timeout(ctx, mod, 900),
                            dry_run=ctx.args.dry_run)
     ctx.stderr_log(mod["key"], err)
     if ctx.args.dry_run:
@@ -1129,6 +1310,7 @@ def collect_sd_external(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
     pm = external_pm_args(ctx.internal_domains)
     rows: List[Dict[str, str]] = []
     unscanned: List[str] = []
+    failed: List[str] = []
     errors = 0
     for drive in drives:
         if shutdown_requested:
@@ -1169,6 +1351,7 @@ def collect_sd_external(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
                     rows.append(row)
             else:
                 errors += 1
+                failed.append(f"{drive_name} ({drive_id})")
                 unscanned.append(f"{drive_name} ({drive_id}) - scan failed")
         finally:
             if granted:
@@ -1188,11 +1371,15 @@ def collect_sd_external(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
     write_rows(ctx.csv_path(mod["key"]), rows)
     ctx.manifest["meta"]["unscanned_shared_drives"] = unscanned
     note = ""
-    if unscanned:
-        note = (f"{len(unscanned)} drive(s) UNSCANNED (admin not a member; "
+    not_member = len(unscanned) - len(failed)
+    if not_member:
+        note = (f"{not_member} drive(s) UNSCANNED (admin not a member; "
                 f"re-run with --grant-temp-access to cover them)")
-    if errors:
-        note = (note + "; " if note else "") + f"{errors} scan error(s)"
+    if failed:
+        # Name them: a timed-out drive contributes nothing and the operator
+        # has to know which one to re-run.
+        note = (note + "; " if note else "") + \
+            f"{len(failed)} drive(s) FAILED mid-scan: {', '.join(failed)}"
     return ("empty" if not rows else "ok"), len(rows), note
 
 
@@ -1280,9 +1467,12 @@ def collect_dns(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
         return "dry-run", 0, ""
     results: Dict[str, Dict] = {}
     use_fallback = bool(ctx.manifest["meta"].get("dns_fallback"))
-    for domain in domains:
+    for idx, domain in enumerate(domains, 1):
         if shutdown_requested:
             return "error", len(results), "interrupted"
+        # Four HTTP checks per domain at up to 25s each, and nothing on
+        # screen between them on a tenant carrying a dozen domains.
+        print_info(f"dns: {domain} ({idx}/{len(domains)})")
         if use_fallback:
             results[domain] = doh_fallback(domain)
             continue
@@ -1563,11 +1753,30 @@ def check_admin_2sv(ctx: RunContext) -> List[Finding]:
         evidence, "users.csv")]
 
 
+def _asp_rows(ctx: RunContext) -> List[Dict[str, str]]:
+    """Rows in asps.csv that are an actual app password.
+
+    `gam all users print asps` emits one row per user with an `asps` count
+    column when that user has none - a clean tenant yields 37 rows of
+    `user,0`. Counting rows therefore flags everybody. Real app passwords
+    carry a codeId.
+    """
+    real = []
+    for row in ctx.rows("asps"):
+        if col(row, "codeId", "codeid"):
+            real.append(row)
+            continue
+        count = col(row, "asps")
+        if count and count.strip().isdigit() and int(count) > 0:
+            real.append(row)
+    return real
+
+
 def check_admin_asps(ctx: RunContext) -> List[Finding]:
     if not (_module_usable(ctx, "users") and _module_usable(ctx, "asps")):
         return []
     admin_emails = {col(r, "primaryEmail").lower() for r in _super_admins(ctx)}
-    hits = [r for r in ctx.rows("asps")
+    hits = [r for r in _asp_rows(ctx)
             if col(r, "User", "user").lower() in admin_emails]
     if not hits:
         return []
@@ -2049,7 +2258,7 @@ def check_at_risk_accounts(ctx: RunContext) -> List[Finding]:
     internal = {d.lower() for d in ctx.internal_domains}
     asp_users = set()
     if _module_usable(ctx, "asps"):
-        asp_users = {col(r, "User", "user").lower() for r in ctx.rows("asps")}
+        asp_users = {col(r, "User", "user").lower() for r in _asp_rows(ctx)}
     risky_users = set()
     if _module_usable(ctx, "tokens"):
         for row in ctx.rows("tokens"):
@@ -2851,6 +3060,11 @@ def render_html(ctx: RunContext, findings: List[Finding]) -> Path:
                      "Per-user checks (mail settings, calendars, Drive "
                      "sharing) cover ACTIVE users only; suspended accounts "
                      "were not swept.")
+    never_skipped = ctx.manifest["meta"].get("skipped_never_logged_in", 0)
+    if never_skipped:
+        coverage_note += (f" {never_skipped} account(s) that have never "
+                          "signed in were excluded from those checks "
+                          "(--skip-never-logged-in).")
 
     html = f"""<!DOCTYPE html>
 <html lang='en'>
@@ -2978,6 +3192,14 @@ def parse_args(argv=None):
     parser.add_argument("--render-only", action="store_true",
                         help="Skip collection; re-run checks and render from "
                         "an existing --run-dir")
+    parser.add_argument("--skip-never-logged-in", action="store_true",
+                        help="Exclude accounts that have never signed in from "
+                        "the per-user scans (big tenants carrying thousands "
+                        "of placeholder accounts); coverage is stated in the "
+                        "report")
+    parser.add_argument("--no-open", action="store_true",
+                        help="Do not open the finished report in a browser "
+                        "(for headless or scheduled runs)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print every GAM command without executing")
     parser.add_argument("--yes", action="store_true",
@@ -3003,6 +3225,21 @@ def list_modules():
     print("DNS:")
     print(f"  {'dns':<24} Mail DNS (MX/SPF/DKIM/DMARC) via tamingdns.com, "
           "dns.google fallback")
+
+
+def open_report(path: Path, args) -> bool:
+    """Open the finished report in the default browser.
+
+    A file:// URI, not the bare path: on Linux webbrowser hands a bare path to
+    the browser as a relative URL and it 404s.
+    """
+    if args.no_open:
+        return False
+    try:
+        return webbrowser.open(path.as_uri())
+    except Exception as exc:                       # headless box, no browser
+        print_warning(f"Could not open the report automatically: {exc}")
+        return False
 
 
 def main(argv=None):
@@ -3032,7 +3269,7 @@ def main(argv=None):
 
     if args.render_only:
         findings = run_checks(ctx)
-        render_html(ctx, findings)
+        open_report(render_html(ctx, findings), args)
         return 0
 
     if not preflight(ctx, modules):
@@ -3044,7 +3281,7 @@ def main(argv=None):
         print_info("Dry run complete - no data collected, no report rendered.")
         return 0
     findings = run_checks(ctx)
-    render_html(ctx, findings)
+    report_path = render_html(ctx, findings)
 
     worst = next((f.severity for f in findings
                   if f.severity in ("CRITICAL", "HIGH")), None)
@@ -3054,6 +3291,7 @@ def main(argv=None):
     else:
         print_success("No critical or high findings. "
                       "Open audit_report.html for the full picture.")
+    open_report(report_path, args)
     return 0
 
 
