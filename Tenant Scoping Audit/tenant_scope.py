@@ -147,7 +147,7 @@ from typing import Dict, List, Optional, Tuple
 # CONFIGURATION
 ###############################################################################
 
-SCRIPT_VERSION = "1.4.0"
+SCRIPT_VERSION = "1.4.1"
 
 # [OPTIONAL] Startup check against the remote VERSION file. Fail-silent.
 CHECK_FOR_UPDATES = True
@@ -1948,7 +1948,9 @@ def check_filter_forwarding(ctx: RunContext) -> List[Finding]:
     internal = set(ctx.internal_domains)
     hits = []
     for row in ctx.rows("filters"):
-        target = col(row, "forward")
+        # GAM writes the action verb into the cell ("forward user@x.com"),
+        # so the address has to come off the end of the value.
+        target = col(row, "forward").removeprefix("forward").strip()
         if target and email_domain(target) not in internal:
             hits.append({"User": col(row, "User", "user"),
                          "Filter forwards to": target})
@@ -2985,13 +2987,20 @@ def render_html(ctx: RunContext, findings: List[Finding]) -> Path:
         f"<td>{escape(r[2])}</td></tr>"
         for r in ctx.manifest.get("preflight", []))
 
-    # Modules that did not produce data are ALWAYS listed - a reader must be
-    # able to tell "checked and clean" from "not checked".
+    # Modules that did not produce complete data are ALWAYS listed - a reader
+    # must be able to tell "checked and clean" from "not checked", and a
+    # partial module from a module that returned nothing at all.
     not_checked = ""
     for key, entry in sorted(ctx.manifest["modules"].items()):
         if entry["status"] in ("skipped", "error", "partial"):
             title = MODULE_BY_KEY.get(key, {}).get("title", key)
             note = entry.get("note", "")
+            rows_n = entry.get("rows", 0)
+            # A partial module WAS checked over the rows it did return; say so
+            # and name the CSV, otherwise this table reads as "not audited".
+            if entry["status"] == "partial" and rows_n:
+                note = (f"{rows_n} row(s) collected and checked "
+                        f"({key}.csv); {note}")
             not_checked += (f"<tr><td>{escape(title)}</td>"
                             f"<td>{escape(entry['status'])}</td>"
                             f"<td>{escape(note)}</td></tr>")
@@ -3004,9 +3013,13 @@ def render_html(ctx: RunContext, findings: List[Finding]) -> Path:
     if not_checked:
         not_checked_block = f"""
 <section class='finding'>
-  <h3>Not checked</h3>
-  <p>These areas were NOT audited on this run, for the reason given. Absence
-  from the findings above does not mean they are clean.</p>
+  <h3>Coverage gaps</h3>
+  <p>These areas were not fully audited on this run, for the reason given.
+  <strong>skipped</strong> and <strong>error</strong> mean no data at all -
+  absence from the findings above does not mean they are clean.
+  <strong>partial</strong> means the rows that did come back were collected
+  and checked, and the raw rows are in the run folder's CSV; only the users
+  named in the reason were missed.</p>
   <div class='scroll'><table><thead><tr><th>Area</th><th>Status</th>
   <th>Reason</th></tr></thead><tbody>{not_checked}</tbody></table></div>
 </section>"""

@@ -170,6 +170,15 @@ user@example.com,f1,boss@example.com,leak@evil.example.net""")
         ids = self.finding_ids(ts.check_filter_forwarding(self.ctx))
         self.assertIn("filter-external-forwarding", ids)
 
+    def test_filter_forwarding_strips_gam_action_verb(self):
+        # Live GAM output: the cell is "forward <address>", not the address.
+        self.write_csv("filters", """User,id,from,forward
+user@example.com,f1,vendor@example.com,forward leak@evil.example.net""")
+        findings = ts.check_filter_forwarding(self.ctx)
+        self.assertIn("filter-external-forwarding", self.finding_ids(findings))
+        self.assertEqual("leak@evil.example.net",
+                         findings[0].evidence[0]["Filter forwards to"])
+
     def test_filter_forwarding_internal_clean(self):
         self.write_csv("filters", """User,id,from,forward
 user@example.com,f1,boss@example.com,team@example.com""")
@@ -1092,8 +1101,12 @@ class TestRender(CtxTestCase):
         out = ts.render_html(self.ctx, findings)
         html = out.read_text(encoding="utf-8")
         self.assertIn("Something &lt;bad&gt; &amp; risky", html)
-        self.assertIn("Not checked", html)
+        self.assertIn("Coverage gaps", html)
         self.assertIn("not authorised: DWD scope missing", html)
+        # A partial module says what it DID cover, not just what failed.
+        self.ctx.set_module("filters", "partial", 42, "some users failed")
+        html = ts.render_html(self.ctx, findings).read_text(encoding="utf-8")
+        self.assertIn("42 row(s) collected and checked (filters.csv)", html)
         # Self-contained: no external stylesheet/script/image references.
         self.assertNotIn("<script src", html)
         self.assertNotIn("<link", html)
