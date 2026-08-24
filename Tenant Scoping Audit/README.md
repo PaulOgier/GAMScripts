@@ -248,6 +248,12 @@ which path ran.
   users unless you pass `--include-suspended`; the report says which.
 - Usage-report figures (storage) lag roughly two days behind live state.
 - Shared Drives the auditing admin cannot scan are listed as UNSCANNED.
+- Policy checks report the *resolved* setting. The Policy API returns
+  Google's defaults, the administrator's own policy and a copy per
+  licence SKU for the same org unit; the highest `sortOrder` wins, per
+  Google's Max reducer. Licence scoping is not modelled, so a setting
+  that genuinely differs between two SKUs in one org unit shows only the
+  winner.
 
 ## Tests
 
@@ -255,7 +261,7 @@ which path ran.
 python3 -m unittest test_tenant_scope -v
 ```
 
-104 tests, no GAM calls, no fixtures on disk beyond temp directories.
+128 tests, no GAM calls, no fixtures on disk beyond temp directories.
 
 ## Licence
 

@@ -583,15 +583,20 @@ import csv as _csv
 
 class PolicyTestCase(CtxTestCase):
     def write_policies(self, settings, broken_rows=()):
-        """settings: list of (type, orgUnitPath, value-dict). Writes a
-        policies.csv shaped like gam's formatjson output."""
+        """settings: list of (type, orgUnitPath, value-dict) or
+        (type, orgUnitPath, value-dict, sortOrder). Writes a policies.csv
+        shaped like gam's formatjson output. Real sortOrders: ~101.x for
+        Google's SYSTEM defaults, ~201.x for admin-set policies."""
         path = self.run_dir / "policies.csv"
         with open(path, "w", newline="", encoding="utf-8") as fh:
             writer = _csv.writer(fh)
             writer.writerow(["name", "JSON"])
-            for i, (stype, ou, value) in enumerate(settings):
+            for i, entry in enumerate(settings):
+                stype, ou, value = entry[:3]
+                order = entry[3] if len(entry) > 3 else 101.0
                 writer.writerow([f"policies/p{i}", json.dumps(
-                    {"policyQuery": {"orgUnitPath": ou},
+                    {"policyQuery": {"orgUnitPath": ou,
+                                     "sortOrder": order},
                      "setting": {"type": f"settings/{stype}",
                                  "value": value}})])
             for i, raw in enumerate(broken_rows):
@@ -607,12 +612,53 @@ class TestPolicyParsing(PolicyTestCase):
         self.assertEqual(1, len(parsed))
         self.assertEqual("security.password", parsed[0]["type"])
 
-    def test_distinct_values_all_kept(self):
+    def test_highest_sort_order_wins(self):
+        # The admin-set policy (201.x) beats Google's SYSTEM default
+        # (101.x) for the same setting and OU - one resolved row, not two.
         self.write_policies([
-            ("drive_and_docs.shared_drive_creation", "/",
-             {"allowSharedDriveCreation": True}),
-            ("drive_and_docs.shared_drive_creation", "/",
-             {"allowSharedDriveCreation": False})])
+            ("security.password", "/", {"minimumLength": 8}, 101.00073),
+            ("security.password", "/", {"minimumLength": 14}, 201.0031)])
+        parsed = ts._policy_settings(self.ctx)
+        self.assertEqual(1, len(parsed))
+        self.assertEqual(14, parsed[0]["value"]["minimumLength"])
+
+    def test_admin_policy_suppresses_weak_default_finding(self):
+        # Kim Nilsson's report: root / returns several security.password
+        # policies, and reading the SYSTEM default row flagged a tenant
+        # whose admin had already hardened the policy.
+        self.write_policies([
+            ("security.password", "/",
+             {"minimumLength": 8, "allowedStrength": "STRONG"}, 101.00073),
+            ("security.password", "/",
+             {"minimumLength": 8, "allowedStrength": "STRONG"}, 101.00106),
+            ("security.password", "/",
+             {"minimumLength": 14, "allowedStrength": "STRONG"}, 201.0031)])
+        self.assertEqual([], ts.check_password_policy(self.ctx))
+
+    def test_fields_merge_across_policies(self):
+        # Max reduces per field: a partial high-order policy overrides only
+        # the fields it carries.
+        self.write_policies([
+            ("security.password", "/",
+             {"minimumLength": 8, "allowReuse": False}, 101.0),
+            ("security.password", "/", {"minimumLength": 12}, 201.0)])
+        value = ts._policy_settings(self.ctx)[0]["value"]
+        self.assertEqual(12, value["minimumLength"])
+        self.assertIs(False, value["allowReuse"])
+
+    def test_per_ou_policies_stay_separate(self):
+        self.write_policies([
+            ("security.password", "/", {"minimumLength": 14}, 201.0),
+            ("security.password", "/Contractors",
+             {"minimumLength": 8}, 202.0)])
+        parsed = ts._policy_settings(self.ctx)
+        self.assertEqual({"/", "/Contractors"}, {p["ou"] for p in parsed})
+
+    def test_rule_rows_not_reduced(self):
+        # DLP rules and system-defined alerts are a list, not one setting.
+        self.write_policies([
+            ("rule.dlp", "/", {"name": "one"}),
+            ("rule.dlp", "/", {"name": "two"})])
         self.assertEqual(2, len(ts._policy_settings(self.ctx)))
 
     def test_gam_backslash_quote_artifact_repaired(self):

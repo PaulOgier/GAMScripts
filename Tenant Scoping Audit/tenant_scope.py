@@ -147,7 +147,7 @@ from typing import Dict, List, Optional, Tuple
 # CONFIGURATION
 ###############################################################################
 
-SCRIPT_VERSION = "1.4.1"
+SCRIPT_VERSION = "1.4.2"
 
 # [OPTIONAL] Startup check against the remote VERSION file. Fail-silent.
 CHECK_FOR_UPDATES = True
@@ -2517,23 +2517,44 @@ def check_tenant_shape(ctx: RunContext) -> List[Finding]:
 
 
 def _policy_settings(ctx: RunContext) -> List[Dict]:
-    """Parse policies.csv (formatjson: name,JSON) into a list of
-    {"type", "ou", "value"} dicts, with the "settings/" prefix stripped.
+    """Parse policies.csv (formatjson: name,JSON) and return the RESOLVED
+    settings as a list of {"type", "ou", "value"} dicts, "settings/"
+    stripped.
+
+    The Policy API returns every policy that could apply to a target, not
+    the one that wins: Google's own defaults (type SYSTEM) sit alongside
+    what the administrator set (type ADMIN), plus a licence-scoped copy per
+    SKU. A tenant whose admin raised the password minimum still shows the
+    SYSTEM default of 8 in its own row, so reading the rows as-is reports a
+    weak policy that is not in force.
+
+    Google resolves them with the Max/Merge reducer: for each field, the
+    value from the policy with the greatest policyQuery.sortOrder wins
+    (docs.cloud.google.com/identity/docs/concepts/policy-api-concepts).
+    Admin policies carry a higher sortOrder than system ones (measured on
+    a test tenant: an admin-set security.password at 201.00332 against
+    three system rows at 101.000x), so merging the values of a
+    (setting, OU) group in ascending sortOrder yields the setting actually
+    in force.
+
+    Licence filtering is not modelled - a policy scoped to one
+    SKU is treated as applying to the whole OU. Where two SKUs in the same
+    OU genuinely differ, the higher sortOrder wins and the divergence is
+    invisible. Per-user resolution would need each user's licences.
+
+    rule.* rows (DLP rules, system-defined alerts) are lists of rules, not
+    reducible settings, so they keep one entry each.
 
     gam renders a quote inside a policy display name as \\\\" which is invalid
     JSON once the CSV layer has decoded it (seen on DLP rule names); one
     targeted repair recovers those rows, and rows that still fail to parse
     are skipped - on the dev tenant every such row is a rule.dlp or
     system-defined alert, not a settings policy.
-
-    The API returns one row PER LICENCE SKU for some settings, so the same
-    (type, OU, value) triple repeats; those duplicates are collapsed here.
-    Distinct values for the same type+OU (licence-scoped variants) are all
-    kept.
     """
-    out: List[Dict] = []
     if not _module_usable(ctx, "policies"):
-        return out
+        return []
+    rules: List[Dict] = []
+    groups: Dict[tuple, List[tuple]] = {}
     seen = set()
     for row in ctx.rows("policies"):
         raw = col(row, "JSON")
@@ -2551,12 +2572,27 @@ def _policy_settings(ctx: RunContext) -> List[Dict]:
         if not stype:
             continue
         value = setting.get("value") or {}
-        ou = str((data.get("policyQuery") or {}).get("orgUnitPath", ""))
-        key = (stype, ou, json.dumps(value, sort_keys=True))
-        if key in seen:
+        query = data.get("policyQuery") or {}
+        ou = str(query.get("orgUnitPath", ""))
+        if stype.startswith("rule."):
+            key = (stype, ou, json.dumps(value, sort_keys=True))
+            if key not in seen:
+                seen.add(key)
+                rules.append({"type": stype, "ou": ou, "value": value})
             continue
-        seen.add(key)
-        out.append({"type": stype, "ou": ou, "value": value})
+        try:
+            order = float(query.get("sortOrder", 0))
+        except (TypeError, ValueError):
+            order = 0.0
+        groups.setdefault((stype, ou), []).append((order, value))
+    out: List[Dict] = []
+    for (stype, ou), entries in groups.items():
+        resolved: Dict = {}
+        for _, value in sorted(entries, key=lambda e: e[0]):
+            if isinstance(value, dict):
+                resolved.update(value)
+        out.append({"type": stype, "ou": ou, "value": resolved})
+    out.extend(rules)
     return out
 
 
