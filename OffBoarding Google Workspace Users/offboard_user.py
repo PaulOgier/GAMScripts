@@ -41,8 +41,8 @@ YOU ASSUME ALL RISK ASSOCIATED WITH THE USE OF THIS SOFTWARE.
 
 Author:       Paul Ogier
 Created:      2023-06-22
-Updated:      2026-07-13
-Version:      5.5.0
+Updated:      2026-08-31
+Version:      5.6.0
 Status:       Production
 Python:       3.8+
 Dependencies: GAM ADV X (GAM7), GYB (optional), rclone (optional), PyYAML (optional)
@@ -427,7 +427,7 @@ import shutil
 
 # [IMPORTANT] Current local script version. Bumped on each release.
 # Compared against the remote VERSION file to detect updates.
-SCRIPT_VERSION = "5.5.0"
+SCRIPT_VERSION = "5.6.0"
 
 # [OPTIONAL] Check for a newer script version on startup.
 # When True (default), the script makes a single 3-second HTTP request to
@@ -462,6 +462,23 @@ GAM_COMMAND = "gam"
 # Only needed if you want to back up and restore email to another account.
 # If GYB is not installed, set this to None or leave as "gyb".
 GYB_COMMAND = "gyb"
+
+# [IMPORTANT] Spam and Trash are DELIBERATELY excluded from every backup and
+# migration. GYB omits both unless --spam-trash is passed, and this script
+# passes neither that nor --search, so the exclusion costs no code and must not
+# be "fixed" by a later cleanup pass: a leaver's spam and deleted mail should
+# not land in the successor's mailbox or in the archive.
+#
+# The visible consequence is that the backup is SMALLER than the mailbox size
+# shown in the Admin console, which counts spam and trash. Printing it up front
+# means the run log answers "why is it smaller?" before anyone has to ask.
+# (_estimate_mailbox_bytes reads those same GAM storage fields, so the
+# disk-space preflight over-reserves rather than under-reserves. That is the
+# safe direction; leave it.)
+SPAM_TRASH_NOTE = (
+    "Spam and Trash are excluded by design, so this backup will be smaller "
+    "than the mailbox size reported in the Admin console."
+)
 
 # [IMPORTANT] Root directory for backups, snapshots, and email migration data.
 # Snapshots, mailbox GYB backups and Drive downloads are all written in
@@ -3562,6 +3579,7 @@ def migrate_email(source: str, destination: str, dry_run: bool, strip_labels: bo
 
         # Backup
         print_info(f"Backing up email to: {backup_path}")
+        print_info(SPAM_TRASH_NOTE)
         print_info(
             "GYB will print a live progress bar (e.g. ' 42%|####  | 1234/2950 [01:23<02:45]'). "
             "For large mailboxes this phase can run for tens of minutes."
@@ -3591,8 +3609,13 @@ def migrate_email(source: str, destination: str, dry_run: bool, strip_labels: bo
 
     # Restore
     migration_label = f"Migrated/{source}"
+    # GYB 1.95 creates the --label-restored label with a leading underscore, so
+    # what lands in the destination is '_Migrated/<source>', not the name passed
+    # here. Report the landed name: an admin searching Gmail for the name we
+    # asked for finds nothing. Verified 2026-08-31 on GYB 1.95 (Win/Linux/macOS).
+    landed_label = f"_{migration_label}"
     mode_desc = "archived under single label" if strip_labels else "original labels preserved + migration label"
-    print_info(f"Restoring email to: {destination} (label: {migration_label}; {mode_desc})")
+    print_info(f"Restoring email to: {destination} (label: {landed_label}; {mode_desc})")
     restore_args = ["--email", destination, "--action", "restore",
                     "--local-folder", str(backup_path),
                     "--label-restored", migration_label,
@@ -3702,7 +3725,7 @@ def migrate_email(source: str, destination: str, dry_run: bool, strip_labels: bo
             f"exclusion for {backup_path.parent} in the endpoint AV policy."
         )
         return
-    migrated_desc = f"Email migrated to {destination} under label '{migration_label}' ({mode_desc})"
+    migrated_desc = f"Email migrated to {destination} under label '{landed_label}' ({mode_desc})"
     if skipped:
         migrated_desc += f", excluding {len(skipped)} unreadable/AV-quarantined message(s)"
     summary_action(migrated_desc)
@@ -3823,13 +3846,42 @@ def setup_forwarding(email: str, forward_to: str, dry_run: bool):
             time.sleep(3)
 
         if not verified:
+            # Timing is not the whole story, and the old "within 60s" wording
+            # implied it was. Same-domain auto-acceptance is inconsistent: over
+            # five dev runs on 2026-08-31 one destination was accepted on the
+            # FIRST poll while three others were still 'pending' an hour later,
+            # never having moved. When it does not auto-accept, Gmail mails a
+            # "Forwarding Confirmation" from forwarding-noreply@google.com to
+            # the DESTINATION and the address stays pending until someone opens
+            # it — so polling longer is not reliably the answer, and the
+            # operator needs to be sent to that mailbox, not back to a wait.
+            # Activating while pending genuinely fails ("Set Failed: Invalid
+            # forwarding address"), so skipping here is correct.
             print_error(
-                f"Forwarding address {forward_to} did not reach 'accepted' "
-                f"state within 60s. Skipping activation."
+                f"Forwarding address {forward_to} is still 'pending' after 60s, "
+                f"so activation is skipped."
+            )
+            print_info(
+                f"Gmail does not always auto-accept a same-domain destination. "
+                f"When it does not, it sends a 'Forwarding Confirmation' from "
+                f"forwarding-noreply@google.com to {forward_to}, and the address "
+                f"stays pending until that mail is confirmed. Read it with:"
+            )
+            # showbody: the confirmation link is in the body, and `show messages`
+            # prints headers only without it.
+            print_info(
+                f"  gam user {forward_to} show messages query "
+                f"\"from:forwarding-noreply@google.com\" showbody"
+            )
+            print_info(
+                f"The alias / recipient-address-map / group options in the MANUAL "
+                f"ACTION block below need no confirmation and, unlike Gmail "
+                f"forwarding, survive suspension."
             )
             summary_error(
-                f"Forwarding NOT activated for {email}: {forward_to} unverified. "
-                f"Once verified, run: gam user {email} forward on {forward_to} keep"
+                f"Forwarding NOT activated for {email}: {forward_to} still awaiting "
+                f"confirmation in the destination mailbox. Once confirmed, run: "
+                f"gam user {email} forward on {forward_to} keep"
             )
             return
 
@@ -3876,8 +3928,14 @@ def check_shared_drives(email: str, dry_run: bool) -> List[str]:
         print_info("DRY RUN: would check Shared Drive memberships")
         return []
 
+    # GAM exits 60 on `print shareddrives` when the user is in NO shared drive,
+    # even though the query succeeded and printed the CSV header. Without this
+    # pattern every ordinary leaver triggers the "check by hand" warning below —
+    # exactly the case where there is nothing to check. Verified 2026-08-31 on
+    # GAM 7.48.01 on dev.
     ok, out = run_gam(["user", email, "print", "shareddrives"],
                       dry_run=False, capture_output=True, timeout=180,
+                      non_fatal_patterns=["got 0 shared drives"],
                       suppress_summary_error=True)
     if not ok:
         print_warning(
@@ -3990,6 +4048,24 @@ def check_shared_drives(email: str, dry_run: bool) -> List[str]:
     return orphaned
 
 
+def _count_unexportable(out: str) -> int:
+    """
+    Count Forms and Sites in `gam print filelist fields id,mimetype` output.
+
+    Drive's export API has no format for either, so rclone never lists them and
+    they can never be in a Drive backup. That makes them a deliberate exclusion
+    rather than data at risk, which is the distinction a shortfall has to be
+    classified on before it is called an error — the same split the mail path
+    makes between quarantined and genuinely missing messages.
+
+    Counts substring matches rather than parsing the CSV: run_gam merges GAM's
+    stderr progress lines into the output, so a strict DictReader over the whole
+    string trips on them.
+    """
+    return (out.count("application/vnd.google-apps.form")
+            + out.count("application/vnd.google-apps.site"))
+
+
 def _parse_gam_got_count(out: str) -> int:
     """
     Read the file count out of `gam print filelist` output.
@@ -4065,6 +4141,16 @@ def verify_drive_backup_complete(email: str, backup_path: Path,
 
     local_files = sum(1 for p in backup_path.rglob("*") if p.is_file())
 
+    # Classify the shortfall before reporting it, the way verify_backup_complete
+    # does for mail (issue #11). Forms and Sites have no export format at all,
+    # so rclone never lists them and their absence is a deliberate, unavoidable
+    # exclusion — not data at risk. Everything else missing IS at risk. The
+    # mimetype column is already in the filelist query above, so this costs no
+    # extra call.
+    unexportable = _count_unexportable(out)
+    shortfall = max(drive_files - local_files, 0)
+    genuinely_missing = max(shortfall - unexportable, 0)
+
     if drive_files and local_files < drive_files and duplicates:
         # rclone named them, so stop guessing at causes for these ones.
         print_warning(
@@ -4082,33 +4168,43 @@ def verify_drive_backup_complete(email: str, backup_path: Path,
             "Sites (not exportable, so never listed) or files owned here but "
             "parented only in someone else's folder."
         )
-        summary_warning(
-            f"Drive backup at {backup_path} is short by "
-            f"{drive_files - local_files} file(s); rclone dropped these as "
-            f"same-name collisions: {'; '.join(duplicates)}"
+        # rclone NAMED these, so they are known losses, not a maybe. An error
+        # (not a warning) so exit_code goes non-zero and the enclosing
+        # record_failure() holds licence removal — the same treatment the mail
+        # path gives an unexplained shortfall. Before this, a short Drive backup
+        # warned loudly and still exited 0, so any wrapper reading only the exit
+        # status went on to delete the source account (issue #11).
+        summary_error(
+            f"Drive backup at {backup_path} is short by {shortfall} file(s); "
+            f"rclone dropped these as same-name collisions: "
+            f"{'; '.join(duplicates)}"
         )
-    elif drive_files and local_files < drive_files:
+    elif drive_files and local_files < drive_files and genuinely_missing:
+        summary_error(
+            f"Drive backup at {backup_path} is short by {shortfall} file(s), "
+            f"{genuinely_missing} of them unaccounted for beyond the "
+            f"{unexportable} Form(s)/Site(s) that cannot be exported "
+            f"(Drive {drive_files}, on disk {local_files}). Verify before "
+            f"deleting the source account."
+        )
         print_warning(
             f"{Colours.RED}Drive backup is SHORT: {drive_files} file(s) owned in "
-            f"Drive but {local_files} on disk ({drive_files - local_files} "
-            f"missing). Three causes, in order of likelihood:\n"
-            f"  1. Two files share a name in the same folder. On Drive they are "
-            f"distinct file IDs; on disk the second overwrites the first, and "
-            f"rclone counts that a normal write. Those files are NOT in this "
-            f"backup — rename them in Drive and re-run, or export them by hand.\n"
-            f"  2. Google FORMS and SITES cannot be exported to a file at all, "
-            f"so rclone does not even list them. No setting fixes this. A Form "
-            f"carries its response data — transfer its ownership instead of "
-            f"relying on this backup.\n"
-            f"  3. The user OWNS a file that lives only under another user's "
-            f"folder. GAM counts it; rclone walks this user's own tree and never "
-            f"reaches it. Nothing is lost, but it is not in this backup either.\n"
-            f"Check before deleting the source account.{Colours.RESET}"
+            f"Drive but {local_files} on disk. {unexportable} are Forms/Sites "
+            f"that cannot be exported; {genuinely_missing} are unaccounted "
+            f"for.{Colours.RESET}"
+        )
+    elif drive_files and local_files < drive_files:
+        # Shortfall fully explained by Forms/Sites: a real limit of the export
+        # API, nothing an operator can fix, so it stays a warning.
+        print_warning(
+            f"Drive backup is short by {shortfall} file(s), all of them "
+            f"Forms/Sites that have no export format. Nothing else is missing. "
+            f"A Form carries its response data — transfer its ownership rather "
+            f"than relying on this backup."
         )
         summary_warning(
-            f"Drive backup at {backup_path} has {local_files} file(s) on disk "
-            f"but Drive lists {drive_files} ({drive_files - local_files} missing, "
-            f"likely same-name collisions)"
+            f"Drive backup at {backup_path} excludes {unexportable} "
+            f"Form(s)/Site(s) (not exportable); nothing else is missing"
         )
     elif drive_files == local_files:
         print_success(f"Drive backup verified: {local_files} file(s), matches Drive.")
@@ -4389,6 +4485,7 @@ def backup_email_only(email: str, dry_run: bool) -> bool:
         backup_path.mkdir(parents=True, exist_ok=True)
 
     print_info(f"Backing up email to: {backup_path}")
+    print_info(SPAM_TRASH_NOTE)
 
     success, output = run_gyb(
         ["--email", email, "--action", "backup", "--local-folder", str(backup_path)],
@@ -4516,11 +4613,21 @@ def suspend_user(email: str, dry_run: bool):
 
     # Read back the actual state: a successful 'Updated' response can lie.
     # Observed live on dev 2026-07-13: an unsuspend returned 'Updated' with
-    # no state change for 70+ seconds until a suspend-toggle cycle cleared
-    # it. Suspension is the security-critical final step, so verify it
-    # rather than trusting the exit code; retry the read a few times to
-    # ride out ordinary propagation lag.
-    for attempt in range(3):
+    # no state change for 70+ seconds until a suspend-toggle cycle cleared it.
+    #
+    # How long to wait is measured, not guessed (dev, 2026-08-31). On a quiet
+    # account the flip reads back in 4-5s (5 of 5 trials). Straight after the
+    # kill switch's burst of directory writes — OU move, recovery wipe,
+    # deprovision, signout, password scramble, GAL, licence deletes — the SAME
+    # flip took 54s. The old window was three reads with 5s between (~18s), so
+    # every scorched-earth run, which suspends less than a minute after that
+    # burst, failed verification on an account that did suspend correctly: 2 of
+    # 2 genuine transitions raised CRITICAL and exited 1 on a run that worked.
+    # 120s covers the measured worst case with headroom and costs the normal
+    # path nothing, because it returns on the first read.
+    deadline = time.time() + 120
+    started = time.time()
+    while True:
         ok, output = run_gam(
             ["info", "user", email, "quick"],
             dry_run=False,
@@ -4532,15 +4639,20 @@ def suspend_user(email: str, dry_run: bool):
             for line in output.splitlines():
                 lower = line.lower()
                 if "account suspended" in lower and "true" in lower:
-                    summary_action("User account suspended (verified by read-back)")
+                    waited = int(time.time() - started)
+                    summary_action(
+                        f"User account suspended (verified by read-back "
+                        f"after {waited}s)"
+                    )
                     return
-        if attempt < 2:
-            time.sleep(5)
+        if time.time() >= deadline:
+            break
+        time.sleep(5)
     print_error(
         f"CRITICAL: Suspension reported success but {email} still reads as "
-        f"ACTIVE. Toggle it manually: gam update user {email} suspended on "
-        f"(if that reports Updated with no effect, run suspended off then "
-        f"suspended on) and verify with: gam info user {email} quick"
+        f"ACTIVE after 120s. Toggle it manually: gam update user {email} "
+        f"suspended on (if that reports Updated with no effect, run suspended "
+        f"off then suspended on) and verify with: gam info user {email} quick"
     )
     summary_error(
         f"Suspension NOT verified — {email} may still be ACTIVE despite "
@@ -4745,6 +4857,12 @@ def parse_args():
         help="DANGER: Kill switch, remove groups/licences, suspend, then "
              "permanently DELETE the user. No backups, no transfers. "
              "Requires --doit and --force. You must type the email to confirm.")
+    mode_grp.add_argument(
+        "--allow-orphaned-shared-drives", action="store_true",
+        help="With --scorched-earth, delete the user even when they are the "
+             "ONLY organizer of a Shared Drive. Without this the run aborts "
+             "before any change, because deleting the sole organizer leaves a "
+             "drive only a super admin can recover.")
     mode_grp.add_argument(
         "--allow-admin-account", action="store_true",
         help="DANGER: Continue even when the target still has Super Admin or "
@@ -5084,6 +5202,38 @@ def main():
             confirm = ""
         if confirm != user_email:
             print_error("Email mismatch. Aborting.")
+            sys.exit(2)
+
+        # Scorched earth short-circuits straight to deletion and so never
+        # reaches the Shared Drive check that every other run does. Deleting
+        # the sole organizer leaves a drive no MEMBER can add members to,
+        # change settings on or delete — only a super admin taking it over in
+        # the console recovers it, and nothing in the run said so (issue #9).
+        # Proved on dev 2026-08-31: a scorched-earth delete left
+        # `gam print shareddriveorganizers` reporting that drive with an empty
+        # organizer column and printed no warning at all.
+        #
+        # This runs BEFORE the kill switch on purpose: aborting here leaves the
+        # account completely untouched, so the operator can add an organizer
+        # and re-run. Deletion is the one step with no undo, so it is the one
+        # step that gets a gate rather than a warning.
+        orphans = check_shared_drives(user_email, dry_run)
+        if orphans and not args.allow_orphaned_shared_drives:
+            print_error(
+                f"Refusing to delete {user_email}: they are the ONLY organizer "
+                f"of {len(orphans)} Shared Drive(s), listed above. Deleting the "
+                f"account strands them."
+            )
+            print_error(
+                "Add a replacement organizer first (the command above runs as "
+                "the leaver, who is the only one who can grant it), or re-run "
+                "with --allow-orphaned-shared-drives to delete anyway."
+            )
+            summary_error(
+                f"Scorched earth aborted: {user_email} solely organizes "
+                f"{len(orphans)} Shared Drive(s)"
+            )
+            print_summary(dry_run)
             sys.exit(2)
 
     elif not dry_run and not args.force:

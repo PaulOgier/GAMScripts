@@ -125,6 +125,29 @@ class TestA1SummaryHonesty(OffboardTestCase):
         self.assertTrue(any("NOT verified" in e for e in offb.summary_errors),
                         "a lying suspend update must be a loud error")
 
+    def test_a11_2_slow_flip_after_the_kill_switch_is_still_caught(self):
+        # Measured on dev 2026-08-31: a suspension reads back in 4-5s on a
+        # quiet account but took 54s straight after the kill switch's burst of
+        # directory writes. The old window was ~18s, so every scorched-earth
+        # run raised CRITICAL and exited 1 on an account that did suspend.
+        # Reads stay False until 40s have passed, then flip.
+        clock = _FakeClock()
+        start = clock.now
+
+        def fake(args, **kwargs):
+            if "info" in args:
+                elapsed = clock.now - start
+                return True, ("    Account Suspended: True" if elapsed > 40
+                              else "    Account Suspended: False")
+            return True, ""
+
+        with mock.patch.object(offb, "run_gam", side_effect=fake), \
+             mock.patch("time.time", clock.time), \
+             mock.patch("time.sleep", clock.sleep):
+            offb.suspend_user("leaver@yourdomain.com", dry_run=False)
+        self.assertIn("verified by read-back", self.actions().lower())
+        self.assertFalse(offb.summary_errors)
+
     def test_a1_2_delete_failure_not_reported_as_deleted(self):
         with mock.patch.object(offb, "run_gam", return_value=(False, "err")):
             offb.delete_user("leaver@yourdomain.com", dry_run=False)
@@ -387,6 +410,15 @@ class TestA7VersionConsistency(unittest.TestCase):
         self.assertIsNotNone(m, "no 'Version:' line in the header")
         self.assertEqual(m.group(1), offb.SCRIPT_VERSION,
                          "header Version: line has drifted from SCRIPT_VERSION")
+
+    def test_a7_3_version_file_matches_script_version(self):
+        # The VERSION file is what check_for_updates compares against, so a
+        # drift here tells every user they are behind (or up to date) wrongly.
+        # tenant_scope.py drifted across three places for six months the same way.
+        version_file = SCRIPT_PATH.parent / "VERSION"
+        self.assertEqual(version_file.read_text(encoding="utf-8").strip(),
+                         offb.SCRIPT_VERSION,
+                         "VERSION file has drifted from SCRIPT_VERSION")
 
     def test_a7_2_snapshot_embeds_script_version(self):
         source = SCRIPT_PATH.read_text(encoding="utf-8")
@@ -969,6 +1001,8 @@ class TestB9DriveBackupReconciliation(unittest.TestCase):
 
     def setUp(self):
         offb.summary_warnings.clear()
+        offb.summary_errors.clear()
+        offb.exit_code = 0
         self.tmp = tempfile.TemporaryDirectory()
         self.b = Path(self.tmp.name)
 
@@ -976,9 +1010,10 @@ class TestB9DriveBackupReconciliation(unittest.TestCase):
         self.tmp.cleanup()
 
     @staticmethod
-    def _filelist(n):
-        return "Owner,id,mimeType\n" + "\n".join(
-            f"u,id{i},application/vnd.google-apps.document" for i in range(n))
+    def _filelist(n, forms=0):
+        rows = [f"u,id{i},application/vnd.google-apps.document" for i in range(n - forms)]
+        rows += [f"u,form{i},application/vnd.google-apps.form" for i in range(forms)]
+        return "Owner,id,mimeType\n" + "\n".join(rows)
 
     def test_b9_1_short_backup_warns(self):
         (self.b / "one.docx").write_text("x")
@@ -986,7 +1021,10 @@ class TestB9DriveBackupReconciliation(unittest.TestCase):
                                return_value=(True, self._filelist(3))):
             drive, local = offb.verify_drive_backup_complete("u@d.com", self.b)
         self.assertEqual((drive, local), (3, 1))
-        self.assertTrue(any("missing" in w for w in offb.summary_warnings))
+        # Was a summary_warning, which left exit_code 0 and let a wrapper
+        # reading only the exit status delete the source account (issue #11).
+        self.assertTrue(any("unaccounted for" in e for e in offb.summary_errors))
+        self.assertEqual(offb.exit_code, 1)
 
     def test_b9_2_matching_backup_is_quiet(self):
         for name in ("a.docx", "b.docx"):
@@ -1034,7 +1072,8 @@ class TestB9DriveBackupReconciliation(unittest.TestCase):
         with mock.patch.object(offb, "run_gam", return_value=(True, out)):
             drive, local = offb.verify_drive_backup_complete("u@d.com", self.b)
         self.assertEqual((drive, local), (256, 150))
-        self.assertTrue(any("missing" in w for w in offb.summary_warnings))
+        self.assertTrue(any("unaccounted for" in e for e in offb.summary_errors))
+        self.assertEqual(offb.exit_code, 1)
 
     def test_b9_7_row_fallback_ignores_stray_progress_lines(self):
         # Fallback path (no "Got" line at all): stderr is appended AFTER the
@@ -1053,9 +1092,34 @@ class TestB9DriveBackupReconciliation(unittest.TestCase):
                                return_value=(True, self._filelist(3))):
             offb.verify_drive_backup_complete(
                 "u@d.com", self.b, ["folder/Notes.docx", "folder/Line one.docx"])
-        joined = " ".join(offb.summary_warnings)
+        joined = " ".join(offb.summary_errors)
         self.assertIn("folder/Notes.docx", joined)
         self.assertIn("folder/Line one.docx", joined)
+        self.assertEqual(offb.exit_code, 1)
+
+    def test_b9_9_forms_only_shortfall_stays_a_warning(self):
+        # Forms and Sites have no export format, so rclone can never fetch
+        # them. That shortfall is a limit of the API, not lost data, and must
+        # not hold licence removal or fail the run.
+        (self.b / "one.docx").write_text("x")
+        with mock.patch.object(offb, "run_gam",
+                               return_value=(True, self._filelist(3, forms=2))):
+            drive, local = offb.verify_drive_backup_complete("u@d.com", self.b)
+        self.assertEqual((drive, local), (3, 1))
+        self.assertFalse(offb.summary_errors)
+        self.assertEqual(offb.exit_code, 0)
+        self.assertTrue(any("not exportable" in w for w in offb.summary_warnings))
+
+    def test_b9_10_shortfall_beyond_the_forms_is_an_error(self):
+        # 4 in Drive, 1 of them a Form, 1 on disk: the Form explains one of the
+        # three missing, the other two are real and must fail the run.
+        (self.b / "one.docx").write_text("x")
+        with mock.patch.object(offb, "run_gam",
+                               return_value=(True, self._filelist(4, forms=1))):
+            offb.verify_drive_backup_complete("u@d.com", self.b)
+        self.assertTrue(any("2 of them unaccounted for" in e
+                            for e in offb.summary_errors))
+        self.assertEqual(offb.exit_code, 1)
 
     def test_b9_4_gam_failure_does_not_raise_or_warn(self):
         with mock.patch.object(offb, "run_gam", return_value=(False, "")):
@@ -1147,6 +1211,17 @@ class TestB11SharedDrives(unittest.TestCase):
                 offb.check_shared_drives("leaver@yourdomain.com", dry_run=False)
         self.assertTrue(any("gam user leaver@yourdomain.com add drivefileacl" in p
                             for p in printed))
+
+    def test_b11_9_zero_shared_drives_exit_60_is_not_a_failed_read(self):
+        # GAM 7.48.01 exits 60 on `print shareddrives` for a user in no shared
+        # drive, having printed the CSV header perfectly well (dev, 2026-08-31,
+        # all three test VMs). run_gam only forgives a non-zero exit when the
+        # output matches a non-fatal pattern, so without one every ordinary
+        # leaver got "Could not list Shared Drives ... check by hand".
+        with mock.patch.object(offb, "run_gam", return_value=(True, "")) as rg:
+            offb.check_shared_drives("leaver@yourdomain.com", dry_run=False)
+        patterns = rg.call_args.kwargs.get("non_fatal_patterns") or []
+        self.assertTrue(any("0 shared drives" in p.lower() for p in patterns))
 
     def test_b11_5_dry_run_makes_no_calls(self):
         with mock.patch.object(offb, "run_gam") as rg:

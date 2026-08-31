@@ -1,53 +1,58 @@
-# How to Use the Script
-Follow these simple steps to run the script from your terminal.
+# Split Calendar CSV Events
 
-## 1. Save the Script
+Three standalone utilities for GAM calendar exports that are too big to open in Excel or Google Sheets. Standard library only — no packages to install. All three write their output files into the **current working directory**, so `cd` to where you want the results before running.
 
-Open a plain text editor (like TextEdit, VS Code, or Sublime Text).
+## Get the export out of GAM
 
-Copy the Python code and paste it into the new file.
-
-Save the file as split_csv.py in a convenient location.
-
-## 2. Prepare Your CSV File
-
-Make sure your main CSV file (e.g., AllUsersPrimaryEvents.csv) is in the same folder as the split_csv.py script you just saved.
-
-Confirm that the first column's header is exactly primaryEmail.
-
-In GAM7 you can run this command:
 ```
 gam redirect csv ./AllUsersPrimaryEvents.csv all users print events primary
 ```
 
-This will make a CSV with all the Events from all the users in your Google Workspace tenant's events. 
+That produces one CSV with every event for every user in the tenant. `split_csv.py` and `filter_and_split.py` both key off the `primaryEmail` column, so leave the header row alone.
 
-## 3. Run from the Terminal
+## Which one do you want?
 
-Open the Terminal app.
+| Script | Splits by | Output |
+| --- | --- | --- |
+| `split_csv.py` | user | one CSV per person, whole history |
+| `filter_and_split.py` | user, recent events only | one CSV per person, last N days |
+| `split_by_size.py` | file size | numbered chunks, all users mixed |
 
-Navigate to the folder where you saved the script and your CSV file. For example, if you saved them on your Desktop, you would type:
+---
 
-cd Desktop
-Now, run the script by typing python3, followed by the script's name, and then the name of your CSV file. For example, if your main file is named AllUsersPrimaryEvents.csv, you would run:
+## `split_csv.py` — one file per user
 
-## split_csv.py
+Groups every row by `primaryEmail` and writes each user their own CSV.
 
-```
-python3 split_csv.py AllUsersPrimaryEvents.csv
-```
-The script will then run, and you will see messages in the terminal for each new file it creates (e.g., Successfully created: name_email_com.csv). Once it's finished, all the new, individual CSV files will be in that same folder.
-
-## split_by_size.py
-This is a second script that is run the same way. However this breaks the CSV file into 5 mb chunks. You can modify the size, but it makes it easier to open in Excel or Google Sheets.
-
-```
+```bash
 python3 split_csv.py AllUsersPrimaryEvents.csv
 ```
 
-## filter_and_split.py
-This script breaks the files into more managable pieces, here you will run it with the number of days you want to filter on. This example brings in the last 30 days of events. 
+Output is named after the address with `@` and `.` replaced: `name@company.com` becomes `name_company_com.csv`. Rows with an empty `primaryEmail` are skipped with a warning.
 
+## `filter_and_split.py` — one file per user, recent events only
+
+Same per-user split, but first drops every event that starts before the cutoff. Takes the file and the number of days.
+
+```bash
+# last 30 days
+python3 filter_and_split.py AllUsersPrimaryEvents.csv 30
 ```
-python3 filter_and_split.py '/Users/paulogier/GAMWork/AllUsersPrimaryEvents.csv' 30
+
+Output: `name_company_com_filtered_events.csv` per user, and nothing at all for users with no events in the window.
+
+Needs the `primaryEmail`, `start.date` and `start.dateTime` columns, and refuses to run without all three. It reads `start.dateTime` when present and falls back to `start.date` for all-day events. **Comparison is in naive local time** — timezones on the event are stripped, not converted, so events within a few hours of the cutoff can land on either side of it. Rows with an unparseable date are silently skipped.
+
+## `split_by_size.py` — size-limited chunks
+
+Cuts the file into pieces of at most N megabytes (default 5), repeating the header in each one. This one does not care about users; a person's events can straddle two chunks.
+
+```bash
+# 5 MB chunks
+python3 split_by_size.py AllUsersPrimaryEvents.csv
+
+# 20 MB chunks
+python3 split_by_size.py AllUsersPrimaryEvents.csv 20
 ```
+
+Output: `AllUsersPrimaryEvents_part_1.csv`, `_part_2.csv`, and so on. Chunk size is estimated from the raw row text, so a file lands near the limit rather than exactly on it.
