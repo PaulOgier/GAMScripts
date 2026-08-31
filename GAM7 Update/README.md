@@ -8,6 +8,11 @@ is a version check, a rollback copy and a verification pass around it.
 **GAM7 only.** GAMADV-XTD3 is a separate project with its own installer and its
 own install folder. Do not point this at one.
 
+**Windows users want a different script.** This one is bash. For Windows there is
+[NoSubstitute/gamupdate](https://github.com/NoSubstitute/gamupdate), Kim Nilsson's
+`updategam7.ps1`, which detects the install location and CPU architecture and picks
+the matching release asset.
+
 macOS and Linux. Bash, curl and Python 3 (the installer needs all three anyway).
 
 ## Why
