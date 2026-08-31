@@ -34,3 +34,6 @@ OffBoarding Google Workspace Users/SESSION_RECOVERY_*.md
 
 # Tenant audit run data (real tenant CSVs; never on GitHub).
 Tenant Scoping Audit/tenant_audit_runs/
+
+# Local-only docs-coverage guard, run by .git/hooks/pre-commit.
+OffBoarding Google Workspace Users/check-docs-coverage.py

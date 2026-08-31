@@ -58,12 +58,5 @@ fire($('all-to'), 'input');
 check('execute mode: not emitted',
       !out().includes('--allow-orphaned-shared-drives'), out());
 
-// Every flag the script accepts should be reachable from the builder.
-const scriptFlags = fs.readFileSync(path.join(__dirname, 'offboard_user.py'), 'utf8')
-  .match(/add_argument\(\s*"(--[a-z0-9-]+)"/g)
-  .map(m => m.match(/"(--[a-z0-9-]+)"/)[1]);
-const absent = [...new Set(scriptFlags)].filter(f => !html.includes(f));
-check('builder mentions every script flag', absent.length === 0, absent.join(' '));
-
 console.log(fails ? `\n${fails} failed` : '\nall passed');
 process.exit(fails ? 1 : 0);

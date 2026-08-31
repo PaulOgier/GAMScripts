@@ -398,65 +398,6 @@ class TestA6DryRunPurity(OffboardTestCase):
 
 
 ###############################################################################
-# A6 — Every flag must reach the docs that describe this script
-#
-# --allow-orphaned-shared-drives shipped in v5.6.0 and appeared in none of the
-# four documents, so the only way to learn how to override a new safety gate
-# was to read argparse. Nothing failed, because nothing was checking. These
-# tests fail the moment a flag is added without documenting it.
-###############################################################################
-
-class TestA6FlagsAreDocumented(unittest.TestCase):
-
-    # The test-setup guide is a test matrix rather than a flag reference, and
-    # these six predate the check. Listed rather than ignored so they stay
-    # visible, and test_a6_3 fails once one is documented — a stale exemption
-    # is how this kind of list quietly stops meaning anything.
-    UNDOCUMENTED_IN_TEST_GUIDE = {
-        "--allow-admin-account", "--log-dir", "--no-auto-reply",
-        "--no-delegates", "--no-drive", "--no-snapshot",
-    }
-
-    @staticmethod
-    def _script_flags():
-        source = SCRIPT_PATH.read_text(encoding="utf-8")
-        import re
-        return set(re.findall(r'add_argument\(\s*"(--[a-z0-9-]+)"', source))
-
-    def _doc(self, name):
-        return (SCRIPT_PATH.parent / name).read_text(encoding="utf-8")
-
-    def test_a6_1_command_builder_offers_every_flag(self):
-        # The builder is the no-code front door: a flag missing here is a
-        # feature no one who uses the builder can reach.
-        html = self._doc("offboarding_command_builder.html")
-        missing = sorted(f for f in self._script_flags() if f not in html)
-        self.assertEqual(missing, [],
-                         f"flags absent from the command builder: {missing}")
-
-    def test_a6_2_test_guide_covers_every_new_flag(self):
-        guide = self._doc("offboarding_test_setup_guide.md")
-        missing = {f for f in self._script_flags() if f not in guide}
-        new = sorted(missing - self.UNDOCUMENTED_IN_TEST_GUIDE)
-        self.assertEqual(new, [],
-                         f"flags absent from the test setup guide: {new}")
-
-    def test_a6_3_the_exemption_list_does_not_go_stale(self):
-        guide = self._doc("offboarding_test_setup_guide.md")
-        now_documented = sorted(f for f in self.UNDOCUMENTED_IN_TEST_GUIDE
-                                if f in guide)
-        self.assertEqual(now_documented, [],
-                         "these are documented now — drop them from "
-                         f"UNDOCUMENTED_IN_TEST_GUIDE: {now_documented}")
-
-    def test_a6_4_exemptions_name_real_flags(self):
-        flags = self._script_flags()
-        gone = sorted(f for f in self.UNDOCUMENTED_IN_TEST_GUIDE if f not in flags)
-        self.assertEqual(gone, [],
-                         f"exemptions for flags that no longer exist: {gone}")
-
-
-###############################################################################
 # A7 — Version consistency: header and snapshot must track SCRIPT_VERSION
 ###############################################################################
 
