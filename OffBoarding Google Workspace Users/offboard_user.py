@@ -42,7 +42,7 @@ YOU ASSUME ALL RISK ASSOCIATED WITH THE USE OF THIS SOFTWARE.
 Author:       Paul Ogier
 Created:      2023-06-22
 Updated:      2026-08-31
-Version:      5.6.0
+Version:      5.6.1
 Status:       Production
 Python:       3.8+
 Dependencies: GAM ADV X (GAM7), GYB (optional), rclone (optional), PyYAML (optional)
@@ -427,7 +427,7 @@ import shutil
 
 # [IMPORTANT] Current local script version. Bumped on each release.
 # Compared against the remote VERSION file to detect updates.
-SCRIPT_VERSION = "5.6.0"
+SCRIPT_VERSION = "5.6.1"
 
 # [OPTIONAL] Check for a newer script version on startup.
 # When True (default), the script makes a single 3-second HTTP request to
@@ -3922,7 +3922,11 @@ def check_shared_drives(email: str, dry_run: bool) -> List[str]:
     automatic answer to who should inherit it. So this reports and instructs,
     the same way the mail-capture block does.
 
-    Returns the names of drives left without another organizer.
+    Returns the drives that must BLOCK an irreversible deletion: those left
+    without another organizer, PLUS those whose membership could not be read.
+    An unread ACL is not evidence of safety — treating "we could not check" as
+    "nothing to worry about" is the same mistake as reporting it as orphaned,
+    just in the direction that loses the drive.
     """
     if dry_run:
         print_info("DRY RUN: would check Shared Drive memberships")
@@ -4045,7 +4049,7 @@ def check_shared_drives(email: str, dry_run: bool) -> List[str]:
             f"Shared Drive membership unread for {len(unknown)} drive(s) "
             f"({'; '.join(unknown)}); sole-organizer status unknown"
         )
-    return orphaned
+    return orphaned + unknown
 
 
 def _count_unexportable(out: str) -> int:
@@ -5220,9 +5224,10 @@ def main():
         orphans = check_shared_drives(user_email, dry_run)
         if orphans and not args.allow_orphaned_shared_drives:
             print_error(
-                f"Refusing to delete {user_email}: they are the ONLY organizer "
-                f"of {len(orphans)} Shared Drive(s), listed above. Deleting the "
-                f"account strands them."
+                f"Refusing to delete {user_email}: {len(orphans)} Shared "
+                f"Drive(s) listed above are either organized by them ALONE or "
+                f"could not be checked. Deleting the account strands any drive "
+                f"in that list that has no other organizer."
             )
             print_error(
                 "Add a replacement organizer first (the command above runs as "
@@ -5230,8 +5235,8 @@ def main():
                 "with --allow-orphaned-shared-drives to delete anyway."
             )
             summary_error(
-                f"Scorched earth aborted: {user_email} solely organizes "
-                f"{len(orphans)} Shared Drive(s)"
+                f"Scorched earth aborted: {len(orphans)} Shared Drive(s) of "
+                f"{user_email} are sole-organized or unverifiable"
             )
             print_summary(dry_run)
             sys.exit(2)

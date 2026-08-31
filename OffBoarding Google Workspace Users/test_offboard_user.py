@@ -1188,11 +1188,14 @@ class TestB11SharedDrives(unittest.TestCase):
         # not evidence of absence, and the red warning states it as fact.
         with mock.patch.object(offb, "run_gam",
                                side_effect=[(True, SD_LIST), (False, "")]):
-            orphaned = offb.check_shared_drives("leaver@yourdomain.com", dry_run=False)
-        self.assertEqual(orphaned, [])
+            blockers = offb.check_shared_drives("leaver@yourdomain.com", dry_run=False)
+        # Still not CALLED orphaned — the wording stays "unknown".
         self.assertTrue(any("unknown" in w.lower() for w in offb.summary_warnings))
         self.assertFalse(any("no organizer other than" in w
                              for w in offb.summary_warnings))
+        # But it must still block an irreversible delete: "could not check" is
+        # not "safe to delete" (issue #9 asked for detected OR unverifiable).
+        self.assertEqual(len(blockers), 1)
 
     def test_b11_7_unparseable_drive_list_is_not_silence(self):
         with mock.patch.object(offb, "run_gam", return_value=(True, "garbage")):
