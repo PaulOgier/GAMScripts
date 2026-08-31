@@ -254,6 +254,10 @@
       <h3>⚠ Scorched earth — permanent deletion</h3>
       <p>This permanently <strong>DELETES</strong> the user after killing access, removing groups/licences, and suspending. No backups, no transfers — even if you set them. <code>--no-snapshot</code> is forced on by the script.</p>
       <p>The script requires <code>--doit</code> and <code>--force</code> (added automatically) and a typed-email confirmation at runtime. This builder also requires you to re-type the email below.</p>
+      <div class="check" style="margin-top:10px;">
+        <input type="checkbox" id="allow-orphaned-shared-drives">
+        <label for="allow-orphaned-shared-drives"><strong>--allow-orphaned-shared-drives</strong> — delete even when it strands a Shared Drive.<span class="check-desc">Since v5.6.0 a scorched-earth run checks the leaver's Shared Drives BEFORE the kill switch and refuses (exit 2) if they are the only organizer of one, or if a drive's membership could not be read at all (v5.6.1). Deleting the sole organizer leaves a drive no member can add people to, change settings on, or delete; recovering it means a super admin taking it over in the Admin console. Because the check runs first, a refusal leaves the account completely untouched, so you can add another organizer and re-run. Tick this only when losing those drives is a deliberate decision.</span></label>
+      </div>
       <div class="field" style="margin-top:10px;">
         <label class="field-label" for="scorched-confirm">Re-type the target email to enable the Copy button:</label>
         <input type="email" id="scorched-confirm" placeholder="must match the email in section 1" autocomplete="off">
@@ -325,7 +329,7 @@
     <div class="row">
       <div class="check">
         <input type="checkbox" id="backup-drive">
-        <label for="backup-drive"><strong>--backup-drive</strong><span class="check-desc">Local Drive backup via <code>rclone</code> BEFORE the transfer happens. Requires rclone with a configured Google Drive remote. Can be slow for large drives — allow extra time. <strong>Treat it as a convenience copy, not an archive:</strong> a filesystem cannot hold two files with the same name in one folder, Forms and Sites cannot be exported at all, and files owned by the user but living in someone else's folder are outside the tree rclone walks. Since v5.2.0 the script counts what Drive holds against what reached the disk and names the files rclone dropped, rather than trusting rclone's exit code. If you need a complete copy, transfer ownership instead.</span></label>
+        <label for="backup-drive"><strong>--backup-drive</strong><span class="check-desc">Local Drive backup via <code>rclone</code> BEFORE the transfer happens. Requires rclone with a configured Google Drive remote. Can be slow for large drives — allow extra time. <strong>Treat it as a convenience copy, not an archive:</strong> a filesystem cannot hold two files with the same name in one folder, Forms and Sites cannot be exported at all, and files owned by the user but living in someone else's folder are outside the tree rclone walks. Since v5.2.0 the script counts what Drive holds against what reached the disk and names the files rclone dropped, rather than trusting rclone's exit code. Since v5.6.0 that shortfall is classified and a real one FAILS the run (exit 1) and holds licence removal, so a short backup can no longer be mistaken for a good one; Forms and Sites, which have no export format, are recognised as an unavoidable gap and stay a warning. If you need a complete copy, transfer ownership instead.</span></label>
       </div>
       <div class="check">
         <input type="checkbox" id="backup-email">
@@ -664,6 +668,9 @@
       if ($('force').checked) parts.push('--force');
     } else if (mode === 'scorched') {
       parts.push('--doit', '--force', '--scorched-earth');
+      if ($('allow-orphaned-shared-drives').checked) {
+        parts.push('--allow-orphaned-shared-drives');
+      }
     }
 
     if ($('allow-admin-account').checked) parts.push('--allow-admin-account');
@@ -808,7 +815,8 @@
       'forward-to','forward-alias-to','log-dir','backup-dir',
       'restore-batch-size','reuse-email-backup'
     ].forEach(id => { snap.text[id] = $(id).value; });
-    ['no-transfer','unsuspend','backup-drive','backup-email','allow-admin-account', ...SKIP_FLAGS]
+    ['no-transfer','unsuspend','backup-drive','backup-email','allow-admin-account',
+     'allow-orphaned-shared-drives', ...SKIP_FLAGS]
       .forEach(id => { snap.bool[id] = $(id).checked; });
     return snap;
   }

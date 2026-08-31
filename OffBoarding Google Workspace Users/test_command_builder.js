@@ -1,0 +1,69 @@
+/*
+ * Exercise offboarding_command_builder.html for real: load the page, tick
+ * boxes, read the command it produces. A flag can be declared in the HTML and
+ * never reach the output, which no amount of grepping the file will catch.
+ *
+ * Needs jsdom, which this repo does not otherwise depend on:
+ *     npm install jsdom
+ *     node test_command_builder.js
+ *
+ * Exits non-zero on the first failed assertion.
+ */
+const { JSDOM } = require('jsdom');
+const fs = require('fs');
+const path = require('path');
+
+const html = fs.readFileSync(path.join(__dirname, 'offboarding_command_builder.html'), 'utf8');
+const dom = new JSDOM(html, { runScripts: 'dangerously', url: 'http://localhost/' });
+const { window } = dom;
+const d = window.document;
+const $ = id => d.getElementById(id);
+const fire = (el, ev = 'change') => el.dispatchEvent(new window.Event(ev, { bubbles: true }));
+const out = () => d.querySelector('textarea').value;
+
+let fails = 0;
+function check(name, cond, extra = '') {
+  console.log((cond ? 'PASS  ' : 'FAIL  ') + name + (cond ? '' : '  <<< ' + extra));
+  if (!cond) fails++;
+}
+
+$('user').value = 'leaver@example.com';
+fire($('user'), 'input');
+
+const scorched = d.querySelector('input[name="mode"][value="scorched"]');
+scorched.checked = true; fire(scorched);
+$('scorched-confirm').value = 'leaver@example.com';
+fire($('scorched-confirm'), 'input');
+
+check('--allow-orphaned-shared-drives checkbox exists', !!$('allow-orphaned-shared-drives'));
+check('it lives in the scorched-earth panel',
+      !!$('scorched-panel') && $('scorched-panel').contains($('allow-orphaned-shared-drives')));
+check('unticked: absent from the command',
+      !out().includes('--allow-orphaned-shared-drives'), out());
+
+$('allow-orphaned-shared-drives').checked = true;
+fire($('allow-orphaned-shared-drives'));
+const s = out();
+check('ticked: present', s.includes('--allow-orphaned-shared-drives'), s);
+check('ticked: still a scorched-earth command',
+      s.includes('--scorched-earth') && s.includes('--doit') && s.includes('--force'), s);
+check('emitted exactly once',
+      (s.match(/--allow-orphaned-shared-drives/g) || []).length === 1, s);
+
+// Outside scorched-earth the flag does nothing, so the builder must not emit it.
+const exec = d.querySelector('input[name="mode"][value="exec"]');
+exec.checked = true; fire(exec);
+$('all-to').value = 'successor@example.com';
+fire($('all-to'), 'input');
+check('execute mode: not emitted',
+      !out().includes('--allow-orphaned-shared-drives'), out());
+
+// Every flag the script accepts should be reachable from the builder.
+const scriptFlags = fs.readFileSync(path.join(__dirname, 'offboard_user.py'), 'utf8')
+  .match(/add_argument\(\s*"(--[a-z0-9-]+)"/g)
+  .map(m => m.match(/"(--[a-z0-9-]+)"/)[1]);
+const absent = [...new Set(scriptFlags)].filter(f => !html.includes(f));
+check('builder mentions every script flag', absent.length === 0, absent.join(' '));
+
+console.log(fails ? `\n${fails} failed` : '\nall passed');
+process.exit(fails ? 1 : 0);

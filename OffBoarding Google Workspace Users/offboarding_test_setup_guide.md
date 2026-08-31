@@ -423,6 +423,39 @@ gam create user testoffboard.delete@yourdomain.com firstname 'Throwaway' lastnam
 # Wait 30 seconds for mailbox provisioning
 python3 offboard_user.py --doit --force --scorched-earth --user testoffboard.delete@yourdomain.com
 # You will be prompted to type the email to confirm even with --force
+
+# Test 13: Scorched earth REFUSES when it would strand a Shared Drive (v5.6.0)
+# Give the throwaway user a Shared Drive they alone organise, then try to delete
+# them. Expect exit 2, a "Refusing to delete" message, and — because the check
+# runs before the kill switch — an account that is still active and still in its
+# original OU. Verify that: the refusal is only useful if it changes nothing.
+gam user testoffboard.delete@yourdomain.com create shareddrive 'Offboard Orphan Test'
+python3 offboard_user.py --doit --force --scorched-earth --user testoffboard.delete@yourdomain.com
+gam info user testoffboard.delete@yourdomain.com | grep -iE 'suspended|Org Unit Path'
+
+# Test 13b: the gate opens once another organiser exists
+# Run AS the leaver: they are the only organiser, and a non-member cannot grant
+# themselves access (GAM answers 'Add Failed: Does not exist').
+gam user testoffboard.delete@yourdomain.com add drivefileacl <driveId> user testoffboard.dest@yourdomain.com role organizer
+python3 offboard_user.py --doit --force --scorched-earth --user testoffboard.delete@yourdomain.com
+
+# Test 13c: the override deletes anyway (leaves the drive with no organiser)
+python3 offboard_user.py --doit --force --scorched-earth --allow-orphaned-shared-drives --user testoffboard.delete@yourdomain.com
+# Afterwards the drive shows an EMPTY organizer column, which is the state the
+# gate exists to prevent. Only a super admin can take it over from here.
+gam print shareddriveorganizers | grep 'Offboard Orphan Test'
+
+# Test 14: a short Drive backup FAILS the run (v5.6.0)
+# Upload the same local file twice so two files share a name in one folder.
+# rclone drops one with a NOTICE and still exits 0; the script must not.
+echo 'duplicate name test' > /tmp/offboard_same.txt
+gam user testoffboard5@yourdomain.com add drivefile localfile /tmp/offboard_same.txt
+gam user testoffboard5@yourdomain.com add drivefile localfile /tmp/offboard_same.txt
+python3 offboard_user.py --doit --force --user testoffboard5@yourdomain.com --no-transfer --no-suspend --backup-drive
+# Expect: exit 1, the dropped filename named, and
+# "Licence removal held back by failed phase(s): Drive backup" in the summary.
+# A shortfall made up only of Forms and Sites stays a warning and exits 0,
+# because those have no export format and no setting changes that.
 ```
 
 ### Step 6: Verify Results After Each Test

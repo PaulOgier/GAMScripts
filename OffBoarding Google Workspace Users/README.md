@@ -16,6 +16,10 @@ A comprehensive, cross-platform Python script that automates the full Google Wor
 * Already-suspended users — detects suspension at start and offers to temporarily unsuspend for full offboarding, then re-suspends automatically at the end
 * Suspension last — ensures all GAM operations complete before the account is locked
 * Logs written to `logs/` subfolder by default (overridable with `--log-dir`)
+* Shared Drives — reports every drive the leaver organises and refuses a `--scorched-earth`
+  delete that would leave one with no organiser (override: `--allow-orphaned-shared-drives`)
+* Backups that fall short fail the run — an incomplete Drive backup exits non-zero and holds
+  licence removal, rather than reporting success
 * Detailed phase-by-phase summary with timing and exit codes (`0`=success, `1`=errors, `2`=fatal)
 
 ## Usage

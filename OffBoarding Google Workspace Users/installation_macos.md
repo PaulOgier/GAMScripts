@@ -613,6 +613,13 @@ Since v5.2.0 the script counts what Drive holds against what reached the disk
 and tells you when they disagree, naming the files rclone reported dropping.
 Do not read a clean rclone exit as a complete backup — read the count.
 
+Since v5.6.0 the script does more than tell you. The shortfall is classified
+first: Forms and Sites can never be exported, so a gap that is only those stays
+a warning and the run still exits 0. Anything missing beyond them is treated as
+a failed backup — the run exits 1 and licence removal is held back, so the seat
+is not reclaimed behind an incomplete copy. If you chain `--backup-drive` into
+a deletion step, that chain now stops instead of continuing.
+
 **When a complete copy is the requirement, transfer ownership instead.**
 `gam transfer drive` never touches a filesystem, so it preserves duplicates,
 Forms, Sites and files parented elsewhere. Measured on the same 115-file test
@@ -625,10 +632,25 @@ once that account is deleted, no member can add members, change settings or
 delete the drive, and recovery means a super admin taking it over from the
 Admin console. Add another organiser before deleting anyone.
 
+Since v5.6.0 `--scorched-earth` will not delete an account that strands a drive
+this way. The check runs before the kill switch, so the refusal leaves the
+account untouched: add an organiser and re-run. v5.6.1 extends the refusal to
+drives whose membership could not be read at all, since "could not check" is not
+evidence that a drive is safe. `--allow-orphaned-shared-drives` overrides it.
+
 ---
 
 ## Troubleshooting
 
+- **A scorched-earth run refuses with "Refusing to delete".** The leaver is the
+  only organiser of a Shared Drive, or one of their drives could not be read.
+  Nothing has been changed at that point. Add another organiser as the leaver
+  (`gam user <leaver> add drivefileacl <driveId> user <new-organizer> role
+  organizer` — a non-member cannot grant themselves access) and re-run, or pass
+  `--allow-orphaned-shared-drives` if losing the drive is deliberate.
+- **A `--backup-drive` run now exits 1 where it used to exit 0.** The backup is
+  short by files that are not Forms or Sites. The summary names them. Licences
+  are deliberately retained so the backup can be retried.
 - **Restore is slow and the log repeats "Backing off ... backendError".**
   Usually the destination account is suspended, not a rate limit — the two are
   indistinguishable in the log. Check with
