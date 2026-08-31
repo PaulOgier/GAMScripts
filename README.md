@@ -143,7 +143,7 @@ Here is a breakdown of the available scripts. Each script is designed to solve a
 
 ### **5. GAM7 Update (`gam-update.sh`)**
 
-* **Description**: A safety wrapper around GAM7's official installer. Downloads and runs [`gam-install.sh`](https://raw.githubusercontent.com/GAM-team/GAM/master/src/gam-install.sh) in upgrade mode. The upgrade itself is upstream's work; this adds a version check, a rollback copy and a verification pass around it. **GAM7 only; GAMADV-XTD3 has its own installer and install folder.**
+* **Description**: A safety wrapper around GAM7's official installer. Downloads and runs [`gam-install.sh`](https://raw.githubusercontent.com/GAM-team/GAM/master/src/gam-install.sh) in upgrade mode. The upgrade itself is upstream's work; this adds a version check, a rollback copy and a verification pass around it. **GAM7 only; GAMADV-XTD3 has its own installer and install folder.** This script is bash, so Windows users want [NoSubstitute/gamupdate](https://github.com/NoSubstitute/gamupdate) instead.
 * **Best For**: Keeping GAM current without the risk of an interrupted upgrade leaving you with no working `gam`, and for anyone who wants an upgrade step that is safe to run on a schedule.
 * **Key Features**:
   * Asks GAM itself (`gam version checkrc`) whether it is behind, so there is no GitHub API call and no rate limit. Exits `0` with "already current" when it is up to date, making it safe in cron or a login script
@@ -152,7 +152,8 @@ Here is a breakdown of the available scripts. Each script is designed to solve a
   * Asks GAM again after upgrading and fails if it still reports itself behind
   * Prints `gam info domain` at the end, so which tenant your config points at is on screen before the first real command
   * Credentials untouched: `~/.gam` and the `config_dir` it points at sit outside the install folder
-  * Bash, curl and Python 3 only; macOS and Linux
+  * Bash and curl; the official installer it runs needs Python 3, which GAM itself already requires
+  * macOS and Linux, both tested end to end (macOS Tahoe 26.5 arm64 and Ubuntu 25.10 aarch64)
 * **Usage**:
     ```bash
     # Dry run: print installed vs latest, change nothing
