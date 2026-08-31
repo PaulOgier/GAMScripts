@@ -30,9 +30,11 @@ wrong. When something does, these are the gaps:
 
 ## What it does
 
-1. Reads the installed version, then the latest release tag from the GitHub API.
-   If they match it prints `already current, nothing to do` and exits 0, so it is
-   safe in a monthly cron job or a login script.
+1. Asks GAM itself whether it is behind, with `gam version checkrc`. If it is
+   current the script prints `already current, nothing to do` and exits 0, so it is
+   safe in a monthly cron job or a login script. Only exit codes 0 and 1 are
+   trusted: anything else means the check did not run, which is an error rather
+   than a reason to skip the upgrade.
 2. Copies the entire install to `<install dir>.bak-<old version>` before touching
    anything, and refuses to run if that path already exists.
 3. Runs the official installer with `-l` (upgrade only, no project/auth prompts)
@@ -78,10 +80,22 @@ the old ones once an upgrade has proved itself.
 
 ## Exit codes
 
-`0` = upgraded, or already on the latest version. `1` = no gam binary at the
-given path, GitHub unreachable or rate-limited, the backup path is already
-occupied, or the version after the upgrade was not the one expected. `2` = bad
+`0` = upgraded, or already on the latest version. `1` = no gam binary at the given
+path, the version check could not run or could not reach GitHub, the backup path is
+already occupied, or GAM still reports itself behind after the upgrade. `2` = bad
 command-line arguments.
 
-The GitHub API allows 60 unauthenticated requests per hour per IP. If you hit
-that, the script prints the reason GitHub gave and stops.
+Nothing here calls the GitHub API directly, so there is no rate limit to hit. GAM's
+own `version checkrc` does the release lookup, and it works even with
+`no_update_check = true` in `gam.cfg`.
+
+## Testing
+
+`./test-gam-update.sh` drives the script against a stub `gam` covering four cases:
+current, behind, gam failing to launch, and a check that finishes without reaching
+GitHub. No GAM install and no network needed. The last two are the ones worth
+keeping honest, since a version check that did not run must never read as "already
+current".
+
+Verified end to end on macOS Tahoe 26.5 arm64 and Ubuntu 25.10 aarch64, upgrading
+real installs to 7.48.01.

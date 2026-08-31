@@ -146,9 +146,10 @@ Here is a breakdown of the available scripts. Each script is designed to solve a
 * **Description**: A safety wrapper around GAM7's official installer. Downloads and runs [`gam-install.sh`](https://raw.githubusercontent.com/GAM-team/GAM/master/src/gam-install.sh) in upgrade mode. The upgrade itself is upstream's work; this adds a version check, a rollback copy and a verification pass around it. **GAM7 only; GAMADV-XTD3 has its own installer and install folder.**
 * **Best For**: Keeping GAM current without the risk of an interrupted upgrade leaving you with no working `gam`, and for anyone who wants an upgrade step that is safe to run on a schedule.
 * **Key Features**:
-  * Exits `0` with "already current" when the installed version matches the latest release, so it is safe in cron or a login script
+  * Asks GAM itself (`gam version checkrc`) whether it is behind, so there is no GitHub API call and no rate limit. Exits `0` with "already current" when it is up to date, making it safe in cron or a login script
+  * Treats a version check that could not run as an error, never as "already current". That is the failure mode that silently skips upgrades forever
   * Copies the whole install to `<dir>.bak-<old version>` first, because the official installer deletes `lib/` and extracts over the top with no undo
-  * Verifies afterwards that the version on disk is the release that was expected, and fails if it is not
+  * Asks GAM again after upgrading and fails if it still reports itself behind
   * Prints `gam info domain` at the end, so which tenant your config points at is on screen before the first real command
   * Credentials untouched: `~/.gam` and the `config_dir` it points at sit outside the install folder
   * Bash, curl and Python 3 only; macOS and Linux
@@ -163,7 +164,7 @@ Here is a breakdown of the available scripts. Each script is designed to solve a
     # Non-default install location
     ./gam-update.sh -d /opt/gam7
     ```
-* **Additional Requirements**: None. See `GAM7 Update/README.md` for the rollback command and exit codes.
+* **Additional Requirements**: None. Ships with `test-gam-update.sh`, a self-check that needs no GAM install and no network. See `GAM7 Update/README.md` for the rollback command and exit codes.
 
 ---
 
