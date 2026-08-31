@@ -9,6 +9,7 @@ resume. No GAM calls are made anywhere in here.
 
 import argparse
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -1376,15 +1377,45 @@ class TestOpenReport(unittest.TestCase):
     def tearDown(self):
         ts.webbrowser.open = self.original
 
+    # An absolute path on the running platform: "/tmp/..." has no drive on
+    # Windows, and as_uri() rejects it.
+    REPORT = Path.cwd() / "x" / "audit_report.html"
+
     def test_opens_as_file_uri(self):
         args = argparse.Namespace(no_open=False)
-        self.assertTrue(ts.open_report(Path("/tmp/x/audit_report.html"), args))
-        self.assertEqual(["file:///tmp/x/audit_report.html"], self.opened)
+        self.assertTrue(ts.open_report(self.REPORT, args))
+        self.assertEqual([self.REPORT.as_uri()], self.opened)
 
     def test_no_open_flag_respected(self):
         args = argparse.Namespace(no_open=True)
-        self.assertFalse(ts.open_report(Path("/tmp/x/audit_report.html"), args))
+        self.assertFalse(ts.open_report(self.REPORT, args))
         self.assertEqual([], self.opened)
+
+    def test_relative_path_is_resolved(self):
+        # The default output directory is relative, and as_uri() rejects a
+        # relative path, so the report never opened on a default run.
+        args = argparse.Namespace(no_open=False)
+        rel = Path("tenant_audit_runs") / "run" / "audit_report.html"
+        self.assertTrue(ts.open_report(rel, args))
+        self.assertEqual([rel.resolve().as_uri()], self.opened)
+
+
+class TestVersionsInStep(unittest.TestCase):
+    """The update check compares the remote VERSION file against
+    SCRIPT_VERSION, so a release that bumps one and not the other tells every
+    older user they are current. v1.4.2 shipped exactly that way."""
+
+    ROOT = Path(__file__).resolve().parent
+
+    def test_version_file_matches_script_version(self):
+        self.assertEqual(
+            (self.ROOT / "VERSION").read_text(encoding="utf-8").strip(),
+            ts.SCRIPT_VERSION)
+
+    def test_docstring_header_matches_script_version(self):
+        header = re.search(r"^Version:\s+(\S+)$", ts.__doc__, re.M)
+        self.assertIsNotNone(header, "no Version: line in the module docstring")
+        self.assertEqual(header.group(1), ts.SCRIPT_VERSION)
 
 
 if __name__ == "__main__":

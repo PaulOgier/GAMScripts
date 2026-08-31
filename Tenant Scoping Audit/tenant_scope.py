@@ -42,8 +42,8 @@ YOU ASSUME ALL RISK ASSOCIATED WITH THE USE OF THIS SOFTWARE.
 
 Author:       Paul Ogier
 Created:      2026-08-15
-Updated:      2026-08-15
-Version:      1.3.7
+Updated:      2026-08-31
+Version:      1.4.3
 Status:       Production
 Python:       3.9+
 Dependencies: GAM ADV X (GAM7) only. Stdlib only on the Python side.
@@ -147,7 +147,7 @@ from typing import Dict, List, Optional, Tuple
 # CONFIGURATION
 ###############################################################################
 
-SCRIPT_VERSION = "1.4.2"
+SCRIPT_VERSION = "1.4.3"
 
 # [OPTIONAL] Startup check against the remote VERSION file. Fail-silent.
 CHECK_FOR_UPDATES = True
@@ -880,7 +880,15 @@ def preflight(ctx: RunContext, modules: List[Dict]) -> bool:
             print_info(f"Primary domain : {domain}")
             print_info(f"Customer ID    : {customer}")
             if not args.yes:
-                answer = input("Audit THIS tenant? [y/N]: ").strip().lower()
+                try:
+                    answer = input("Audit THIS tenant? [y/N]: ").strip().lower()
+                except EOFError:
+                    # No console to answer with: a cron job, a pipe, an ssh
+                    # command with no tty. Refuse rather than assume yes.
+                    print_error("No console to confirm the tenant on. Re-run "
+                                "with --yes once the domain above is the one "
+                                "you meant to audit.")
+                    return False
                 if answer not in ("y", "yes"):
                     print_error("Tenant not confirmed; nothing was collected.")
                     return False
@@ -3280,12 +3288,13 @@ def open_report(path: Path, args) -> bool:
     """Open the finished report in the default browser.
 
     A file:// URI, not the bare path: on Linux webbrowser hands a bare path to
-    the browser as a relative URL and it 404s.
+    the browser as a relative URL and it 404s. as_uri() needs an absolute
+    path, and the default output directory is relative, so resolve first.
     """
     if args.no_open:
         return False
     try:
-        return webbrowser.open(path.as_uri())
+        return webbrowser.open(path.resolve().as_uri())
     except Exception as exc:                       # headless box, no browser
         print_warning(f"Could not open the report automatically: {exc}")
         return False
