@@ -149,19 +149,19 @@ boss@example.com,2""")
 
 class TestForwardingChecks(CtxTestCase):
     def test_external_forward_found(self):
-        self.write_csv("forwards", """User,forwardingEnabled,forwardTo,disposition
+        self.write_csv("forwards", """User,forwardEnabled,forwardTo,disposition
 user@example.com,True,rival@gmail.com,archive""")
         findings = ts.check_external_forwarding(self.ctx)
         self.assertEqual(["external-forwarding"], self.finding_ids(findings))
         self.assertEqual("CRITICAL", findings[0].severity)
 
     def test_internal_forward_clean(self):
-        self.write_csv("forwards", """User,forwardingEnabled,forwardTo,disposition
+        self.write_csv("forwards", """User,forwardEnabled,forwardTo,disposition
 user@example.com,True,team@alias.example.com,archive""")
         self.assertEqual([], ts.check_external_forwarding(self.ctx))
 
     def test_disabled_forward_clean(self):
-        self.write_csv("forwards", """User,forwardingEnabled,forwardTo,disposition
+        self.write_csv("forwards", """User,forwardEnabled,forwardTo,disposition
 user@example.com,False,rival@gmail.com,archive""")
         self.assertEqual([], ts.check_external_forwarding(self.ctx))
 
@@ -542,6 +542,12 @@ a@example.com,a@example.com,reader,domain,example.com""")
 
 
 class TestDnsCheck(CtxTestCase):
+    def setUp(self):
+        super().setUp()
+        # The check is gated on the module like every other one: a dns.json
+        # left by a failed collection must not read as "DNS is fine".
+        self.ctx.set_module("dns", "ok", 2)
+
     def test_dmarc_missing_via_doh(self):
         (self.run_dir / "dns.json").write_text(json.dumps({
             "example.com": {"path": "doh", "checks": {
@@ -881,7 +887,7 @@ class TestMissingModules(CtxTestCase):
                              f"{check.__name__} produced findings with no data")
 
     def test_errored_module_not_usable(self):
-        self.write_csv("forwards", """User,forwardingEnabled,forwardTo
+        self.write_csv("forwards", """User,forwardEnabled,forwardTo
 u@example.com,True,x@gmail.com""")
         self.ctx.set_module("forwards", "error", 0, "exit 2: boom")
         self.assertEqual([], ts.check_external_forwarding(self.ctx))
@@ -943,7 +949,7 @@ class TestManifestResume(CtxTestCase):
         ctx2 = ts.RunContext(self.run_dir, make_args())
         self.assertEqual("ok", ctx2.module_status("users"))
         self.assertEqual(["example.com", "alias.example.com"],
-                         self.ctx.internal_domains)
+                         ctx2.internal_domains)
 
     def test_internal_domains_persist(self):
         self.ctx.internal_domains = ["x.com"]
@@ -977,7 +983,7 @@ class TestModuleSelection(unittest.TestCase):
 
     def test_skip_tier(self):
         keys = {m["key"] for m in
-                ts.selected_modules(make_args(skip_tier="2,3"))}
+                ts.selected_modules(make_args(skip_tier=[2, 3]))}
         self.assertNotIn("sendas", keys)
         self.assertNotIn("mydrive_external", keys)
         self.assertIn("users", keys)
@@ -1035,7 +1041,7 @@ class TestCollectSimple(CtxTestCase):
     def test_partial_output_is_kept(self):
         # `all users print X` exits 73 when one user has Gmail disabled but
         # still emits the other users' rows; those rows must not be lost.
-        gam_output = ("User,forwardingEnabled,forwardTo\n"
+        gam_output = ("User,forwardEnabled,forwardTo\n"
                       "a@example.com,False,\n"
                       "b@example.com,True,x@gmail.com\n")
         original = ts.run_gam
@@ -1062,7 +1068,7 @@ class TestCollectSimple(CtxTestCase):
         # emits a bare header and exits 73. Partial-empty, not an error.
         original = ts.run_gam
         ts.run_gam = lambda *a, **k: (
-            73, "User,forwardingEnabled,forwardTo\n",
+            73, "User,forwardEnabled,forwardTo\n",
             "User: dead@example.com, Gmail Service/App not enabled (4/4)")
         try:
             status, rows, note = ts.collect_simple(
@@ -1267,10 +1273,10 @@ class TestRunGamStreaming(unittest.TestCase):
         self.assertEqual(3, len(err.strip().splitlines()))
 
     def test_timeout_keeps_the_rows_already_collected(self):
-        rc, out, err = ts.run_gam([str(self.script), "--hang"], timeout=2)
+        rc, out, err = ts.run_gam([str(self.script), "--hang"], timeout=0.5)
         self.assertEqual(-1, rc)
         self.assertEqual(4, len(out.strip().splitlines()))
-        self.assertEqual("Timed out after 2s", err.strip().splitlines()[-1])
+        self.assertTrue(err.strip().splitlines()[-1].startswith("Timed out after"))
 
 
 class TestUserScanArgs(CtxTestCase):
@@ -1320,12 +1326,11 @@ gone@example.com,True,False,2026-08-01T10:00:00Z,True,True,,False,False,Business
         """Live codes must never reach disk via GAM's own CSV writer."""
         mod = dict(key="backupcodes",
                    args=["all", "users", "print", "backupcodes"])
-        args, _ = ts.user_scan_args(self.ctx, mod)
-        cut = args.index("redirect")
-        stripped = args[:cut] + args[cut + 4:]
+        stripped = ts.collect_backupcodes_args(self.ctx, mod)
         self.assertNotIn("redirect", stripped)
         self.assertNotIn("multiprocess", stripped)
-        self.assertIn("num_threads", stripped)
+        self.assertNotIn("num_threads", stripped)
+        self.assertEqual("0", stripped[stripped.index("auto_batch_min") + 1])
         self.assertEqual(["print", "backupcodes"], stripped[-2:])
         self.assertTrue(any(a.endswith(":primaryEmail") for a in stripped))
 
@@ -1420,3 +1425,271 @@ class TestVersionsInStep(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestCsvDataRows(unittest.TestCase):
+    def test_multiline_cell_counts_as_one_row(self):
+        text = ('User,message\n'
+                'a@example.com,"line one\nline two"\n'
+                'b@example.com,plain\n')
+        self.assertEqual(2, ts.csv_data_rows(text))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "x.csv"
+            path.write_text(text, encoding="utf-8")
+            self.assertEqual(2, ts.csv_data_rows(path))
+        self.assertEqual(0, ts.csv_data_rows("User,message\n"))
+        self.assertEqual(0, ts.csv_data_rows(""))
+
+
+class TestScanSelectionEmpty(CtxTestCase):
+    """Filters that leave nobody must skip the module, never widen to
+    `all users` (which scans every mailbox in the tenant)."""
+
+    def setUp(self):
+        super().setUp()
+        self.write_csv("users", USERS_HEADER + "\n"
+                       "never@example.com,False,False,Never,True,True,,"
+                       "False,False,Business")
+        self.ctx.args.skip_never_logged_in = True
+
+    def test_collect_simple_skips(self):
+        calls = []
+        original = ts.run_gam
+        ts.run_gam = lambda args, **kw: calls.append(args) or (0, "", "")
+        try:
+            status, rows, note = ts.collect_simple(
+                self.ctx, ts.MODULE_BY_KEY["sendas"])
+        finally:
+            ts.run_gam = original
+        self.assertEqual("skipped", status)
+        self.assertEqual([], calls)
+
+    def test_backupcodes_skips(self):
+        original = ts.run_gam
+        ts.run_gam = lambda *a, **k: self.fail("gam must not run")
+        try:
+            status, _, _ = ts.collect_backupcodes(
+                self.ctx, ts.MODULE_BY_KEY["backupcodes"])
+        finally:
+            ts.run_gam = original
+        self.assertEqual("skipped", status)
+
+
+class TestBatchedRedirectCounting(CtxTestCase):
+    def setUp(self):
+        super().setUp()
+        self.write_csv("users", USERS_HEADER + "\n"
+                       "u@example.com,False,False,2026-01-01T00:00:00Z,"
+                       "True,True,,False,False,Business")
+
+    def test_redirect_file_is_counted_in_place(self):
+        mod = ts.MODULE_BY_KEY["vacation"]
+
+        def fake(args, **kw):
+            path = Path(args[args.index("redirect") + 2])
+            path.write_text('User,message\nu@example.com,"a\nb"\n',
+                            encoding="utf-8")
+            return 0, "", "Getting vacation for u@example.com\n"
+        original = ts.run_gam
+        ts.run_gam = fake
+        try:
+            status, rows, note = ts.collect_simple(self.ctx, mod)
+        finally:
+            ts.run_gam = original
+        self.assertEqual("ok", status)
+        self.assertEqual(1, rows)
+
+    def test_marker_inside_csv_data_is_not_a_skip(self):
+        mod = ts.MODULE_BY_KEY["sendas"]
+
+        def fake(args, **kw):
+            path = Path(args[args.index("redirect") + 2])
+            path.write_text("User,signature\n"
+                            "u@example.com,Does not exist? Ask me.\n",
+                            encoding="utf-8")
+            return 0, "", ""
+        original = ts.run_gam
+        ts.run_gam = fake
+        try:
+            status, rows, note = ts.collect_simple(self.ctx, mod)
+        finally:
+            ts.run_gam = original
+        self.assertEqual("ok", status)
+
+    def test_backupcodes_partial_keeps_the_counts(self):
+        mod = ts.MODULE_BY_KEY["backupcodes"]
+        original = ts.run_gam
+        ts.run_gam = lambda *a, **k: (
+            73, "User,verificationCodesCount\nu@example.com,10\n",
+            "User: dead@example.com, Gmail Service/App not enabled")
+        try:
+            status, rows, note = ts.collect_backupcodes(self.ctx, mod)
+        finally:
+            ts.run_gam = original
+        self.assertEqual("partial", status)
+        self.assertEqual(1, rows)
+        written = (self.run_dir / "backupcodes.csv").read_text(encoding="utf-8")
+        self.assertIn("u@example.com,10", written)
+
+
+class TestTier3Batched(CtxTestCase):
+    def setUp(self):
+        super().setUp()
+        self.write_csv("users", USERS_HEADER + "\n"
+                       "u@example.com,False,False,2026-01-01T00:00:00Z,"
+                       "True,True,,False,False,Business")
+
+    def test_mydrive_scan_is_one_batched_filelist(self):
+        calls = []
+
+        def fake(args, **kw):
+            calls.append(args)
+            return 0, "", ""
+        original = ts.run_gam
+        ts.run_gam = fake
+        try:
+            ts.collect_mydrive_external(
+                self.ctx, ts.MODULE_BY_KEY["mydrive_external"])
+        finally:
+            ts.run_gam = original
+        self.assertEqual(1, len(calls))
+        args = calls[0]
+        self.assertIn("multiprocess", args)
+        self.assertNotIn("all", args)
+        self.assertEqual(["print", "filelist"],
+                         args[args.index("print"):args.index("print") + 2])
+        self.assertIn("notdomainlist", args)
+
+
+class TestCollectDnsStatus(CtxTestCase):
+    def test_all_checks_failed_is_an_error(self):
+        original = ts._dns_domain
+        ts._dns_domain = lambda d, fb: {"path": "doh", "checks": {
+            "mx": {"error": "x"}, "dmarc": {"error": "x"}}}
+        try:
+            status, rows, note = ts.collect_dns(
+                self.ctx, ts.MODULE_BY_KEY["dns"])
+        finally:
+            ts._dns_domain = original
+        self.assertEqual("error", status)
+
+    def test_one_dead_domain_is_partial_and_order_is_kept(self):
+        def fake(domain, fb):
+            if domain == "alias.example.com":
+                return {"path": "doh", "checks": {"mx": {"error": "x"}}}
+            return {"path": "doh", "checks": {"mx": {"present": True}}}
+        original = ts._dns_domain
+        ts._dns_domain = fake
+        try:
+            status, rows, note = ts.collect_dns(
+                self.ctx, ts.MODULE_BY_KEY["dns"])
+        finally:
+            ts._dns_domain = original
+        self.assertEqual("partial", status)
+        self.assertIn("alias.example.com", note)
+        data = json.loads((self.run_dir / "dns.json").read_text(encoding="utf-8"))
+        self.assertEqual(["example.com", "alias.example.com"], list(data))
+
+
+class TestCollectOrdering(CtxTestCase):
+    """domains/users first, then tenant-level prints together, then the
+    per-mailbox scans one at a time - and a resumed partial is not re-run."""
+
+    def test_order_and_manifest(self):
+        seen = []
+
+        def fake(args, **kw):
+            key = "users" if "users" in args[:3] else args[-1]
+            seen.append(key)
+            if "users" in args[:3] and "print" in args:
+                return (0, USERS_HEADER + "\nu@example.com,False,False,"
+                        "2026-01-01T00:00:00Z,True,True,,False,False,Business\n",
+                        "")
+            if "domains" in args:
+                return 0, "domainName,verified\nexample.com,True\n", ""
+            return 0, "", ""
+        mods = [ts.MODULE_BY_KEY[k] for k in
+                ("sendas", "orgs", "users", "domains", "admins")]
+        self.ctx.set_module("sendas", "partial", 3, "some users failed")
+        original = ts.run_gam
+        ts.run_gam = fake
+        try:
+            ts.collect(self.ctx, mods)
+        finally:
+            ts.run_gam = original
+        self.assertEqual({"domains", "users"}, set(seen[:2]))
+        self.assertNotIn("sendas", seen)          # partial, not timed out
+        self.assertEqual("ok", self.ctx.module_status("users"))
+        self.assertEqual("empty", self.ctx.module_status("orgs"))
+        self.assertEqual("empty", self.ctx.module_status("admins"))
+        self.assertEqual(1, self.ctx.manifest["meta"]["user_count"])
+        self.assertIn("collected_at", self.ctx.manifest["meta"])
+        self.assertFalse(self.ctx.manifest["meta"]["include_suspended"])
+
+
+class TestLicenceWasteGating(CtxTestCase):
+    def test_no_licenses_module_no_finding(self):
+        (self.run_dir / "domaininfo.txt").write_text(
+            "Google Workspace Enterprise Plus Licenses: 50\n", encoding="utf-8")
+        self.assertEqual([], ts.check_licence_waste(self.ctx))
+
+    def test_archived_user_sku_is_not_summed_into_the_parent(self):
+        (self.run_dir / "domaininfo.txt").write_text(
+            "Workspace Enterprise Plus Licenses: 10\n"
+            "Workspace Enterprise Plus - Archived User Licenses: 10\n",
+            encoding="utf-8")
+        rows = ["userId,skuId,skuDisplay"]
+        rows += [f"a{i}@example.com,1,Google Workspace Enterprise Plus"
+                 for i in range(8)]
+        rows += [f"b{i}@example.com,2,Google Workspace Enterprise Plus - "
+                 "Archived User" for i in range(2)]
+        self.write_csv("licenses", "\n".join(rows))
+        findings = ts.check_licence_waste(self.ctx)
+        # Enterprise Plus: 10 owned, 8 assigned - clean. Archived: 10 owned,
+        # 2 assigned - flagged, and NOT as 10 assigned via the substring.
+        self.assertEqual(1, len(findings))
+        self.assertEqual("2", findings[0].evidence[0]["Assigned"])
+
+
+class TestAtRiskAdminRecovery(CtxTestCase):
+    def test_admin_without_recovery_email_is_not_scored_for_it(self):
+        self.write_csv("users", USERS_HEADER + "\n"
+                       "boss@example.com,False,False,2026-08-30T10:00:00Z,"
+                       "True,True,,True,False,Business")
+        # Admin role alone is one factor; "no recovery email" must not be
+        # the second, or following check_admin_recovery's advice flags you.
+        self.assertEqual([], ts.check_at_risk_accounts(self.ctx))
+
+
+class TestParseArgsGuards(unittest.TestCase):
+    def assertRejects(self, argv):
+        import contextlib, io
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                ts.parse_args(argv)
+
+    def test_render_only_needs_run_dir(self):
+        self.assertRejects(["--render-only"])
+
+    def test_grant_needs_admin(self):
+        self.assertRejects(["--grant-temp-access"])
+
+    def test_skip_tier_parsed(self):
+        self.assertEqual([2, 3], ts.parse_args(["--skip-tier", "2,3"]).skip_tier)
+        self.assertRejects(["--skip-tier", "three"])
+
+
+class TestPlainLogFile(unittest.TestCase):
+    def test_ansi_stripped_from_the_file(self):
+        import contextlib, io
+        with tempfile.TemporaryDirectory() as tmp, \
+                contextlib.redirect_stdout(io.StringIO()):
+            ts.setup_logging(Path(tmp))
+            ts.logger.info("\x1b[1;92mgreen\x1b[0m")
+            logging_text = (Path(tmp) / "tenant_scope.log").read_text(
+                encoding="utf-8")
+            ts.logger = None
+            import logging
+            logging.shutdown()
+        self.assertIn("green", logging_text)
+        self.assertNotIn("\x1b[", logging_text)

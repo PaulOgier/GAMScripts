@@ -127,10 +127,10 @@ timestamped run directory, with the report opened at the end.
 | `--no-dns` | Skip the DNS checks. |
 | `--include-suspended` | Include suspended accounts in the per-user scans. Default is active accounts only, and the report says which. |
 | `--skip-never-logged-in` | Exclude accounts that have never signed in from the per-user scans. |
-| `--grant-temp-access` | The one write in the script. See below. |
+| `--grant-temp-access` | The one write in the script. Needs `--admin`. See below. |
 | `--output-dir <dir>` | Where run directories are created. Default `./tenant_audit_runs/`. |
 | `--run-dir <dir>` | Resume an existing run. Completed modules are skipped. |
-| `--render-only` | Re-run the checks and rebuild the report from a `--run-dir`, with no GAM calls at all. |
+| `--render-only` | Re-run the checks and rebuild the report from a `--run-dir` (required), with no GAM calls at all. |
 | `--dry-run` | Print every GAM command without executing it. |
 | `--no-open` | Don't open the report in a browser when the run finishes. |
 | `--yes` | Skip the interactive tenant confirmation. The identity is still logged. |
@@ -197,18 +197,40 @@ before anything is collected, because auditing the wrong tenant is the worst
 silent failure this kind of tool can have. `--yes` skips the prompt but still logs
 the identity.
 
-Timeouts scale with the size of the tenant, and per-user scans run as a
-threaded GAM batch over an explicit list of the accounts being audited rather
-than one sequential pass over every mailbox. GAM's own progress counters are
+Collection runs in three passes. The domain and user lists go first because
+everything else depends on them. The tenant-level prints (OUs, groups, admins,
+devices, policies, reports, DNS) then run four at a time, since each is one
+short GAM process and the long ones (`report users`, `tokens`) hide the rest.
+The per-mailbox modules and the Drive scans run one at a time: each already
+forks up to 20 GAM processes as a batch over an explicit list of the accounts
+being audited, and the tier-3 Drive sweeps use the same batch instead of one
+GAM process per user.
+
+Each per-mailbox batch runs up to 20 GAM workers (`SCAN_THREADS`), which want
+about 4 GB of free memory. On a 130,000-file test tenant a full run took 5m51s
+on a 4 GB machine and 10m49s on a 3 GB one, with no API rate-limit retries on
+either; memory is the ceiling, not Google's quota. Set `SCAN_THREADS` to 10 on
+a small box.
+
+Timeouts scale with the size of the tenant. GAM's own progress counters are
 echoed to the console every 30 seconds during a long scan, so a Drive
 enumeration that runs for hours doesn't look like a hang. If a command is
-killed by its timeout, the rows collected up to that point are kept and the
-module is marked partial rather than discarded.
+killed by its timeout, GAM and its batch children are all stopped, the rows
+collected up to that point are kept, and the module is marked partial rather
+than discarded.
+
+Ctrl+C lets the module that is running finish (GAM runs in its own process
+group, so the interrupt reaches the script and not GAM), then stops. The
+report is still rendered over what was collected and the exit code is 130, so
+a scheduled run can tell "complete" from "stopped". A second Ctrl+C kills
+everything.
 
 Each run writes into its own timestamped directory under
 `./tenant_audit_runs/` (change with `--output-dir`). Runs are resumable:
 `manifest.json` records completed modules, and `--run-dir` picks up where a
-run stopped.
+run stopped. A module marked partial because some mailboxes could not be read
+(Gmail off, for instance) is not re-run on resume, since it would only end
+partial again; one cut short by a timeout is.
 
 A default run on a small tenant takes a few minutes. The tier-3 Drive scans
 are the expensive part on large tenants; run them overnight, or start with
@@ -261,7 +283,7 @@ which path ran.
 python3 -m unittest test_tenant_scope -v
 ```
 
-128 tests, no GAM calls, no fixtures on disk beyond temp directories.
+148 tests, no GAM calls, no fixtures on disk beyond temp directories.
 
 ## Licence
 

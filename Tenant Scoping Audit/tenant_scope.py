@@ -42,8 +42,8 @@ YOU ASSUME ALL RISK ASSOCIATED WITH THE USE OF THIS SOFTWARE.
 
 Author:       Paul Ogier
 Created:      2026-08-15
-Updated:      2026-08-31
-Version:      1.4.3
+Updated:      2026-09-01
+Version:      1.5.0
 Status:       Production
 Python:       3.9+
 Dependencies: GAM ADV X (GAM7) only. Stdlib only on the Python side.
@@ -106,6 +106,25 @@ Notes that matter when reading results:
     in the report where they apply.
 
 Changelog
+  2026-09-01 - v1.5.0 - Tenant-level modules collect four at a time; the
+                        tier-3 Drive sweeps and calendar ACLs run as one GAM
+                        batch per module instead of one process per user;
+                        DNS domains are checked in parallel. A timeout now
+                        kills GAM's batch children too, and Ctrl+C lets the
+                        running module finish (exit 130). Fixes: the
+                        external-forwarding check read a column GAM7 does
+                        not emit and could never fire; licence waste fired
+                        on every SKU when the licenses module had not run,
+                        and summed archived-user seats into the parent SKU;
+                        a selection filter that left nobody widened the scan
+                        to every mailbox; --render-only without --run-dir
+                        rendered an empty "clean" report; the log file
+                        carried ANSI codes; a resumed run kept a DNS
+                        fallback decided by a blip. App-password check now
+                        covers delegated admins; archived accounts no longer
+                        count as unenrolled or dormant. Load-tested on a
+                        130k-file tenant: 5m51s, no rate-limit retries.
+                        148 tests.
   2026-08-15 - v1.3.7 - First public release. Everything from the internal
                         1.x line: external-share findings (named users,
                         whole domains, inbound), people-centric checks
@@ -141,13 +160,18 @@ import webbrowser
 from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional, Tuple
+
+# `print policies formatjson` puts a whole policy JSON in one cell; the csv
+# module's default 128 KB field limit raises mid-check on a large DLP rule.
+csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
 
 ###############################################################################
 # CONFIGURATION
 ###############################################################################
 
-SCRIPT_VERSION = "1.4.3"
+SCRIPT_VERSION = "1.5.0"
 
 # [OPTIONAL] Startup check against the remote VERSION file. Fail-silent.
 CHECK_FOR_UPDATES = True
@@ -258,6 +282,9 @@ def signal_handler(_signum, _frame):
     global shutdown_requested
     if shutdown_requested:
         print(f"\n{Colours.RED}Forced exit.{Colours.RESET}")
+        with _live_procs_lock:
+            for proc in list(_live_procs):
+                _kill_tree(proc)
         sys.exit(2)
     shutdown_requested = True
     print(f"\n{Colours.YELLOW}[WARN] Ctrl+C received. Finishing the current "
@@ -270,17 +297,30 @@ if hasattr(signal, 'SIGTERM'):
     signal.signal(signal.SIGTERM, signal_handler)
 
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+class _PlainFormatter(logging.Formatter):
+    """The console gets colour; the log file must not (every line would
+    otherwise carry escape codes on a tty run)."""
+
+    def format(self, record):
+        return _ANSI_RE.sub("", super().format(record))
+
+
 def setup_logging(run_dir: Path):
     global logger
     _force_utf8_console()
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[
-            logging.FileHandler(run_dir / "tenant_scope.log", encoding="utf-8"),
-            logging.StreamHandler(sys.stdout),
-        ],
-    )
+    fmt = "%(asctime)s [%(levelname)s] %(message)s"
+    file_handler = logging.FileHandler(run_dir / "tenant_scope.log",
+                                       encoding="utf-8")
+    file_handler.setFormatter(_PlainFormatter(fmt))
+    console = logging.StreamHandler(sys.stdout)
+    console.setFormatter(logging.Formatter(fmt))
+    # force=True: a second call in one process (main() is callable) would
+    # otherwise be a silent no-op and log into the previous run directory.
+    logging.basicConfig(level=logging.INFO, handlers=[file_handler, console],
+                        force=True)
     logger = logging.getLogger(__name__)
     return logger
 
@@ -344,6 +384,47 @@ def check_for_updates():
 
 GAM_PATH = GAM_COMMAND  # resolved in preflight
 
+# GAM processes currently running, so a forced exit can take their batch
+# children with them.
+_live_procs: set = set()
+_live_procs_lock = threading.Lock()
+
+
+def _popen_isolated(cmd, **kwargs) -> subprocess.Popen:
+    """Start GAM in its own process group / session.
+
+    Two reasons. Ctrl+C in the terminal goes to the whole foreground group,
+    so without this the GAM child died at the same moment the handler
+    promised to "finish the current module". And a timeout kill has to reach
+    GAM's batch children, which needs a group to signal.
+    """
+    if os.name == "nt":
+        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        kwargs["start_new_session"] = True
+    return subprocess.Popen(cmd, **kwargs)
+
+
+def _kill_tree(proc: subprocess.Popen):
+    """Kill a GAM process and its batch children.
+
+    proc.kill() reaches the parent only; with auto_batch_min the children are
+    separate processes that keep writing the redirect CSV after the parent is
+    gone, so the row count recorded and the file on disk would diverge.
+    """
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            os.killpg(proc.pid, signal.SIGKILL)
+    except Exception:
+        pass
+    try:
+        proc.kill()
+    except Exception:
+        pass
+
 
 def locate_gam() -> Optional[str]:
     """Find the gam binary: PATH first, then known installer locations."""
@@ -397,9 +478,11 @@ def run_gam(args: List[str], timeout: int = 900,
         # "Got N files..." counters reach the console during a long scan.
         with tempfile.TemporaryFile(mode="w+", encoding="utf-8",
                                     errors="replace") as out_fh:
-            proc = subprocess.Popen(
+            proc = _popen_isolated(
                 cmd, stdout=out_fh, stderr=subprocess.PIPE, text=True,
                 encoding="utf-8", errors="replace")
+            with _live_procs_lock:
+                _live_procs.add(proc)
             collected: List[str] = []
             reader = threading.Thread(target=_echo_progress,
                                       args=(proc.stderr, collected),
@@ -409,9 +492,12 @@ def run_gam(args: List[str], timeout: int = 900,
             try:
                 rc = proc.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
-                proc.kill()
+                _kill_tree(proc)
                 rc, timed_out = -1, True
                 proc.wait()
+            finally:
+                with _live_procs_lock:
+                    _live_procs.discard(proc)
             reader.join(timeout=5)
             out_fh.seek(0)
             out = out_fh.read()
@@ -428,6 +514,23 @@ def run_gam(args: List[str], timeout: int = 900,
 def is_header_only(text: str) -> bool:
     """True when GAM emitted at most a CSV header (an empty result set)."""
     return len([ln for ln in text.strip().splitlines() if ln.strip()]) <= 1
+
+
+def csv_data_rows(source) -> int:
+    """Number of data rows in a CSV (a Path or the text itself).
+
+    Counted through the csv reader, not by lines: vacation messages and
+    filter criteria carry newlines inside a cell, and a line count reports
+    more rows than there are. Streams a file, so a redirect CSV of hundreds
+    of MB is never held in memory.
+    """
+    def count(fh):
+        return max(0, sum(1 for row in csv.reader(fh) if row) - 1)
+    if isinstance(source, Path):
+        with open(source, newline="", encoding="utf-8",
+                  errors="replace") as fh:
+            return count(fh)
+    return count(io.StringIO(source))
 
 
 ###############################################################################
@@ -448,6 +551,12 @@ def col(row: Dict[str, str], *names: str) -> str:
     between versions; matching by lowercase name keeps the checks engine
     working across that.
     """
+    # Exact-key fast path first: every check calls this several times per
+    # row, and rebuilding the lowered dict was the only measurable CPU cost
+    # in the checks stage on a large file-share CSV.
+    for name in names:
+        if name in row:
+            return (row[name] or "").strip()
     lowered = {k.lower().strip(): v for k, v in row.items() if k}
     for name in names:
         if name.lower() in lowered:
@@ -598,9 +707,8 @@ MODULES: List[Dict] = [
          args=["all", "users", "print", "filecounts"],
          scopes=[SCOPE_DRIVE], timeout=3600),
     dict(key="calendaracls", title="Primary calendar ACLs", tier=2,
-         args=None, collector="per_user",
-         per_user_args=["print", "calendaracls", "primary"],
-         scopes=[SCOPE_CALENDAR], timeout=120),
+         args=["all", "users", "print", "calendaracls", "primary"],
+         scopes=[SCOPE_CALENDAR]),
     # ---- Tier 3: heavy Drive scans ----
     dict(key="mydrive_external", title="My Drive files shared externally",
          tier=3, args=None, collector="mydrive_external",
@@ -690,6 +798,8 @@ class RunContext:
         self.admin: str = args.admin or self.manifest["meta"].get("admin", "")
         self.failed_scopes: List[str] = []
         self._rows_cache: Dict[str, List[Dict[str, str]]] = {}
+        self._policy_cache: Optional[List[Dict]] = None
+        self._log_lock = threading.Lock()
 
     def save(self):
         self.manifest["meta"]["internal_domains"] = self.internal_domains
@@ -702,6 +812,8 @@ class RunContext:
 
     def set_module(self, key: str, status: str, rows: int = 0, note: str = ""):
         self._rows_cache.pop(key, None)
+        if key == "policies":
+            self._policy_cache = None
         self.manifest["modules"][key] = {
             "status": status, "rows": rows, "note": note,
             "completed_at": datetime.now().isoformat(timespec="seconds")}
@@ -728,7 +840,10 @@ class RunContext:
         the CSVs clean while preserving the full trail."""
         if not text.strip():
             return
-        with open(self.run_dir / "gam_stderr.log", "a", encoding="utf-8") as fh:
+        # Tier-1 modules collect in parallel; the lock keeps one module's
+        # block from landing inside another's.
+        with self._log_lock, open(self.run_dir / "gam_stderr.log", "a",
+                                  encoding="utf-8") as fh:
             fh.write(f"\n===== {key} =====\n{text.strip()}\n")
 
 
@@ -776,9 +891,12 @@ def parse_serviceaccount_check(output: str) -> Tuple[List[str], List[str]]:
         if not match:
             continue
         url = match.group(1).rstrip(",")
-        if re.search(r"\bFAIL", line):
+        # Anchor on the ", PASS" / ", FAIL" cell, not any word starting with
+        # FAIL: a future "... FAILED to open" hint line would otherwise skip
+        # a module.
+        if re.search(r",\s*FAIL\b", line):
             failed.append(url)
-        elif re.search(r"\bPASS", line):
+        elif re.search(r",\s*PASS\b", line):
             passed.append(url)
     return passed, failed
 
@@ -787,7 +905,7 @@ def selected_modules(args) -> List[Dict]:
     """Apply --only / --skip / tier selection to the registry."""
     only = [k.strip() for k in (args.only or "").split(",") if k.strip()]
     skip = [k.strip() for k in (args.skip or "").split(",") if k.strip()]
-    skip_tiers = {int(t) for t in (args.skip_tier or "").split(",") if t.strip()}
+    skip_tiers = set(args.skip_tier or [])
     for key in only + skip:
         if key not in MODULE_BY_KEY:
             print_error(f"Unknown module key: {key} (see --list)")
@@ -848,12 +966,15 @@ def preflight(ctx: RunContext, modules: List[Dict]) -> bool:
             ok = False
     dns_selected = any(m["key"] == "dns" for m in modules)
     if ok and dns_selected:
-        if https_reachable("tamingdns.com"):
+        reachable = https_reachable("tamingdns.com")
+        if reachable:
             table.append(("DNS checker (tamingdns.com)", "reachable", "-"))
         else:
             table.append(("DNS checker (tamingdns.com)", "unreachable",
                           "DNS module falls back to dns.google (minimal checks)"))
-            ctx.manifest["meta"]["dns_fallback"] = True
+        # Written on both branches: a resumed run must not inherit a fallback
+        # decided by a network blip on the first attempt.
+        ctx.manifest["meta"]["dns_fallback"] = not reachable
 
     # Gate 3: which tenant is this? Wrong-tenant audit is the worst silent
     # failure, and no per-tenant guard exists - so echo and confirm.
@@ -1051,7 +1172,9 @@ def scan_user_list(ctx: RunContext) -> Optional[Path]:
             continue
         emails.append(email)
     if not emails:
-        return None
+        # Not None: None means "use `all users`", which would scan every
+        # mailbox in the tenant - the opposite of what the filters asked.
+        raise LookupError("no users left to scan after the selection filters")
     path = ctx.run_dir / "_scan_users.csv"
     write_rows(path, [{"primaryEmail": e} for e in emails])
     ctx.manifest["meta"]["scanned_users"] = len(emails)
@@ -1091,23 +1214,37 @@ def user_scan_args(ctx: RunContext, mod: Dict) -> Tuple[List[str], Optional[Path
 
 
 def collect_simple(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
-    args, out_path = user_scan_args(ctx, mod)
+    try:
+        args, out_path = user_scan_args(ctx, mod)
+    except LookupError as exc:
+        return "skipped", 0, str(exc)
     rc, out, err = run_gam(args,
                            timeout=module_timeout(ctx, mod, 900),
                            dry_run=ctx.args.dry_run)
     ctx.stderr_log(mod["key"], err)
     if ctx.args.dry_run:
         return "dry-run", 0, ""
-    if out_path is not None:
-        # GAM wrote the CSV itself; read it back so the handling below (and a
-        # timeout's partial file) goes through exactly one code path.
-        out = out_path.read_text(encoding="utf-8") if out_path.exists() else ""
-    per_user_skips = any(marker in (err + out)
-                         for marker in PER_USER_SKIP_MARKERS)
-    if rc == 0 or (rc == 60 and is_header_only(out)):
+    target = ctx.csv_path(mod["key"])
+    if out_path is not None and out_path.exists():
+        # GAM wrote the CSV itself (redirect). Count it in place: a large
+        # tenant's tokens.csv runs to hundreds of MB, and reading it back only
+        # to write the same bytes again was four copies of it in memory.
+        rows = csv_data_rows(out_path)
+        header_only = rows == 0
+    else:
+        rows = csv_data_rows(out)
+        header_only = is_header_only(out)
+    # GAM reports a skipped mailbox on stderr; searching the CSV as well made
+    # a signature containing "Does not exist" flip a clean module to partial.
+    per_user_skips = any(marker in err for marker in PER_USER_SKIP_MARKERS)
+
+    def keep():
+        if out_path is None or not out_path.exists():
+            target.write_text(out, encoding="utf-8")
+
+    if rc == 0 or (rc == 60 and header_only):
         # Exit 60 with a header-only CSV is GAM for "no rows", not a failure.
-        ctx.csv_path(mod["key"]).write_text(out, encoding="utf-8")
-        rows = max(0, len([ln for ln in out.strip().splitlines() if ln.strip()]) - 1)
+        keep()
         if per_user_skips:
             # A batched scan exits 0 even when a mailbox failed: the failure
             # happened in a child process. Only stderr carries it, so without
@@ -1122,19 +1259,18 @@ def collect_simple(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
     if mod["key"] == "browsers" and BROWSERS_AUTH_ERROR in (out + err):
         return "skipped", 0, ("not authorised: Chrome browser management "
                               "access is missing for this admin/API")
-    if is_header_only(out) and per_user_skips:
+    if header_only and per_user_skips:
         # Some users were skipped and the rest simply had nothing to report:
         # partial coverage over an empty result, not a module failure.
-        ctx.csv_path(mod["key"]).write_text(out, encoding="utf-8")
+        keep()
         note = err.strip().splitlines()[-1:] or [""]
         return "partial", 0, f"some users failed - exit {rc}: {note[0]}"
-    if not is_header_only(out):
+    if not header_only:
         # An `all users` print exits non-zero when ANY user fails (e.g. exit
         # 73 for a user with Gmail disabled) but still emits every other
-        # user's rows on stdout. Discarding those rows would lose good data;
-        # keep them and say plainly that coverage is partial.
-        ctx.csv_path(mod["key"]).write_text(out, encoding="utf-8")
-        rows = len(out.strip().splitlines()) - 1
+        # user's rows. Discarding those rows would lose good data; keep them
+        # and say plainly that coverage is partial.
+        keep()
         note = (err or out).strip().splitlines()[-1:] or ["unknown error"]
         return "partial", rows, f"some users failed - exit {rc}: {note[0]}"
     note = (err or out).strip().splitlines()[-1:] or ["unknown error"]
@@ -1158,6 +1294,10 @@ def collect_backupcodes_args(ctx: RunContext, mod: Dict) -> List[str]:
         args = args[:cut] + args[cut + 4:]   # redirect csv <path> multiprocess
     if "auto_batch_min" in args:
         args[args.index("auto_batch_min") + 1] = "0"
+    if "num_threads" in args:
+        # Meaningless without a fork; dropped so the intent reads at a glance.
+        cut = args.index("num_threads")
+        args = args[:cut] + args[cut + 2:]
     return args
 
 
@@ -1167,13 +1307,17 @@ def collect_backupcodes(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
     Takes the user list and threading from user_scan_args but never its
     redirect: GAM writing this CSV itself would put live codes on disk.
     """
-    rc, out, err = run_gam(collect_backupcodes_args(ctx, mod),
-                           timeout=module_timeout(ctx, mod, 900),
+    try:
+        args = collect_backupcodes_args(ctx, mod)
+    except LookupError as exc:
+        return "skipped", 0, str(exc)
+    rc, out, err = run_gam(args, timeout=module_timeout(ctx, mod, 900),
                            dry_run=ctx.args.dry_run)
     ctx.stderr_log(mod["key"], err)
     if ctx.args.dry_run:
         return "dry-run", 0, ""
-    if not (rc == 0 or (rc == 60 and is_header_only(out))):
+    failed = not (rc == 0 or (rc == 60 and is_header_only(out)))
+    if failed and is_header_only(out):
         note = (err or out).strip().splitlines()[-1:] or ["unknown error"]
         return "error", 0, f"exit {rc}: {note[0]}"
     reduced = []
@@ -1183,98 +1327,73 @@ def collect_backupcodes(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
             if key and "count" in key.lower():
                 count = value
                 break
-        reduced.append({"User": col(row, "User", "user"),
+        reduced.append({"User": col(row, "User"),
                         "verificationCodesCount": count})
     write_rows(ctx.csv_path(mod["key"]), reduced)
+    if failed:
+        # One mailbox failing (Gmail off, deleted mid-run) used to blank the
+        # whole finding; the other users' counts are still good data.
+        note = (err or out).strip().splitlines()[-1:] or ["unknown error"]
+        return "partial", len(reduced), f"some users failed - exit {rc}: {note[0]}"
     return ("empty" if not reduced else "ok"), len(reduced), ""
 
 
-def collect_per_user(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
-    """Iterate users one by one for verbs with no all-users form
-    (calendaracls), and for suspended users under --include-suspended."""
-    users = audited_users(ctx)
-    if not users:
-        return "skipped", 0, "users module has no rows; run it first"
-    rows: List[Dict[str, str]] = []
-    errors = 0
-    for user in users:
-        if shutdown_requested:
-            return "error", len(rows), "interrupted"
-        rc, out, err = run_gam(["user", user] + mod["per_user_args"],
-                               timeout=mod.get("timeout", 120),
-                               dry_run=ctx.args.dry_run)
-        ctx.stderr_log(mod["key"], err)
-        if ctx.args.dry_run:
-            continue
-        if rc == 0 or (rc == 60 and is_header_only(out)):
-            rows.extend(csv.DictReader(io.StringIO(out)))
-        else:
-            errors += 1
-    if ctx.args.dry_run:
-        return "dry-run", 0, ""
-    write_rows(ctx.csv_path(mod["key"]), rows)
-    note = f"{errors} user(s) failed" if errors else ""
-    status = "error" if errors == len(users) else ("empty" if not rows else "ok")
-    return status, len(rows), note
+def _batched_filelist(ctx: RunContext, mod: Dict, tail: List[str],
+                      row_filter=None) -> Tuple[str, int, str]:
+    """Run one `all users print filelist ...` through the batch machinery.
 
+    One gam process per user cost ~2s of start-up per mailbox before a single
+    file was listed, serially: the same shape the tier-2 modules had before
+    1.4.0 and the same fix. user_scan_args turns this into a forked scan over
+    the audited user list with a multiprocess redirect.
 
-def _filelist_sweep(ctx: RunContext, mod: Dict, per_user_cmd,
-                    row_filter=None) -> Tuple[str, int, str]:
-    """Shared loop for the per-user Tier 3 Drive sweeps.
-
-    row_filter, when given, keeps only matching rows — for sweeps where the
-    externality test must run in Python because gam's pm filters cannot see
-    the deciding field.
+    row_filter, when given, is applied to the collected CSV afterwards - for
+    the sweep where the externality test must run in Python because gam's pm
+    filters cannot see the deciding field.
     """
-    users = audited_users(ctx)
-    if not users:
+    if not ctx.rows("users"):
         return "skipped", 0, "users module has no rows; run it first"
     if not ctx.internal_domains:
         return "skipped", 0, "domains module has no rows; run it first"
-    rows: List[Dict[str, str]] = []
-    errors = 0
-    for user in users:
-        if shutdown_requested:
-            return "error", len(rows), "interrupted"
-        rc, out, err = run_gam(per_user_cmd(user),
-                               timeout=mod.get("timeout", 3600),
-                               dry_run=ctx.args.dry_run)
-        ctx.stderr_log(mod["key"], err)
-        if ctx.args.dry_run:
-            continue
-        if rc == 0 or (rc == 60 and is_header_only(out)):
-            new_rows = csv.DictReader(io.StringIO(out))
-            rows.extend(filter(row_filter, new_rows) if row_filter
-                        else new_rows)
-        else:
-            errors += 1
-    if ctx.args.dry_run:
-        return "dry-run", 0, ""
-    write_rows(ctx.csv_path(mod["key"]), rows)
-    note = f"{errors} user(s) failed" if errors else ""
-    status = "error" if errors == len(users) else ("empty" if not rows else "ok")
-    return status, len(rows), note
+    scan = dict(mod, args=["all", "users", "print", "filelist"] + tail)
+    status, rows, note = _collect_scan(ctx, scan)
+    if row_filter is None or status not in ("ok", "partial", "empty"):
+        return status, rows, note
+    kept = [r for r in read_csv_rows(ctx.csv_path(mod["key"])) if row_filter(r)]
+    write_rows(ctx.csv_path(mod["key"]), kept)
+    if status == "ok" and not kept:
+        status = "empty"
+    return status, len(kept), note
+
+
+def _collect_scan(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
+    """collect_simple with the Drive scan's longer per-user allowance.
+
+    module_timeout's 10s per mailbox is sized for a Gmail-settings call; a
+    Drive listing is bounded by file count, not user count, so the module's
+    own ceiling stays the floor and the per-user term is tripled.
+    """
+    users = ctx.manifest["meta"].get("user_count", 0)
+    scan = dict(mod, timeout=max(mod.get("timeout", 3600),
+                                 users * PER_USER_TIMEOUT_SECONDS * 3))
+    return collect_simple(ctx, scan)
 
 
 def collect_mydrive_external(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
-    pm = external_pm_args(ctx.internal_domains)
-
-    def cmd(user):
-        return (["user", user, "print", "filelist", "fields",
-                 "id,name,mimeType,owners.emailAddress,basicpermissions"] + pm)
-    return _filelist_sweep(ctx, mod, cmd)
+    return _batched_filelist(
+        ctx, mod, ["fields", "id,name,mimeType,owners.emailAddress,"
+                   "basicpermissions"] + external_pm_args(ctx.internal_domains))
 
 
 def collect_sites(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
-    def cmd(user):
-        return ["user", user, "print", "filelist", "showmimetype", "gsite",
-                "fields", "id,name,owners.emailAddress"]
-    return _filelist_sweep(ctx, mod, cmd)
+    return _batched_filelist(
+        ctx, mod, ["showmimetype", "gsite", "fields",
+                   "id,name,owners.emailAddress"])
 
 
 def collect_swm_external(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
     # No pm filter here: the recipient of an externally-owned file sees NO
-    # permissions array at all (verified on dev 2026-08-15 — basicpermissions
+    # permissions array at all (verified on dev 2026-08-15 - basicpermissions
     # came back empty on the planted inbound fixture), so any pm filter
     # silently excludes every genuinely external file. Externality must be
     # decided from owners.0.emailAddress in Python instead.
@@ -1284,11 +1403,10 @@ def collect_swm_external(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
         owner = col(row, "owners.0.emailAddress").lower()
         return "@" in owner and owner.rsplit("@", 1)[1] not in internal
 
-    def cmd(user):
-        return ["user", user, "print", "filelist", "fullquery",
-                "sharedWithMe and not 'me' in owners", "fields",
-                "id,name,owners.emailAddress,sharedWithMeTime"]
-    return _filelist_sweep(ctx, mod, cmd, row_filter=is_external)
+    return _batched_filelist(
+        ctx, mod, ["fullquery", "sharedWithMe and not 'me' in owners",
+                   "fields", "id,name,owners.emailAddress,sharedWithMeTime"],
+        row_filter=is_external)
 
 
 def collect_sd_external(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
@@ -1464,6 +1582,27 @@ def doh_fallback(domain: str) -> Dict:
     return result
 
 
+DNS_WORKERS = 4   # domains checked at once; tamingdns rate limits are unknown
+
+
+def _dns_domain(domain: str, use_fallback: bool) -> Dict:
+    """All four checks for one domain, tamingdns first, DoH if every one failed."""
+    if use_fallback:
+        return doh_fallback(domain)
+    entry: Dict = {"path": "tamingdns", "checks": {}}
+    for check in ("check_mx", "check_spf", "check_dkim", "check_dmarc"):
+        try:
+            extra = {"selector": "google"} if check == "check_dkim" else None
+            entry["checks"][check.replace("check_", "")] = tamingdns_check(
+                check, domain, extra_args=extra)
+        except Exception as exc:
+            entry["checks"][check.replace("check_", "")] = {
+                "error": f"{type(exc).__name__}: {exc}"}
+    if all("error" in (v or {}) for v in entry["checks"].values()):
+        entry = doh_fallback(domain)
+    return entry
+
+
 def collect_dns(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
     # Google's *.test-google-a.com alias exists on many tenants and is not a
     # mail domain; checking its DNS only adds noise to the report.
@@ -1473,39 +1612,32 @@ def collect_dns(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
         return "skipped", 0, "domains module has no rows; run it first"
     if ctx.args.dry_run:
         return "dry-run", 0, ""
-    results: Dict[str, Dict] = {}
     use_fallback = bool(ctx.manifest["meta"].get("dns_fallback"))
-    for idx, domain in enumerate(domains, 1):
-        if shutdown_requested:
-            return "error", len(results), "interrupted"
-        # Four HTTP checks per domain at up to 25s each, and nothing on
-        # screen between them on a tenant carrying a dozen domains.
-        print_info(f"dns: {domain} ({idx}/{len(domains)})")
-        if use_fallback:
-            results[domain] = doh_fallback(domain)
-            continue
-        entry: Dict = {"path": "tamingdns", "checks": {}}
-        for check in ("check_mx", "check_spf", "check_dkim", "check_dmarc"):
-            try:
-                extra = {"selector": "google"} if check == "check_dkim" else None
-                result = tamingdns_check(check, domain, extra_args=extra)
-                entry["checks"][check.replace("check_", "")] = result
-            except Exception as exc:
-                entry["checks"][check.replace("check_", "")] = {
-                    "error": f"{type(exc).__name__}: {exc}"}
-        # If every check errored, fall back to DoH for this domain.
-        if all("error" in (v or {}) for v in entry["checks"].values()):
-            entry = doh_fallback(domain)
-        results[domain] = entry
+    results: Dict[str, Dict] = {}
+    # Four HTTP checks per domain at up to 25s each: a dozen domains took
+    # minutes in series and the calls share nothing, so run them together.
+    with ThreadPoolExecutor(max_workers=DNS_WORKERS) as pool:
+        futures = {pool.submit(_dns_domain, d, use_fallback): d for d in domains}
+        for idx, fut in enumerate(as_completed(futures), 1):
+            domain = futures[fut]
+            results[domain] = fut.result()
+            print_info(f"dns: {domain} done ({idx}/{len(domains)})")
+    results = {d: results[d] for d in domains}   # report order = domain order
     (ctx.run_dir / "dns.json").write_text(
         json.dumps(results, indent=2), encoding="utf-8")
+    dead = [d for d, e in results.items()
+            if e.get("checks") and all("error" in (v or {})
+                                       for v in e["checks"].values())]
+    if len(dead) == len(domains):
+        return "error", 0, "every DNS check failed on both paths"
+    if dead:
+        return "partial", len(results), f"checks failed for {', '.join(dead)}"
     return "ok", len(results), ""
 
 
 COLLECTORS = {
     "simple": collect_simple,
     "backupcodes": collect_backupcodes,
-    "per_user": collect_per_user,
     "mydrive_external": collect_mydrive_external,
     "sd_external": collect_sd_external,
     "swm_external": collect_swm_external,
@@ -1531,45 +1663,114 @@ def derive_internal_domains(ctx: RunContext):
         ctx.save()
 
 
+FIRST_MODULES = ("domains", "domainaliases", "users")
+LIGHT_WORKERS = 4   # tenant-level gam prints run at once
+
+
+def _is_batch(mod: Dict) -> bool:
+    return [a.lower() for a in (mod.get("args") or [])[:2]] == ["all", "users"]
+
+
+def _needs_run(ctx: RunContext, mod: Dict) -> bool:
+    """Resume and scope gating, decided on the main thread."""
+    key = mod["key"]
+    status = ctx.module_status(key)
+    note = ctx.manifest["modules"].get(key, {}).get("note", "")
+    # A partial module is re-run only when it was cut short by a timeout;
+    # partial because one mailbox has Gmail off would re-scan the whole
+    # tenant on every resume and end partial again.
+    if status in ("ok", "empty") or (status == "partial"
+                                     and "Timed out" not in note):
+        print_info(f"{key}: already collected, skipping (resume)")
+        return False
+    if ctx.failed_scopes and set(mod.get("scopes", [])) & set(ctx.failed_scopes):
+        ctx.set_module(key, "skipped", 0, "not authorised: DWD scope "
+                       "missing (see preflight)")
+        print_warning(f"{key}: skipped, DWD scope not authorised")
+        return False
+    return True
+
+
+def _run_collector(ctx: RunContext, mod: Dict) -> Tuple[str, int, str, float]:
+    started = time.time()
+    status, rows, note = COLLECTORS[mod.get("collector", "simple")](ctx, mod)
+    return status, rows, note, time.time() - started
+
+
+def _record(ctx: RunContext, mod: Dict, status: str, rows: int, note: str,
+            elapsed: float):
+    """Manifest write, console line and the post-module hooks. Main thread
+    only: manifest.json is one file and save() is not atomic."""
+    key = mod["key"]
+    if status != "dry-run":
+        ctx.set_module(key, status, rows, note)
+    label = f"{key}: {status}, {rows} row(s) in {elapsed:.0f}s"
+    if note:
+        label += f" - {note}"
+    if status in ("ok", "empty", "dry-run"):
+        print_success(label)
+    elif status in ("skipped", "partial"):
+        print_warning(label)
+    else:
+        print_error(label)
+    if key in ("domains", "domainaliases"):
+        derive_internal_domains(ctx)
+    if key == "users":
+        ctx.manifest["meta"]["user_count"] = rows
+        ctx.save()
+
+
 def collect(ctx: RunContext, modules: List[Dict]):
+    """Three passes: the modules everything depends on, then every
+    tenant-level print together, then the per-mailbox and Drive scans one
+    at a time.
+
+    The per-mailbox modules already fork SCAN_THREADS gam processes each;
+    two of those at once is forty processes for no quota headroom. The
+    tenant-level prints are one process and a few seconds apiece, and the
+    long ones (report users, tokens) hide the rest when they overlap.
+    """
     print_header("STAGE 1 - COLLECT")
-    # Dependency order: domains and users feed nearly everything downstream.
-    ordered = sorted(modules, key=lambda m: (
-        0 if m["key"] in ("domains", "domainaliases", "users") else m["tier"]))
-    for mod in ordered:
+    ctx.manifest["meta"]["include_suspended"] = bool(ctx.args.include_suspended)
+    ctx.manifest["meta"].setdefault(
+        "collected_at", datetime.now().strftime("%Y-%m-%d %H:%M"))
+    first = [m for m in modules if m["key"] in FIRST_MODULES]
+    rest = [m for m in modules if m["key"] not in FIRST_MODULES]
+    light = [m for m in rest
+             if m.get("collector", "simple") in ("simple", "dns")
+             and not _is_batch(m)]
+    heavy = sorted([m for m in rest if m not in light],
+                   key=lambda m: m["tier"])
+
+    def stop() -> bool:
         if shutdown_requested:
             print_warning("Stopping; resume this run with --run-dir "
                           + str(ctx.run_dir))
-            break
-        key = mod["key"]
-        if ctx.module_status(key) in ("ok", "empty"):
-            print_info(f"{key}: already collected, skipping (resume)")
-            continue
-        if ctx.failed_scopes and set(mod.get("scopes", [])) & set(ctx.failed_scopes):
-            ctx.set_module(key, "skipped", 0, "not authorised: DWD scope "
-                           "missing (see preflight)")
-            print_warning(f"{key}: skipped, DWD scope not authorised")
-            continue
-        collector = COLLECTORS[mod.get("collector", "simple")]
-        started = time.time()
-        status, rows, note = collector(ctx, mod)
-        elapsed = time.time() - started
-        if status != "dry-run":
-            ctx.set_module(key, status, rows, note)
-        label = f"{key}: {status}, {rows} row(s) in {elapsed:.0f}s"
-        if note:
-            label += f" - {note}"
-        if status in ("ok", "empty", "dry-run"):
-            print_success(label)
-        elif status in ("skipped", "partial"):
-            print_warning(label)
-        else:
-            print_error(label)
-        if key in ("domains", "domainaliases"):
-            derive_internal_domains(ctx)
-        if key == "users":
-            ctx.manifest["meta"]["user_count"] = rows
-            ctx.save()
+        return shutdown_requested
+
+    for mod in first:
+        if stop():
+            return
+        if _needs_run(ctx, mod):
+            _record(ctx, mod, *_run_collector(ctx, mod))
+
+    pending = [m for m in light if _needs_run(ctx, m)]
+    if pending and not stop():
+        with ThreadPoolExecutor(max_workers=LIGHT_WORKERS) as pool:
+            futures = {pool.submit(_run_collector, ctx, m): m for m in pending}
+            for fut in as_completed(futures):
+                _record(ctx, futures[fut], *fut.result())
+                if shutdown_requested:
+                    # Running gam processes finish (they are in their own
+                    # group); queued modules are dropped for the resume.
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    break
+
+    for mod in heavy:
+        if stop():
+            return
+        if _needs_run(ctx, mod):
+            _record(ctx, mod, *_run_collector(ctx, mod))
 
 
 ###############################################################################
@@ -1602,6 +1803,31 @@ def _module_usable(ctx: RunContext, key: str) -> bool:
 def _super_admins(ctx: RunContext) -> List[Dict[str, str]]:
     return [r for r in ctx.rows("users") if truthy(col(r, "isAdmin"))
             and not truthy(col(r, "suspended"))]
+
+
+def _admin_role(row: Dict[str, str]) -> str:
+    """'super admin', 'delegated admin' or '' for a users.csv row."""
+    if truthy(col(row, "isAdmin")):
+        return "super admin"
+    if truthy(col(row, "isDelegatedAdmin")):
+        return "delegated admin"
+    return ""
+
+
+def _live_users(ctx: RunContext) -> List[Dict[str, str]]:
+    """Accounts that can sign in: neither suspended nor archived. Archived
+    accounts cannot authenticate, so counting them as unenrolled or dormant
+    pads every people-centric finding."""
+    return [r for r in ctx.rows("users")
+            if not (truthy(col(r, "suspended")) or truthy(col(r, "archived")))]
+
+
+def _risky_scope_labels(row: Dict[str, str]) -> List[str]:
+    """Labels of RISKY_SCOPES present in a tokens.csv row. Scopes sit
+    space-separated in one cell; match whole tokens so .../auth/drive does
+    not also swallow .../auth/drive.readonly."""
+    scopes = set(col(row, "scopes").split())
+    return [label for url, label in RISKY_SCOPES.items() if url in scopes]
 
 
 def check_public_files(ctx: RunContext) -> List[Finding]:
@@ -1783,20 +2009,23 @@ def _asp_rows(ctx: RunContext) -> List[Dict[str, str]]:
 def check_admin_asps(ctx: RunContext) -> List[Finding]:
     if not (_module_usable(ctx, "users") and _module_usable(ctx, "asps")):
         return []
-    admin_emails = {col(r, "primaryEmail").lower() for r in _super_admins(ctx)}
-    hits = [r for r in _asp_rows(ctx)
-            if col(r, "User", "user").lower() in admin_emails]
+    # Delegated admins too: an app password bypasses 2SV on any account that
+    # can reset passwords or read audit logs, not only on a super admin.
+    admins = {col(r, "primaryEmail").lower(): _admin_role(r)
+              for r in _live_users(ctx) if _admin_role(r)}
+    hits = [r for r in _asp_rows(ctx) if col(r, "User").lower() in admins]
     if not hits:
         return []
-    evidence = [{"Super admin": col(r, "User", "user"),
+    evidence = [{"Admin": col(r, "User"),
+                 "Role": admins[col(r, "User").lower()],
                  "App password name": col(r, "name"),
                  "Created": col(r, "creationTime")} for r in hits]
     return [Finding(
         "admin-asps", "CRITICAL",
-        "Super admin accounts using app passwords",
+        "Admin accounts using app passwords",
         "App passwords bypass 2-step verification: anything holding one can "
-        "sign in as the admin without a second factor. On a super admin "
-        "account that undoes the strongest protection the tenant has.",
+        "sign in as the admin without a second factor. On an admin account "
+        "that undoes the strongest protection the tenant has.",
         "Identify what each app password is for, replace it with modern "
         "OAuth sign-in, and revoke the app passwords on all admin accounts.",
         evidence, "asps.csv")]
@@ -1808,11 +2037,13 @@ def check_external_forwarding(ctx: RunContext) -> List[Finding]:
     internal = set(ctx.internal_domains)
     hits = []
     for row in ctx.rows("forwards"):
-        if not truthy(col(row, "forwardingEnabled", "enabled")):
+        # GAM7 emits User,forwardEnabled,forwardTo,disposition (verified on
+        # the dev tenant). The older name is kept for gam builds that used it.
+        if not truthy(col(row, "forwardEnabled", "forwardingEnabled", "enabled")):
             continue
         target = col(row, "forwardTo", "emailAddress", "forwardingAddress")
         if target and email_domain(target) not in internal:
-            hits.append({"User": col(row, "User", "user"),
+            hits.append({"User": col(row, "User"),
                          "Forwards to": target})
     if not hits:
         return []
@@ -2000,11 +2231,13 @@ def check_unmanaged_accounts(ctx: RunContext) -> List[Finding]:
 
 def check_dns_findings(ctx: RunContext) -> List[Finding]:
     dns_path = ctx.run_dir / "dns.json"
-    if not dns_path.is_file():
+    if not (_module_usable(ctx, "dns") and dns_path.is_file()):
         return []
     try:
         results = json.loads(dns_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
+        return []
+    if not isinstance(results, dict):
         return []
     missing = []
     for domain, entry in results.items():
@@ -2042,13 +2275,13 @@ def check_dns_findings(ctx: RunContext) -> List[Finding]:
 def check_2sv_enrolment(ctx: RunContext) -> List[Finding]:
     if not _module_usable(ctx, "users"):
         return []
-    users = [r for r in ctx.rows("users") if not truthy(col(r, "suspended"))]
+    users = _live_users(ctx)
     if not users:
         return []
     unenrolled = [r for r in users if not truthy(col(r, "isEnrolledIn2Sv"))]
-    pct = round(100 * (len(users) - len(unenrolled)) / len(users))
     if not unenrolled:
         return []
+    pct = round(100 * (len(users) - len(unenrolled)) / len(users))
     evidence = [{"User": col(r, "primaryEmail"),
                  "Last login": col(r, "lastLoginTime")} for r in unenrolled]
     return [Finding(
@@ -2128,20 +2361,19 @@ def check_dormant_accounts(ctx: RunContext) -> List[Finding]:
     if not _module_usable(ctx, "users"):
         return []
     admin_hits, never_hits, idle_hits = [], [], []
-    for row in ctx.rows("users"):
-        if truthy(col(row, "suspended")) or truthy(col(row, "archived")):
-            continue
+    for row in _live_users(ctx):
         last = col(row, "lastLoginTime")
         if not _dormant_login(last):
             continue
+        paid = _paid_licences(row)
         entry = {"User": col(row, "primaryEmail"),
                  "Last login": "never" if _never_logged_in(last) else last,
-                 "Licences": _paid_licences(row) or "none"}
-        if truthy(col(row, "isAdmin")) or truthy(col(row, "isDelegatedAdmin")):
-            entry["Admin role"] = ("super admin" if truthy(col(row, "isAdmin"))
-                                   else "delegated admin")
+                 "Licences": paid or "none"}
+        role = _admin_role(row)
+        if role:
+            entry["Admin role"] = role
             admin_hits.append(entry)
-        elif not _paid_licences(row):
+        elif not paid:
             continue
         elif _never_logged_in(last):
             never_hits.append(entry)
@@ -2268,33 +2500,32 @@ def check_at_risk_accounts(ctx: RunContext) -> List[Finding]:
     internal = {d.lower() for d in ctx.internal_domains}
     asp_users = set()
     if _module_usable(ctx, "asps"):
-        asp_users = {col(r, "User", "user").lower() for r in _asp_rows(ctx)}
+        asp_users = {col(r, "User").lower() for r in _asp_rows(ctx)}
     risky_users = set()
     if _module_usable(ctx, "tokens"):
-        for row in ctx.rows("tokens"):
-            scopes = col(row, "scopes").split()
-            if any(url in scopes for url in RISKY_SCOPES):
-                risky_users.add(col(row, "user", "User").lower())
+        risky_users = {col(r, "user").lower() for r in ctx.rows("tokens")
+                       if _risky_scope_labels(r)}
     hits = []
     admin_flagged = False
-    for row in ctx.rows("users"):
-        if truthy(col(row, "suspended")) or truthy(col(row, "archived")):
-            continue
+    for row in _live_users(ctx):
         email = col(row, "primaryEmail").lower()
+        admin = bool(_admin_role(row))
         reasons = []
         if not truthy(col(row, "isEnrolledIn2Sv")):
             reasons.append("no 2-step verification")
         recovery = col(row, "recoveryEmail")
         if not recovery:
-            reasons.append("no recovery email")
+            # Not a risk factor on an admin: check_admin_recovery tells them
+            # to remove recovery details and rely on a second super admin,
+            # and this check must not then score them for having done so.
+            if not admin:
+                reasons.append("no recovery email")
         elif email_domain(recovery) not in internal:
             reasons.append("personal recovery email")
         if email in asp_users:
             reasons.append("app-specific passwords")
         if email in risky_users:
             reasons.append("app with full mail/Drive access")
-        admin = (truthy(col(row, "isAdmin"))
-                 or truthy(col(row, "isDelegatedAdmin")))
         if admin:
             reasons.append("admin role")
         if _dormant_login(col(row, "lastLoginTime")):
@@ -2351,7 +2582,7 @@ def check_suspended_holding_data(ctx: RunContext) -> List[Finding]:
                 continue
             gmail_mb = col(row, "accounts:gmail_used_quota_in_mb")
             drive_mb = col(row, "accounts:drive_used_quota_in_mb")
-            if (gmail_mb or drive_mb) and (gmail_mb, drive_mb) != ("0", "0"):
+            if any(v not in ("", "0") for v in (gmail_mb, drive_mb)):
                 data_rows.append({"User": email,
                                   "Gmail (MB)": gmail_mb or "0",
                                   "Drive (MB)": drive_mb or "0",
@@ -2394,18 +2625,12 @@ def check_risky_oauth(ctx: RunContext) -> List[Finding]:
         return []
     apps: Dict[str, Dict] = {}
     for row in ctx.rows("tokens"):
-        scopes = col(row, "scopes")
-        matched = []
-        for scope_url, label in RISKY_SCOPES.items():
-            # Scopes sit space-separated in one cell; match whole tokens so
-            # .../auth/drive does not also swallow .../auth/drive.readonly.
-            if scope_url in scopes.split():
-                matched.append(label)
+        matched = _risky_scope_labels(row)
         if not matched:
             continue
         client = col(row, "displayText") or col(row, "clientId")
         app = apps.setdefault(client, {"users": set(), "access": set()})
-        app["users"].add(col(row, "user", "User"))
+        app["users"].add(col(row, "user"))
         app["access"].update(matched)
     if not apps:
         return []
@@ -2525,6 +2750,12 @@ def check_tenant_shape(ctx: RunContext) -> List[Finding]:
 
 
 def _policy_settings(ctx: RunContext) -> List[Dict]:
+    if ctx._policy_cache is not None:
+        return ctx._policy_cache
+    return _parse_policy_settings(ctx)
+
+
+def _parse_policy_settings(ctx: RunContext) -> List[Dict]:
     """Parse policies.csv (formatjson: name,JSON) and return the RESOLVED
     settings as a list of {"type", "ou", "value"} dicts, "settings/"
     stripped.
@@ -2601,6 +2832,7 @@ def _policy_settings(ctx: RunContext) -> List[Dict]:
                 resolved.update(value)
         out.append({"type": stype, "ou": ou, "value": resolved})
     out.extend(rules)
+    ctx._policy_cache = out
     return out
 
 
@@ -2772,7 +3004,10 @@ def _norm_sku(name: str) -> str:
     licenses.csv display names ('Google Workspace Enterprise Plus' vs
     'Enterprise Plus')."""
     name = re.sub(r"\(formerly[^)]*\)", "", name.lower())
-    for junk in ("google workspace", "g suite", "licenses", "license"):
+    # `info domain` prints "Workspace Enterprise Plus Licenses: 50" without
+    # the leading "Google"; strip both spellings.
+    for junk in ("google workspace", "workspace", "g suite", "licenses",
+                 "license"):
         name = name.replace(junk, "")
     return " ".join(name.split())
 
@@ -2795,21 +3030,27 @@ def check_licence_waste(ctx: RunContext) -> List[Finding]:
     """Seats owned (from the preflight's `info domain` output) vs seats
     assigned (licenses.csv). Free Cloud Identity is not a seat."""
     path = ctx.run_dir / "domaininfo.txt"
-    if not path.is_file():
+    # domaininfo.txt always exists (preflight writes it); without the
+    # licenses module every SKU would read as 100% unused.
+    if not path.is_file() or not _module_usable(ctx, "licenses"):
         return []
     owned = parse_owned_licences(path.read_text(encoding="utf-8"))
     assigned: Dict[str, int] = {}
-    if _module_usable(ctx, "licenses"):
-        for row in ctx.rows("licenses"):
-            sku = _norm_sku(col(row, "skuDisplay", "skuId"))
-            assigned[sku] = assigned.get(sku, 0) + 1
+    for row in ctx.rows("licenses"):
+        sku = _norm_sku(col(row, "skuDisplay", "skuId"))
+        assigned[sku] = assigned.get(sku, 0) + 1
     hits = []
     for sku_name, seats in sorted(owned.items()):
         if re.search(r"cloud identity(?! premium)", sku_name.lower()):
             continue
         norm = _norm_sku(sku_name)
-        used = sum(count for key, count in assigned.items()
-                   if key and norm and (key in norm or norm in key))
+        if norm in assigned:
+            used = assigned[norm]
+        else:
+            # Substring only as a fallback: on an exact hit it also summed
+            # "Enterprise Plus - Archived User" into Enterprise Plus.
+            used = sum(count for key, count in assigned.items()
+                       if key and norm and (key in norm or norm in key))
         gap = seats - used
         if gap >= LICENCE_WASTE_MIN_GAP and seats \
                 and gap / seats >= LICENCE_WASTE_MIN_FRACTION:
@@ -2836,8 +3077,7 @@ def check_admin_roles(ctx: RunContext) -> List[Finding]:
     if not (_module_usable(ctx, "admins") and _module_usable(ctx, "users")):
         return []
     users = {col(r, "primaryEmail").lower(): r for r in ctx.rows("users")}
-    active_count = len([r for r in ctx.rows("users")
-                        if not truthy(col(r, "suspended"))])
+    active_count = len(_live_users(ctx))
     map_rows, suspended_hits, unresolved = [], [], []
     holders = set()
     for row in ctx.rows("admins"):
@@ -2984,7 +3224,9 @@ TAMINGDNS_TOOL_LINKS = ("mx", "spf", "dkim", "dmarc")
 def _evidence_table(finding: Finding) -> str:
     if not finding.evidence:
         return ""
-    headers = list(finding.evidence[0].keys())
+    # Union of keys, not row 0's: evidence built from different joins (the
+    # at-risk composite, the delegation map) can carry different columns.
+    headers = list(dict.fromkeys(k for r in finding.evidence for k in r))
     head = "".join(f"<th>{escape(h)}</th>" for h in headers)
     body = ""
     for row in finding.evidence:
@@ -3081,7 +3323,7 @@ def render_html(ctx: RunContext, findings: List[Finding]) -> Path:
             path = entry.get("path", "tamingdns")
             checks = entry.get("checks", {})
             summary = []
-            for name in ("mx", "spf", "dkim", "dmarc"):
+            for name in TAMINGDNS_TOOL_LINKS:
                 value = checks.get(name)
                 if value is None:
                     summary.append(f"{name.upper()}: not checked")
@@ -3095,7 +3337,8 @@ def render_html(ctx: RunContext, findings: List[Finding]) -> Path:
                     grade = value.get("grade") or value.get("status") or "see dns.json"
                     summary.append(f"{name.upper()}: {grade}")
             links = " | ".join(
-                f"<a href='https://tamingdns.com/{tool}?domain={escape(dom)}'>"
+                f"<a href='https://tamingdns.com/{tool}?domain="
+                f"{urllib.parse.quote(dom, safe='')}'>"
                 f"{tool.upper()}</a>" for tool in TAMINGDNS_TOOL_LINKS)
             rows += (f"<tr><td>{escape(dom)}</td>"
                      f"<td>{escape(', '.join(summary))}</td>"
@@ -3112,8 +3355,12 @@ def render_html(ctx: RunContext, findings: List[Finding]) -> Path:
   <tbody>{rows}</tbody></table></div>
 </section>"""
 
+    # From the manifest, not the flags: a --render-only re-run carries no
+    # --include-suspended and would otherwise describe a sweep it did not do.
+    included_suspended = meta.get("include_suspended",
+                                  bool(ctx.args.include_suspended))
     coverage_note = ("Suspended users were included in the per-user checks."
-                     if ctx.args.include_suspended else
+                     if included_suspended else
                      "Per-user checks (mail settings, calendars, Drive "
                      "sharing) cover ACTIVE users only; suspended accounts "
                      "were not swept.")
@@ -3165,7 +3412,8 @@ def render_html(ctx: RunContext, findings: List[Finding]) -> Path:
 <header class='page'>
   <h1>Google Workspace Audit - {escape(domain)}</h1>
   <p>Customer {escape(meta.get('customer_id', '?'))} &middot;
-     generated {escape(datetime.now().strftime('%Y-%m-%d %H:%M'))} &middot;
+     collected {escape(meta.get('collected_at', 'unknown'))} &middot;
+     rendered {datetime.now().strftime('%Y-%m-%d %H:%M')} &middot;
      tenant_scope.py v{SCRIPT_VERSION} (read-only audit)</p>
 </header>
 <div class='wrap'>
@@ -3210,6 +3458,13 @@ Paul Ogier, Outsource House (osh.co.za) - print this page for a PDF copy.
 # CLI / MAIN
 ###############################################################################
 
+def _tier_list(value: str) -> List[int]:
+    try:
+        return [int(t) for t in value.split(",") if t.strip()]
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"tiers are numbers: {value!r}")
+
+
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Read-only Google Workspace tenant audit "
@@ -3230,8 +3485,8 @@ def parse_args(argv=None):
     parser.add_argument("--only", help="Comma-separated module keys to run "
                         "(everything else skipped)")
     parser.add_argument("--skip", help="Comma-separated module keys to skip")
-    parser.add_argument("--skip-tier", help="Comma-separated tiers to skip, "
-                        "e.g. --skip-tier 3")
+    parser.add_argument("--skip-tier", type=_tier_list, default=[],
+                        help="Comma-separated tiers to skip, e.g. --skip-tier 3")
     parser.add_argument("--full", action="store_true",
                         help="Include the tier-4 modules (filters, vacation, "
                         "browsers, alerts, context-aware access)")
@@ -3262,7 +3517,15 @@ def parse_args(argv=None):
     parser.add_argument("--yes", action="store_true",
                         help="Skip the interactive tenant confirmation "
                         "(the tenant identity is still logged)")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.render_only and not args.run_dir:
+        # Without this the branch renders a fresh, empty directory: zero
+        # findings, no coverage table, exit 0 - the one report that says
+        # nothing was checked and reads as clean.
+        parser.error("--render-only needs --run-dir")
+    if args.grant_temp_access and not args.admin:
+        parser.error("--grant-temp-access needs --admin")
+    return args
 
 
 def list_modules():
@@ -3294,10 +3557,14 @@ def open_report(path: Path, args) -> bool:
     if args.no_open:
         return False
     try:
-        return webbrowser.open(path.resolve().as_uri())
+        opened = webbrowser.open(path.resolve().as_uri())
     except Exception as exc:                       # headless box, no browser
         print_warning(f"Could not open the report automatically: {exc}")
         return False
+    if not opened:
+        # webbrowser returns False rather than raising when no browser exists.
+        print_warning(f"No browser found; open the report by hand: {path}")
+    return opened
 
 
 def main(argv=None):
@@ -3320,7 +3587,8 @@ def main(argv=None):
     setup_logging(run_dir)
     print_header(f"TENANT SCOPING AUDIT v{SCRIPT_VERSION}")
     print_info(f"Run directory: {run_dir}")
-    check_for_updates()
+    if not args.render_only:
+        check_for_updates()
 
     ctx = RunContext(run_dir, args)
     modules = selected_modules(args)
@@ -3340,6 +3608,12 @@ def main(argv=None):
         return 0
     findings = run_checks(ctx)
     report_path = render_html(ctx, findings)
+    if shutdown_requested:
+        # A stopped run still renders what it has, but a scheduled --yes run
+        # must be able to tell "complete" from "stopped at module 3".
+        print_warning("Run was interrupted; the report covers the modules "
+                      f"collected so far. Resume with --run-dir {run_dir}")
+        return 130
 
     worst = next((f.severity for f in findings
                   if f.severity in ("CRITICAL", "HIGH")), None)
