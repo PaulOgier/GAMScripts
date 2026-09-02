@@ -48,9 +48,23 @@ python3 offboard_user.py --doit --log-dir /var/log/offboarding
 
 If you don't want to hand-craft the command line, open [`offboarding_command_builder.html`](offboarding_command_builder.html) in any browser. It is a single self-contained HTML page (no server, no install, works offline) that turns every flag into a form field, with inline help text for each one. Fill in the leaving user, successor, domain, and any phase toggles, and the page renders the exact `python3 offboard_user.py ...` command for you to copy. Useful for admins who only run an offboarding occasionally and don't want to re-read the flag list every time.
 
+## Tests
+
+Two offline suites, stdlib only, no tenant needed: `test_offboard_user.py`
+(per-phase behaviour against captured GAM 7.48.01 output in `fixtures/`) and
+`test_offboard_main.py` (drives `main()` end to end and checks command order,
+exit code and summary). Both run in GitHub Actions on Ubuntu and Windows.
+`TEST_PLAN.md` lists the live scenarios; `LIVE_TEST_LOG.md` records each live
+round.
+
+```bash
+python3 test_offboard_user.py
+python3 test_offboard_main.py
+```
+
 ## Requirements
 
-Python 3.6+ and an authorised GAM7. [GYB](https://github.com/GAM-team/got-your-back) is optional, for email migration only.
+Python 3.8+ and an authorised GAM7. [GYB](https://github.com/GAM-team/got-your-back) is optional, for email migration only.
 
 * [`offboarding_test_setup_guide.md`](offboarding_test_setup_guide.md) — full test environment setup
 * [`installation_macos.md`](installation_macos.md) / [`installation_windows.md`](installation_windows.md) — the one-time GAM7 + GYB + rclone install

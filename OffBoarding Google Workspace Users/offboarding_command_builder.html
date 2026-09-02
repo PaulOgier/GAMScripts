@@ -252,7 +252,7 @@
 
     <div id="scorched-panel" class="scorched-panel" style="display:none;">
       <h3>⚠ Scorched earth — permanent deletion</h3>
-      <p>This permanently <strong>DELETES</strong> the user after killing access, removing groups/licences, and suspending. No backups, no transfers — even if you set them. <code>--no-snapshot</code> is forced on by the script.</p>
+      <p>This permanently <strong>DELETES</strong> the user after killing access, removing groups/licences, and suspending. The script refuses any backup or transfer flag alongside it (run those first, then delete), so those sections are disabled here. The read-only pre-flight snapshot still runs.</p>
       <p>The script requires <code>--doit</code> and <code>--force</code> (added automatically) and a typed-email confirmation at runtime. This builder also requires you to re-type the email below.</p>
       <div class="check" style="margin-top:10px;">
         <input type="checkbox" id="allow-orphaned-shared-drives">

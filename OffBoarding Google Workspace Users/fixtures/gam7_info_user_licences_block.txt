@@ -1,0 +1,4 @@
+# GAM 7.48.01, captured 2026-09-02; tail of full `gam info user` output; stdout and stderr merged (2>&1), so "Getting"/"Got N" progress lines are stderr
+  Licenses: (2)
+    1010010001 (Cloud Identity Free)
+    1010020020 (Google Workspace Enterprise Plus (formerly G Suite Enterprise))

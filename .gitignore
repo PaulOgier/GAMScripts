@@ -37,3 +37,9 @@ Tenant Scoping Audit/tenant_audit_runs/
 
 # Local-only docs-coverage guard, run by .git/hooks/pre-commit.
 OffBoarding Google Workspace Users/check-docs-coverage.py
+
+# Node modules for the command-builder jsdom test (npm ci in CI only).
+OffBoarding Google Workspace Users/node_modules/
+
+# Local audit reports and working notes; never on GitHub.
+OffBoarding Google Workspace Users/docs/

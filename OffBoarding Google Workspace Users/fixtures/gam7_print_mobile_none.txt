@@ -1,0 +1,6 @@
+# GAM 7.48.01, captured 2026-09-02, domain rewritten; stdout and stderr merged (2>&1), so "Getting"/"Got N" progress lines are stderr
+Getting all Mobile Devices that match query (email:testoffboard1@yourdomain.com), may take some time on a large Google Workspace Account...
+
+Got 0 Mobile Devices...
+resourceId
+Got 0 Mobile Devices that matched query (email:testoffboard1@yourdomain.com)

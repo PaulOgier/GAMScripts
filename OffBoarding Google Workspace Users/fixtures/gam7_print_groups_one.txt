@@ -1,0 +1,6 @@
+# GAM 7.48.01, captured 2026-09-02, domain rewritten; stdout and stderr merged (2>&1), so "Getting"/"Got N" progress lines are stderr
+Getting all Groups for testload15@yourdomain.com
+
+Got 1 Group for testload15@yourdomain.com...
+User,Group,Role,Status,Delivery
+testload15@yourdomain.com,loadtest-open@yourdomain.com,MEMBER,ACTIVE,ALL_MAIL

@@ -1,15 +1,22 @@
 # GAM7 Offboarding Script v5: Test Environment Setup & Backup Guide
 
-## Step 0: Run the offline unit tests first (no tenant needed)
+## Step 0: Run the offline tests first (no tenant needed)
 
-The repo ships `test_offboard_user.py` next to the script — a stdlib-only
-unittest suite in which every GAM/GYB call is stubbed, so it runs in
-seconds and never touches a Google Workspace tenant. Run it before and
+The repo ships two stdlib-only suites next to the script. Every GAM, GYB and
+rclone call is stubbed and a guard fails any test that reaches a real
+subprocess, so they run in seconds and never touch a Google Workspace tenant.
+`test_offboard_user.py` covers each phase against captured GAM output
+(`fixtures/`); `test_offboard_main.py` drives `main()` end to end and checks
+the order of commands, the exit code and the summary. Run both before and
 after ANY change to `offboard_user.py`:
 
 ```bash
 python3 test_offboard_user.py -v
+python3 test_offboard_main.py -v
 ```
+
+`TEST_PLAN.md` lists the live scenarios that follow, with the IDs used in
+`LIVE_TEST_LOG.md`.
 
 All tests must pass before you move on to the live tests below. Several
 tests pin behaviour that only surfaced against a live tenant (the

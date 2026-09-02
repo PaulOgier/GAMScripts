@@ -1,0 +1,2 @@
+# GAM 7.48.01, captured 2026-09-02, domain rewritten; stdout and stderr merged (2>&1), so "Getting"/"Got N" progress lines are stderr
+User: testoffboard1@yourdomain.com, Show 0 Delegates

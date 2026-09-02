@@ -1,0 +1,25 @@
+# GAM 7.48.01, captured 2026-09-02, domain rewritten; stdout and stderr merged (2>&1), so "Getting"/"Got N" progress lines are stderr
+User: testoffboard.nolic@yourdomain.com
+  Settings:
+    First Name: NoLic
+    Last Name: Receiver
+    Full Name: NoLic Receiver
+    Languages: en+
+    Is a Guest User: False
+    Is a Super Admin: False
+    Is Delegated Admin: False
+    2-step enrolled: False
+    2-step enforced: False
+    Has Agreed to Terms: False
+    IP Whitelisted: False
+    Account Suspended: False
+    Is Archived: False
+    Must Change Password: False
+    Google Unique ID: 000000000000000000000
+    Customer ID: C00000000
+    Mailbox is setup: False
+    Included in GAL: True
+    Creation Time: 2026-08-03T12:17:18Z
+    Last login time: Never
+    Google Org Unit Path: /
+  Other Emails:

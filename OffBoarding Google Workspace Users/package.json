@@ -1,0 +1,11 @@
+{
+  "name": "offboarding-command-builder-tests",
+  "private": true,
+  "description": "jsdom test for offboarding_command_builder.html; the Python script has no npm dependency.",
+  "scripts": {
+    "test": "node test_command_builder.js"
+  },
+  "devDependencies": {
+    "jsdom": "24.1.0"
+  }
+}

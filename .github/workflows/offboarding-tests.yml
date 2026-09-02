@@ -1,0 +1,46 @@
+name: offboarding tests
+
+on:
+  push:
+    paths:
+      - "OffBoarding Google Workspace Users/**"
+      - ".github/workflows/offboarding-tests.yml"
+  pull_request:
+    paths:
+      - "OffBoarding Google Workspace Users/**"
+
+jobs:
+  python:
+    # Two shipped bugs were Windows-only (a chmod that is a no-op there, a
+    # cp1252 console that dropped log lines), so Windows runs on every push.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.8", "3.12"]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: OffBoarding Google Workspace Users
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Unit tests (offline, stdlib only)
+        run: python test_offboard_user.py
+      - name: Integration tests (main() end to end, offline)
+        run: python test_offboard_main.py
+
+  command-builder:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: OffBoarding Google Workspace Users
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+      - run: npm test

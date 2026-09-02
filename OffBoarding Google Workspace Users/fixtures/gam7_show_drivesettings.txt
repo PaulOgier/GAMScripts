@@ -1,0 +1,12 @@
+# GAM 7.48.01, captured 2026-09-02, domain rewritten; stdout and stderr merged (2>&1), so "Getting"/"Got N" progress lines are stderr
+User: testoffboard1@yourdomain.com, Show 1 Drive Settings
+  name: testoffboard1
+  appInstalled: False
+  largestChangeId: 4
+  limit: 329.85 TB
+  maxUploadSize: 5.24 TB
+  permissionId: 00189712134939739317
+  rootFolderId: 0AEgfgQk4ztnQUk9PVA
+  usage: 148.63 MB
+  usageInDrive: 0 KB
+  usageInDriveTrash: 0 KB

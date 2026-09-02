@@ -1,0 +1,6 @@
+# GAM 7.48.01, captured 2026-09-02, domain rewritten; stdout and stderr merged (2>&1), so "Getting"/"Got N" progress lines are stderr
+Getting all CrOS Devices that match query (user:testoffboard1@yourdomain.com) for /, may take some time on a large Organizational Unit...
+
+Got 0 CrOS Devices that matched query (user:testoffboard1@yourdomain.com) for /...
+deviceId
+Got 0 CrOS Devices that matched query (user:testoffboard1@yourdomain.com)
