@@ -1,0 +1,5 @@
+# Windows runners check out with core.autocrlf=true by default, which turned
+# offboard_user.py into CRLF on the first CI run and failed its own line-ending
+# test. Everything here is text the script or its tests read byte-for-byte.
+* text eol=lf
+*.png binary
