@@ -45,6 +45,10 @@ def classify(expect, got):
 
 def main():
     checker, show = sys.argv[1], '--show' in sys.argv
+    # Pastes carry emoji a Windows code page cannot print (seen on the Windows VM).
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(errors='replace')
     total, failures = Counter(), 0
     for folder in sorted(p.parent for p in HERE.glob('*/labels.json')):
         corpus = {r['id']: r['paste'] for r in json.loads((folder / 'corpus.json').read_text(encoding='utf-8'))}
@@ -64,6 +68,10 @@ def main():
         if show or rows:
             print('\n'.join(rows))
     n = sum(total.values())
+    if not n:
+        # The corpora are not shipped, so a fresh checkout has nothing to score.
+        print('No labelled corpus found: build one with fetch_group_corpus.py and add labels.json.')
+        return 2
     print(f"ALL: {n} pastes, {total['match']} match ({100 * total['match'] / n:.0f}%), {total['under']} under-warned")
     return 1 if failures else 0
 
