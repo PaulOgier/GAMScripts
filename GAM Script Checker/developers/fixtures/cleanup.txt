@@ -1,0 +1,4 @@
+# expect: DESTRUCTIVE
+gam print groups
+gam delete group stale@example.com
+commit-batch

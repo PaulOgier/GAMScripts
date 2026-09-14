@@ -1,0 +1,9446 @@
+{
+ "cmd": {
+  "BASE_ENTITY_SELECTORS": [
+   "all",
+   "csvdatafile",
+   "csvkmd",
+   "csvsubkey",
+   "datafile"
+  ],
+  "BATCH_CMD": "batch",
+  "BROWSER_ENTITIES": [
+   "ids",
+   "browserqueies",
+   "browserquery",
+   "browserou",
+   "browserous"
+  ],
+  "CONFIG_CMD": "config",
+  "CROS_CSVDATA_ENTITY_SELECTORS": [
+   "croscsvdata"
+  ],
+  "CROS_ENTITIES": [
+   "cros",
+   "crosqueries",
+   "crosquery",
+   "cros_ou",
+   "cros_ou_and_children",
+   "cros_ous",
+   "cros_ous_and_children",
+   "cros_ou_query",
+   "cros_ou_and_children_query",
+   "cros_ous_query",
+   "cros_ous_and_children_query",
+   "cros_ou_queries",
+   "cros_ou_and_children_queries",
+   "cros_ous_queries",
+   "cros_ous_and_children_queries",
+   "cros_sn"
+  ],
+  "CROS_ENTITY_SELECTORS": [
+   "croscsv",
+   "croscsv_sn",
+   "croscsvfile",
+   "croscsvfile_sn",
+   "crosfile",
+   "crosfile_sn"
+  ],
+  "CROS_ENTITY_SELECTOR_ALL_SUBTYPES": [
+   "cros"
+  ],
+  "CSVTEST_CMD": "csvtest",
+  "CSV_CMD": "csv",
+  "ENTITY_ALIAS_MAP": {
+   "browserorg": "browserou",
+   "browserorgs": "browserous",
+   "browsers": "ids",
+   "cros_org": "cros_ou",
+   "cros_org_and_child": "cros_ou_and_children",
+   "cros_org_and_child_queries": "cros_ou_and_children_queries",
+   "cros_org_and_child_query": "cros_ou_and_children_query",
+   "cros_org_and_children": "cros_ou_and_children",
+   "cros_org_and_children_queries": "cros_ou_and_children_queries",
+   "cros_org_and_children_query": "cros_ou_and_children_query",
+   "cros_org_queries": "cros_ou_queries",
+   "cros_org_query": "cros_ou_query",
+   "cros_orgs": "cros_ous",
+   "cros_orgs_and_child": "cros_ous_and_children",
+   "cros_orgs_and_child_queries": "cros_ous_and_children_queries",
+   "cros_orgs_and_child_query": "cros_ous_and_children_query",
+   "cros_orgs_and_children": "cros_ous_and_children",
+   "cros_orgs_and_children_queries": "cros_ous_and_children_queries",
+   "cros_orgs_and_children_query": "cros_ous_and_children_query",
+   "cros_orgs_queries": "cros_ous_queries",
+   "cros_orgs_query": "cros_ous_query",
+   "cros_ou_and_child": "cros_ou_and_children",
+   "cros_ou_and_child_queries": "cros_ou_and_children_queries",
+   "cros_ou_and_child_query": "cros_ou_and_children_query",
+   "cros_ou_and_childen": "cros_ou_and_children",
+   "cros_ou_and_childen_queries": "cros_ou_and_children_queries",
+   "cros_ou_and_childen_query": "cros_ou_and_children_query",
+   "cros_ous_and_child": "cros_ous_and_children",
+   "cros_ous_and_child_queries": "cros_ous_and_children_queries",
+   "cros_ous_and_child_query": "cros_ous_and_children_query",
+   "cros_ous_and_children": "cros_ous_and_children",
+   "cros_ous_and_children_queries": "cros_ous_and_children_queries",
+   "cros_ous_and_children_query": "cros_ous_and_children_query",
+   "crosorg": "cros_ou",
+   "crosorg_and_child": "cros_ou_and_children",
+   "crosorg_and_child_queries": "cros_ou_and_children_queries",
+   "crosorg_and_child_query": "cros_ou_and_children_query",
+   "crosorg_and_children": "cros_ou_and_children",
+   "crosorg_and_children_queries": "cros_ou_and_children_queries",
+   "crosorg_and_children_query": "cros_ou_and_children_query",
+   "crosorg_queries": "cros_ou_queries",
+   "crosorg_query": "cros_ou_query",
+   "crosorgs": "cros_ous",
+   "crosorgs_and_child": "cros_ous_and_children",
+   "crosorgs_and_child_queries": "cros_ous_and_children_queries",
+   "crosorgs_and_child_query": "cros_ous_and_children_query",
+   "crosorgs_and_children": "cros_ous_and_children",
+   "crosorgs_and_children_queries": "cros_ous_and_children_queries",
+   "crosorgs_and_children_query": "cros_ous_and_children_query",
+   "crosorgs_queries": "cros_ous_queries",
+   "crosorgs_query": "cros_ous_query",
+   "crosou_and_child": "cros_ou_and_children",
+   "crosou_and_child_queries": "cros_ou_and_children_queries",
+   "crosou_and_child_query": "cros_ou_and_children_query",
+   "crosou_and_childen": "cros_ou_and_children",
+   "crosou_and_childen_queries": "cros_ou_and_children_queries",
+   "crosou_and_childen_query": "cros_ou_and_children_query",
+   "crosous_and_child": "cros_ous_and_children",
+   "crosous_and_child_queries": "cros_ous_and_children_queries",
+   "crosous_and_child_query": "cros_ous_and_children_query",
+   "crosous_and_children": "cros_ous_and_children",
+   "crosous_and_children_queries": "cros_ous_and_children_queries",
+   "crosous_and_children_query": "cros_ous_and_children_query",
+   "licence": "licenses",
+   "licences": "licenses",
+   "license": "licenses",
+   "org": "ou",
+   "org_and_child": "ou_and_children",
+   "org_and_child_ns": "ou_and_children_ns",
+   "org_and_child_susp": "ou_and_children_susp",
+   "org_and_children": "ou_and_children",
+   "org_and_children_ns": "ou_and_children_ns",
+   "org_and_children_susp": "ou_and_children_susp",
+   "org_ns": "ou_ns",
+   "org_susp": "ou_susp",
+   "orgs": "ous",
+   "orgs_and_child": "ous_and_children",
+   "orgs_and_child_ns": "ous_and_children_ns",
+   "orgs_and_child_susp": "ous_and_children_susp",
+   "orgs_and_children": "ous_and_children",
+   "orgs_and_children_ns": "ous_and_children_ns",
+   "orgs_and_children_susp": "ous_and_children_susp",
+   "orgs_ns": "ous_ns",
+   "orgs_susp": "ous_susp",
+   "ou_and_child": "ou_and_children",
+   "ou_and_child_ns": "ou_and_children_ns",
+   "ou_and_child_susp": "ou_and_children_susp",
+   "ous_and_child": "ous_and_children",
+   "ous_and_child_ns": "ous_and_children_ns",
+   "ous_and_child_susp": "ous_and_children_susp"
+  },
+  "GAM_CMD": "gam",
+  "LOOP_CMD": "loop",
+  "MULTIPROCESSEXIT_CMD": "multiprocessexit",
+  "REDIRECT_CMD": "redirect",
+  "SELECTFILTER_CMD": "selectfilter",
+  "SELECTINPUTFILTER_CMD": "selectinputfilter",
+  "SELECTOUTPUTFILTER_CMD": "selectoutputfilter",
+  "SELECT_CMD": "select",
+  "SHOWSECTIONS_CMD": "showsections",
+  "TBATCH_CMD": "tbatch",
+  "USER_CSVDATA_ENTITY_SELECTORS": [
+   "csvdata"
+  ],
+  "USER_ENTITIES": [
+   "cigroup",
+   "cigroups",
+   "cigroup_users",
+   "courseparticipants",
+   "domains",
+   "domains_ns",
+   "domains_susp",
+   "group",
+   "group_inde",
+   "group_ns",
+   "group_susp",
+   "groups",
+   "groups_inde",
+   "groups_ns",
+   "groups_susp",
+   "group_users",
+   "group_users_ns",
+   "group_users_susp",
+   "group_users_select",
+   "licenses",
+   "oauthuser",
+   "ou",
+   "ou_ns",
+   "ou_susp",
+   "ou_and_children",
+   "ou_and_children_ns",
+   "ou_and_children_susp",
+   "ous",
+   "ous_ns",
+   "ous_susp",
+   "ous_and_children",
+   "ous_and_children_ns",
+   "ous_and_children_susp",
+   "queries",
+   "query",
+   "students",
+   "teachers",
+   "user",
+   "users"
+  ],
+  "USER_ENTITY_SELECTORS": [
+   "csv",
+   "csvfile",
+   "file"
+  ],
+  "USER_ENTITY_SELECTOR_ALL_SUBTYPES": [
+   "users",
+   "users_ns",
+   "users_ns_susp",
+   "users_susp"
+  ]
+ },
+ "config_variables": [
+  "activity_max_results",
+  "admin_email",
+  "api_calls_rate_check",
+  "api_calls_rate_limit",
+  "api_calls_tries_limit",
+  "auto_batch_min",
+  "bail_on_internal_error_tries",
+  "batch_size",
+  "cacerts_pem",
+  "cache_dir",
+  "cache_discovery_only",
+  "channel_customer_id",
+  "charset",
+  "classroom_max_results",
+  "client_secrets_json",
+  "clock_skew_in_seconds",
+  "cmdlog",
+  "cmdlog_max_backups",
+  "cmdlog_max_kilo_bytes",
+  "config_dir",
+  "contact_max_results",
+  "csv_input_column_delimiter",
+  "csv_input_no_escape_char",
+  "csv_input_quote_char",
+  "csv_input_row_drop_filter",
+  "csv_input_row_drop_filter_mode",
+  "csv_input_row_filter",
+  "csv_input_row_filter_mode",
+  "csv_input_row_limit",
+  "csv_output_column_delimiter",
+  "csv_output_convert_cr_nl",
+  "csv_output_field_delimiter",
+  "csv_output_header_drop_filter",
+  "csv_output_header_filter",
+  "csv_output_header_force",
+  "csv_output_header_order",
+  "csv_output_line_terminator",
+  "csv_output_no_escape_char",
+  "csv_output_quote_char",
+  "csv_output_row_drop_filter",
+  "csv_output_row_drop_filter_mode",
+  "csv_output_row_filter",
+  "csv_output_row_filter_mode",
+  "csv_output_row_limit",
+  "csv_output_sort_headers",
+  "csv_output_subfield_delimiter",
+  "csv_output_timestamp_column",
+  "csv_output_users_audit",
+  "customer_id",
+  "debug_level",
+  "device_max_results",
+  "domain",
+  "drive_dir",
+  "drive_max_results",
+  "drive_v3_beta",
+  "drive_v3_native_names",
+  "email_batch_size",
+  "enable_dasa",
+  "enable_gcloud_reauth",
+  "event_max_results",
+  "extra_args",
+  "gmail_cse_incert_dir",
+  "gmail_cse_inkey_dir",
+  "inter_batch_wait",
+  "license_max_results",
+  "license_skus",
+  "meet_v2_beta",
+  "member_max_results",
+  "member_max_results_ci_basic",
+  "member_max_results_ci_full",
+  "message_batch_size",
+  "message_max_results",
+  "mobile_max_results",
+  "multiprocess_pool_limit",
+  "never_time",
+  "no_browser",
+  "no_cache",
+  "no_short_urls",
+  "no_update_check",
+  "no_verify_ssl",
+  "num_tbatch_threads",
+  "num_threads",
+  "oauth2_txt",
+  "oauth2service_json",
+  "output_dateformat",
+  "output_timeformat",
+  "people_max_results",
+  "print_agu_domains",
+  "print_cros_ous",
+  "print_cros_ous_and_children",
+  "process_wait_limit",
+  "quick_cros_move",
+  "quick_info_user",
+  "reseller_id",
+  "retry_api_service_not_available",
+  "section",
+  "show_api_calls_retry_data",
+  "show_commands",
+  "show_convert_cr_nl",
+  "show_counts_min",
+  "show_gettings",
+  "show_gettings_got_nl",
+  "show_multiprocess_info",
+  "smtp_fqdn",
+  "smtp_host",
+  "smtp_password",
+  "smtp_username",
+  "timezone",
+  "tls_max_version",
+  "tls_min_version",
+  "todrive_clearfilter",
+  "todrive_clientaccess",
+  "todrive_conversion",
+  "todrive_localcopy",
+  "todrive_locale",
+  "todrive_no_escape_char",
+  "todrive_nobrowser",
+  "todrive_noemail",
+  "todrive_parent",
+  "todrive_sheet_timeformat",
+  "todrive_sheet_timestamp",
+  "todrive_timeformat",
+  "todrive_timestamp",
+  "todrive_timezone",
+  "todrive_upload_nodata",
+  "todrive_user",
+  "truncate_client_id",
+  "update_cros_ou_with_id",
+  "use_chat_admin_access",
+  "use_course_owner_access",
+  "use_projectid_as_name",
+  "user_max_results",
+  "user_service_account_access_only"
+ ],
+ "dialect": "modern",
+ "gam_version": "7.06.04",
+ "pairs": [
+  [
+   "main",
+   "batch",
+   null,
+   "PERFORM",
+   "doBatch"
+  ],
+  [
+   "main",
+   "csv",
+   null,
+   "PERFORM",
+   "doCSV"
+  ],
+  [
+   "main",
+   "csvtest",
+   null,
+   "PERFORM",
+   "doCSVTest"
+  ],
+  [
+   "main",
+   "tbatch",
+   null,
+   "PERFORM",
+   "doThreadBatch"
+  ],
+  [
+   "main",
+   "loop",
+   null,
+   "PERFORM",
+   "doLoop"
+  ],
+  [
+   "main",
+   "checkconn",
+   null,
+   "CHECK",
+   "doCheckConnection"
+  ],
+  [
+   "main",
+   "checkconnection",
+   null,
+   "CHECK",
+   "doCheckConnection"
+  ],
+  [
+   "main",
+   "comment",
+   null,
+   "COMMENT",
+   "doComment"
+  ],
+  [
+   "main",
+   "help",
+   null,
+   "PERFORM",
+   "doUsage"
+  ],
+  [
+   "main",
+   "list",
+   null,
+   "LIST",
+   "doListType"
+  ],
+  [
+   "main",
+   "report",
+   null,
+   "REPORT",
+   "doReport"
+  ],
+  [
+   "main",
+   "sendemail",
+   null,
+   "SENDEMAIL",
+   "doSendEmail"
+  ],
+  [
+   "main",
+   "version",
+   null,
+   "PERFORM",
+   "doVersion"
+  ],
+  [
+   "main",
+   "whatis",
+   null,
+   "INFO",
+   "doWhatIs"
+  ],
+  [
+   "main",
+   "add",
+   "admin",
+   "ADD",
+   "doCreateAdmin"
+  ],
+  [
+   "main",
+   "add",
+   "adminrole",
+   "ADD",
+   "doCreateUpdateAdminRoles"
+  ],
+  [
+   "main",
+   "add",
+   "alertfeedback",
+   "ADD",
+   "doCreateAlertFeedback"
+  ],
+  [
+   "main",
+   "add",
+   "alias",
+   "ADD",
+   "doCreateUpdateAliases"
+  ],
+  [
+   "main",
+   "add",
+   "browsertoken",
+   "ADD",
+   "doCreateBrowserToken"
+  ],
+  [
+   "main",
+   "add",
+   "building",
+   "ADD",
+   "doCreateBuilding"
+  ],
+  [
+   "main",
+   "add",
+   "caalevel",
+   "ADD",
+   "doCreateCAALevel"
+  ],
+  [
+   "main",
+   "add",
+   "chatmessage",
+   "ADD",
+   "doCreateChatMessage"
+  ],
+  [
+   "main",
+   "add",
+   "chromenetwork",
+   "ADD",
+   "doCreateChromeNetwork"
+  ],
+  [
+   "main",
+   "add",
+   "chromepolicyimage",
+   "ADD",
+   "doCreateChromePolicyImage"
+  ],
+  [
+   "main",
+   "add",
+   "cigroup",
+   "ADD",
+   "doCreateCIGroup"
+  ],
+  [
+   "main",
+   "add",
+   "contact",
+   "ADD",
+   "doCreateDomainContact"
+  ],
+  [
+   "main",
+   "add",
+   "course",
+   "ADD",
+   "doCreateCourse"
+  ],
+  [
+   "main",
+   "add",
+   "datatransfer",
+   "ADD",
+   "doCreateDataTransfer"
+  ],
+  [
+   "main",
+   "add",
+   "device",
+   "ADD",
+   "doCreateCIDevice"
+  ],
+  [
+   "main",
+   "add",
+   "domain",
+   "ADD",
+   "doCreateDomain"
+  ],
+  [
+   "main",
+   "add",
+   "domainalias",
+   "ADD",
+   "doCreateDomainAlias"
+  ],
+  [
+   "main",
+   "add",
+   "drivefileacl",
+   "ADD",
+   "doCreateDriveFileACL"
+  ],
+  [
+   "main",
+   "add",
+   "drivelabelpermission",
+   "ADD",
+   "doCreateDriveLabelPermissions"
+  ],
+  [
+   "main",
+   "add",
+   "feature",
+   "ADD",
+   "doCreateFeature"
+  ],
+  [
+   "main",
+   "add",
+   "gcpfolder",
+   "ADD",
+   "doCreateGCPFolder"
+  ],
+  [
+   "main",
+   "add",
+   "gcpserviceaccount",
+   "ADD",
+   "doCreateGCPServiceAccount"
+  ],
+  [
+   "main",
+   "add",
+   "group",
+   "ADD",
+   "doCreateGroup"
+  ],
+  [
+   "main",
+   "add",
+   "guardian",
+   "ADD",
+   "doInviteGuardian"
+  ],
+  [
+   "main",
+   "add",
+   "guardianinvitation",
+   "ADD",
+   "doInviteGuardian"
+  ],
+  [
+   "main",
+   "add",
+   "inboundssoassignment",
+   "ADD",
+   "doCreateInboundSSOAssignment"
+  ],
+  [
+   "main",
+   "add",
+   "inboundssocredential",
+   "ADD",
+   "doCreateInboundSSOCredential"
+  ],
+  [
+   "main",
+   "add",
+   "inboundssoprofile",
+   "ADD",
+   "doCreateInboundSSOProfile"
+  ],
+  [
+   "main",
+   "add",
+   "org",
+   "ADD",
+   "doCreateOrg"
+  ],
+  [
+   "main",
+   "add",
+   "permission",
+   "ADD",
+   "doCreatePermissions"
+  ],
+  [
+   "main",
+   "add",
+   "printer",
+   "ADD",
+   "doCreatePrinter"
+  ],
+  [
+   "main",
+   "add",
+   "project",
+   "ADD",
+   "doCreateProject"
+  ],
+  [
+   "main",
+   "add",
+   "resoldcustomer",
+   "ADD",
+   "doCreateResoldCustomer"
+  ],
+  [
+   "main",
+   "add",
+   "resoldsubscription",
+   "ADD",
+   "doCreateResoldSubscription"
+  ],
+  [
+   "main",
+   "add",
+   "resource",
+   "ADD",
+   "doCreateResourceCalendar"
+  ],
+  [
+   "main",
+   "add",
+   "sakey",
+   "ADD",
+   "doCreateSvcAcctKeys"
+  ],
+  [
+   "main",
+   "add",
+   "schema",
+   "ADD",
+   "doCreateUpdateUserSchemas"
+  ],
+  [
+   "main",
+   "add",
+   "shareddrive",
+   "ADD",
+   "doCreateSharedDrive"
+  ],
+  [
+   "main",
+   "add",
+   "site",
+   "ADD",
+   "deprecatedDomainSites"
+  ],
+  [
+   "main",
+   "add",
+   "siteacl",
+   "ADD",
+   "deprecatedDomainSites"
+  ],
+  [
+   "main",
+   "add",
+   "svcacct",
+   "ADD",
+   "doCreateSvcAcct"
+  ],
+  [
+   "main",
+   "add",
+   "user",
+   "ADD",
+   "doCreateUser"
+  ],
+  [
+   "main",
+   "add",
+   "vaultexport",
+   "ADD",
+   "doCreateVaultExport"
+  ],
+  [
+   "main",
+   "add",
+   "vaulthold",
+   "ADD",
+   "doCreateVaultHold"
+  ],
+  [
+   "main",
+   "add",
+   "vaultmatter",
+   "ADD",
+   "doCreateVaultMatter"
+  ],
+  [
+   "main",
+   "add",
+   "verify",
+   "ADD",
+   "doCreateSiteVerification"
+  ],
+  [
+   "main",
+   "approve",
+   "deviceuser",
+   "APPROVE",
+   "doApproveCIDeviceUser"
+  ],
+  [
+   "main",
+   "block",
+   "deviceuser",
+   "BLOCK",
+   "doBlockCIDeviceUser"
+  ],
+  [
+   "main",
+   "cancel",
+   "guardianinvitation",
+   "CANCEL",
+   "doCancelGuardianInvitation"
+  ],
+  [
+   "main",
+   "cancel",
+   "userinvitation",
+   "CANCEL",
+   "doCIUserInvitationsAction"
+  ],
+  [
+   "main",
+   "cancelwipe",
+   "device",
+   "CANCEL_WIPE",
+   "doCancelWipeCIDevice"
+  ],
+  [
+   "main",
+   "cancelwipe",
+   "deviceuser",
+   "CANCEL_WIPE",
+   "doCancelWipeCIDeviceUser"
+  ],
+  [
+   "main",
+   "check",
+   "svcacct",
+   "CHECK",
+   "doCheckUpdateSvcAcct"
+  ],
+  [
+   "main",
+   "check",
+   "userinvitation",
+   "CHECK",
+   "doCheckCIUserInvitations"
+  ],
+  [
+   "main",
+   "check",
+   "isinvitable",
+   "CHECK",
+   "doCheckCIUserInvitations"
+  ],
+  [
+   "main",
+   "check",
+   "org",
+   "CHECK",
+   "doCheckOrgUnit"
+  ],
+  [
+   "main",
+   "clear",
+   "contact",
+   "CLEAR",
+   "doClearDomainContacts"
+  ],
+  [
+   "main",
+   "close",
+   "vaultmatter",
+   "CLOSE",
+   "doCloseVaultMatter"
+  ],
+  [
+   "main",
+   "copy",
+   "shareddriveacls",
+   "COPY",
+   "doCopySyncSharedDriveACLs"
+  ],
+  [
+   "main",
+   "copy",
+   "storagebucket",
+   "COPY",
+   "doCopyCloudStorageBucket"
+  ],
+  [
+   "main",
+   "copy",
+   "vaultexport",
+   "COPY",
+   "doCopyVaultExport"
+  ],
+  [
+   "main",
+   "create",
+   "admin",
+   "CREATE",
+   "doCreateAdmin"
+  ],
+  [
+   "main",
+   "create",
+   "adminrole",
+   "CREATE",
+   "doCreateUpdateAdminRoles"
+  ],
+  [
+   "main",
+   "create",
+   "alertfeedback",
+   "CREATE",
+   "doCreateAlertFeedback"
+  ],
+  [
+   "main",
+   "create",
+   "alias",
+   "CREATE",
+   "doCreateUpdateAliases"
+  ],
+  [
+   "main",
+   "create",
+   "browsertoken",
+   "CREATE",
+   "doCreateBrowserToken"
+  ],
+  [
+   "main",
+   "create",
+   "building",
+   "CREATE",
+   "doCreateBuilding"
+  ],
+  [
+   "main",
+   "create",
+   "caalevel",
+   "CREATE",
+   "doCreateCAALevel"
+  ],
+  [
+   "main",
+   "create",
+   "chatmessage",
+   "CREATE",
+   "doCreateChatMessage"
+  ],
+  [
+   "main",
+   "create",
+   "chromenetwork",
+   "CREATE",
+   "doCreateChromeNetwork"
+  ],
+  [
+   "main",
+   "create",
+   "chromepolicyimage",
+   "CREATE",
+   "doCreateChromePolicyImage"
+  ],
+  [
+   "main",
+   "create",
+   "cigroup",
+   "CREATE",
+   "doCreateCIGroup"
+  ],
+  [
+   "main",
+   "create",
+   "contact",
+   "CREATE",
+   "doCreateDomainContact"
+  ],
+  [
+   "main",
+   "create",
+   "course",
+   "CREATE",
+   "doCreateCourse"
+  ],
+  [
+   "main",
+   "create",
+   "datatransfer",
+   "CREATE",
+   "doCreateDataTransfer"
+  ],
+  [
+   "main",
+   "create",
+   "device",
+   "CREATE",
+   "doCreateCIDevice"
+  ],
+  [
+   "main",
+   "create",
+   "domain",
+   "CREATE",
+   "doCreateDomain"
+  ],
+  [
+   "main",
+   "create",
+   "domainalias",
+   "CREATE",
+   "doCreateDomainAlias"
+  ],
+  [
+   "main",
+   "create",
+   "drivefileacl",
+   "CREATE",
+   "doCreateDriveFileACL"
+  ],
+  [
+   "main",
+   "create",
+   "drivelabelpermission",
+   "CREATE",
+   "doCreateDriveLabelPermissions"
+  ],
+  [
+   "main",
+   "create",
+   "feature",
+   "CREATE",
+   "doCreateFeature"
+  ],
+  [
+   "main",
+   "create",
+   "gcpfolder",
+   "CREATE",
+   "doCreateGCPFolder"
+  ],
+  [
+   "main",
+   "create",
+   "gcpserviceaccount",
+   "CREATE",
+   "doCreateGCPServiceAccount"
+  ],
+  [
+   "main",
+   "create",
+   "group",
+   "CREATE",
+   "doCreateGroup"
+  ],
+  [
+   "main",
+   "create",
+   "guardian",
+   "CREATE",
+   "doInviteGuardian"
+  ],
+  [
+   "main",
+   "create",
+   "guardianinvitation",
+   "CREATE",
+   "doInviteGuardian"
+  ],
+  [
+   "main",
+   "create",
+   "inboundssoassignment",
+   "CREATE",
+   "doCreateInboundSSOAssignment"
+  ],
+  [
+   "main",
+   "create",
+   "inboundssocredential",
+   "CREATE",
+   "doCreateInboundSSOCredential"
+  ],
+  [
+   "main",
+   "create",
+   "inboundssoprofile",
+   "CREATE",
+   "doCreateInboundSSOProfile"
+  ],
+  [
+   "main",
+   "create",
+   "org",
+   "CREATE",
+   "doCreateOrg"
+  ],
+  [
+   "main",
+   "create",
+   "permission",
+   "CREATE",
+   "doCreatePermissions"
+  ],
+  [
+   "main",
+   "create",
+   "printer",
+   "CREATE",
+   "doCreatePrinter"
+  ],
+  [
+   "main",
+   "create",
+   "project",
+   "CREATE",
+   "doCreateProject"
+  ],
+  [
+   "main",
+   "create",
+   "resoldcustomer",
+   "CREATE",
+   "doCreateResoldCustomer"
+  ],
+  [
+   "main",
+   "create",
+   "resoldsubscription",
+   "CREATE",
+   "doCreateResoldSubscription"
+  ],
+  [
+   "main",
+   "create",
+   "resource",
+   "CREATE",
+   "doCreateResourceCalendar"
+  ],
+  [
+   "main",
+   "create",
+   "sakey",
+   "CREATE",
+   "doCreateSvcAcctKeys"
+  ],
+  [
+   "main",
+   "create",
+   "schema",
+   "CREATE",
+   "doCreateUpdateUserSchemas"
+  ],
+  [
+   "main",
+   "create",
+   "shareddrive",
+   "CREATE",
+   "doCreateSharedDrive"
+  ],
+  [
+   "main",
+   "create",
+   "site",
+   "CREATE",
+   "deprecatedDomainSites"
+  ],
+  [
+   "main",
+   "create",
+   "siteacl",
+   "CREATE",
+   "deprecatedDomainSites"
+  ],
+  [
+   "main",
+   "create",
+   "svcacct",
+   "CREATE",
+   "doCreateSvcAcct"
+  ],
+  [
+   "main",
+   "create",
+   "user",
+   "CREATE",
+   "doCreateUser"
+  ],
+  [
+   "main",
+   "create",
+   "vaultexport",
+   "CREATE",
+   "doCreateVaultExport"
+  ],
+  [
+   "main",
+   "create",
+   "vaulthold",
+   "CREATE",
+   "doCreateVaultHold"
+  ],
+  [
+   "main",
+   "create",
+   "vaultmatter",
+   "CREATE",
+   "doCreateVaultMatter"
+  ],
+  [
+   "main",
+   "create",
+   "verify",
+   "CREATE",
+   "doCreateSiteVerification"
+  ],
+  [
+   "main",
+   "dedup",
+   "contact",
+   "DEDUP",
+   "doDedupDomainContacts"
+  ],
+  [
+   "main",
+   "delete",
+   "admin",
+   "DELETE",
+   "doDeleteAdmin"
+  ],
+  [
+   "main",
+   "delete",
+   "adminrole",
+   "DELETE",
+   "doDeleteAdminRole"
+  ],
+  [
+   "main",
+   "delete",
+   "alias",
+   "DELETE",
+   "doDeleteAliases"
+  ],
+  [
+   "main",
+   "delete",
+   "alert",
+   "DELETE",
+   "doDeleteOrUndeleteAlert"
+  ],
+  [
+   "main",
+   "delete",
+   "browser",
+   "DELETE",
+   "doDeleteBrowsers"
+  ],
+  [
+   "main",
+   "delete",
+   "building",
+   "DELETE",
+   "doDeleteBuilding"
+  ],
+  [
+   "main",
+   "delete",
+   "caalevel",
+   "DELETE",
+   "doDeleteCAALevel"
+  ],
+  [
+   "main",
+   "delete",
+   "chatmessage",
+   "DELETE",
+   "doDeleteChatMessage"
+  ],
+  [
+   "main",
+   "delete",
+   "chromenetwork",
+   "DELETE",
+   "doDeleteChromeNetwork"
+  ],
+  [
+   "main",
+   "delete",
+   "chromepolicy",
+   "DELETE",
+   "doDeleteChromePolicy"
+  ],
+  [
+   "main",
+   "delete",
+   "chromeprofile",
+   "DELETE",
+   "doDeleteChromeProfile"
+  ],
+  [
+   "main",
+   "delete",
+   "cigroup",
+   "DELETE",
+   "doDeleteCIGroups"
+  ],
+  [
+   "main",
+   "delete",
+   "classroominvitation",
+   "DELETE",
+   "doDeleteClassroomInvitations"
+  ],
+  [
+   "main",
+   "delete",
+   "contact",
+   "DELETE",
+   "doDeleteDomainContacts"
+  ],
+  [
+   "main",
+   "delete",
+   "contactphoto",
+   "DELETE",
+   "doDeleteDomainContactPhoto"
+  ],
+  [
+   "main",
+   "delete",
+   "course",
+   "DELETE",
+   "doDeleteCourse"
+  ],
+  [
+   "main",
+   "delete",
+   "courses",
+   "DELETE",
+   "doDeleteCourses"
+  ],
+  [
+   "main",
+   "delete",
+   "device",
+   "DELETE",
+   "doDeleteCIDevice"
+  ],
+  [
+   "main",
+   "delete",
+   "deviceuser",
+   "DELETE",
+   "doDeleteCIDeviceUser"
+  ],
+  [
+   "main",
+   "delete",
+   "domain",
+   "DELETE",
+   "doDeleteDomain"
+  ],
+  [
+   "main",
+   "delete",
+   "domainalias",
+   "DELETE",
+   "doDeleteDomainAlias"
+  ],
+  [
+   "main",
+   "delete",
+   "domaincontact",
+   "DELETE",
+   "doDeleteDomainContacts"
+  ],
+  [
+   "main",
+   "delete",
+   "drivefileacl",
+   "DELETE",
+   "doDeleteDriveFileACLs"
+  ],
+  [
+   "main",
+   "delete",
+   "drivelabelpermission",
+   "DELETE",
+   "doDeleteDriveLabelPermissions"
+  ],
+  [
+   "main",
+   "delete",
+   "feature",
+   "DELETE",
+   "doDeleteFeature"
+  ],
+  [
+   "main",
+   "delete",
+   "group",
+   "DELETE",
+   "doDeleteGroups"
+  ],
+  [
+   "main",
+   "delete",
+   "guardian",
+   "DELETE",
+   "doDeleteGuardian"
+  ],
+  [
+   "main",
+   "delete",
+   "inboundssoassignment",
+   "DELETE",
+   "doDeleteInboundSSOAssignment"
+  ],
+  [
+   "main",
+   "delete",
+   "inboundssocredential",
+   "DELETE",
+   "doDeleteInboundSSOCredential"
+  ],
+  [
+   "main",
+   "delete",
+   "inboundssoprofile",
+   "DELETE",
+   "doDeleteInboundSSOProfile"
+  ],
+  [
+   "main",
+   "delete",
+   "mobile",
+   "DELETE",
+   "doDeleteMobileDevices"
+  ],
+  [
+   "main",
+   "delete",
+   "org",
+   "DELETE",
+   "doDeleteOrg"
+  ],
+  [
+   "main",
+   "delete",
+   "orgs",
+   "DELETE",
+   "doDeleteOrgs"
+  ],
+  [
+   "main",
+   "delete",
+   "permission",
+   "DELETE",
+   "doDeletePermissions"
+  ],
+  [
+   "main",
+   "delete",
+   "printer",
+   "DELETE",
+   "doDeletePrinter"
+  ],
+  [
+   "main",
+   "delete",
+   "project",
+   "DELETE",
+   "doDeleteProject"
+  ],
+  [
+   "main",
+   "delete",
+   "resoldsubscription",
+   "DELETE",
+   "doDeleteResoldSubscription"
+  ],
+  [
+   "main",
+   "delete",
+   "resource",
+   "DELETE",
+   "doDeleteResourceCalendar"
+  ],
+  [
+   "main",
+   "delete",
+   "resources",
+   "DELETE",
+   "doDeleteResourceCalendars"
+  ],
+  [
+   "main",
+   "delete",
+   "sakey",
+   "DELETE",
+   "doDeleteSvcAcctKeys"
+  ],
+  [
+   "main",
+   "delete",
+   "schema",
+   "DELETE",
+   "doDeleteUserSchemas"
+  ],
+  [
+   "main",
+   "delete",
+   "shareddrive",
+   "DELETE",
+   "doDeleteSharedDrive"
+  ],
+  [
+   "main",
+   "delete",
+   "siteacl",
+   "DELETE",
+   "deprecatedDomainSites"
+  ],
+  [
+   "main",
+   "delete",
+   "svcacct",
+   "DELETE",
+   "doDeleteSvcAcct"
+  ],
+  [
+   "main",
+   "delete",
+   "user",
+   "DELETE",
+   "doDeleteUser"
+  ],
+  [
+   "main",
+   "delete",
+   "users",
+   "DELETE",
+   "doDeleteUsers"
+  ],
+  [
+   "main",
+   "delete",
+   "vaultexport",
+   "DELETE",
+   "doDeleteVaultExport"
+  ],
+  [
+   "main",
+   "delete",
+   "vaulthold",
+   "DELETE",
+   "doDeleteVaultHold"
+  ],
+  [
+   "main",
+   "delete",
+   "vaultmatter",
+   "DELETE",
+   "doDeleteVaultMatter"
+  ],
+  [
+   "main",
+   "download",
+   "storagebucket",
+   "DOWNLOAD",
+   "doDownloadCloudStorageBucket"
+  ],
+  [
+   "main",
+   "download",
+   "storagefile",
+   "DOWNLOAD",
+   "doDownloadCloudStorageFile"
+  ],
+  [
+   "main",
+   "download",
+   "vaultexport",
+   "DOWNLOAD",
+   "doDownloadVaultExport"
+  ],
+  [
+   "main",
+   "enable",
+   "api",
+   "ENABLE",
+   "doEnableAPIs"
+  ],
+  [
+   "main",
+   "get",
+   "contactphoto",
+   "DOWNLOAD",
+   "doGetDomainContactPhoto"
+  ],
+  [
+   "main",
+   "get",
+   "devicefile",
+   "DOWNLOAD",
+   "doGetCrOSDeviceFiles"
+  ],
+  [
+   "main",
+   "getcommand",
+   "cros",
+   "GET_COMMAND_RESULT",
+   "doGetCommandResultCrOSDevices"
+  ],
+  [
+   "main",
+   "hide",
+   "shareddrive",
+   "HIDE",
+   "doHideUnhideSharedDrive"
+  ],
+  [
+   "main",
+   "info",
+   "adminrole",
+   "INFO",
+   "doInfoAdminRole"
+  ],
+  [
+   "main",
+   "info",
+   "alert",
+   "INFO",
+   "doInfoAlert"
+  ],
+  [
+   "main",
+   "info",
+   "alias",
+   "INFO",
+   "doInfoAliases"
+  ],
+  [
+   "main",
+   "info",
+   "building",
+   "INFO",
+   "doInfoBuilding"
+  ],
+  [
+   "main",
+   "info",
+   "browser",
+   "INFO",
+   "doInfoBrowsers"
+  ],
+  [
+   "main",
+   "info",
+   "chatevent",
+   "INFO",
+   "doInfoChatEvent"
+  ],
+  [
+   "main",
+   "info",
+   "chatmember",
+   "INFO",
+   "doInfoChatMember"
+  ],
+  [
+   "main",
+   "info",
+   "chatmessage",
+   "INFO",
+   "doInfoChatMessage"
+  ],
+  [
+   "main",
+   "info",
+   "chatspace",
+   "INFO",
+   "doInfoChatSpace"
+  ],
+  [
+   "main",
+   "info",
+   "chromeapp",
+   "INFO",
+   "doInfoChromeApp"
+  ],
+  [
+   "main",
+   "info",
+   "chromeprofile",
+   "INFO",
+   "doInfoChromeProfile"
+  ],
+  [
+   "main",
+   "info",
+   "chromeschema",
+   "INFO",
+   "doInfoChromePolicySchemas"
+  ],
+  [
+   "main",
+   "info",
+   "cigroup",
+   "INFO",
+   "doInfoCIGroups"
+  ],
+  [
+   "main",
+   "info",
+   "cigroupmembers",
+   "INFO",
+   "doInfoCIGroupMembers"
+  ],
+  [
+   "main",
+   "info",
+   "policy",
+   "INFO",
+   "doInfoCIPolicies"
+  ],
+  [
+   "main",
+   "info",
+   "contact",
+   "INFO",
+   "doInfoDomainContacts"
+  ],
+  [
+   "main",
+   "info",
+   "course",
+   "INFO",
+   "doInfoCourse"
+  ],
+  [
+   "main",
+   "info",
+   "courses",
+   "INFO",
+   "doInfoCourses"
+  ],
+  [
+   "main",
+   "info",
+   "cros",
+   "INFO",
+   "doInfoCrOSDevices"
+  ],
+  [
+   "main",
+   "info",
+   "crostelemetry",
+   "INFO",
+   "doInfoPrintShowCrOSTelemetry"
+  ],
+  [
+   "main",
+   "info",
+   "currentprojectid",
+   "INFO",
+   "doInfoCurrentProjectId"
+  ],
+  [
+   "main",
+   "info",
+   "customer",
+   "INFO",
+   "doInfoCustomer"
+  ],
+  [
+   "main",
+   "info",
+   "datatransfer",
+   "INFO",
+   "doInfoDataTransfer"
+  ],
+  [
+   "main",
+   "info",
+   "device",
+   "INFO",
+   "doInfoCIDevice"
+  ],
+  [
+   "main",
+   "info",
+   "deviceuser",
+   "INFO",
+   "doInfoCIDeviceUser"
+  ],
+  [
+   "main",
+   "info",
+   "deviceuserstate",
+   "INFO",
+   "doInfoCIDeviceUserState"
+  ],
+  [
+   "main",
+   "info",
+   "domain",
+   "INFO",
+   "doInfoDomain"
+  ],
+  [
+   "main",
+   "info",
+   "domainalias",
+   "INFO",
+   "doInfoDomainAlias"
+  ],
+  [
+   "main",
+   "info",
+   "domaincontact",
+   "INFO",
+   "doInfoDomainContacts"
+  ],
+  [
+   "main",
+   "info",
+   "drivefileacl",
+   "INFO",
+   "doInfoDriveFileACLs"
+  ],
+  [
+   "main",
+   "info",
+   "drivelabel",
+   "INFO",
+   "doInfoDriveLabels"
+  ],
+  [
+   "main",
+   "info",
+   "instance",
+   "INFO",
+   "doInfoInstance"
+  ],
+  [
+   "main",
+   "info",
+   "gal",
+   "INFO",
+   "doInfoGAL"
+  ],
+  [
+   "main",
+   "info",
+   "group",
+   "INFO",
+   "doInfoGroups"
+  ],
+  [
+   "main",
+   "info",
+   "groupmembers",
+   "INFO",
+   "doInfoGroupMembers"
+  ],
+  [
+   "main",
+   "info",
+   "inboundssoassignment",
+   "INFO",
+   "doInfoInboundSSOAssignment"
+  ],
+  [
+   "main",
+   "info",
+   "inboundssocredential",
+   "INFO",
+   "doInfoInboundSSOCredential"
+  ],
+  [
+   "main",
+   "info",
+   "inboundssoprofile",
+   "INFO",
+   "doInfoInboundSSOProfile"
+  ],
+  [
+   "main",
+   "info",
+   "mobile",
+   "INFO",
+   "doInfoMobileDevices"
+  ],
+  [
+   "main",
+   "info",
+   "org",
+   "INFO",
+   "doInfoOrg"
+  ],
+  [
+   "main",
+   "info",
+   "orgs",
+   "INFO",
+   "doInfoOrgs"
+  ],
+  [
+   "main",
+   "info",
+   "peopleprofile",
+   "INFO",
+   "doInfoDomainPeopleProfile"
+  ],
+  [
+   "main",
+   "info",
+   "peoplecontact",
+   "INFO",
+   "doInfoDomainPeopleContacts"
+  ],
+  [
+   "main",
+   "info",
+   "printer",
+   "INFO",
+   "doInfoPrinter"
+  ],
+  [
+   "main",
+   "info",
+   "resoldcustomer",
+   "INFO",
+   "doInfoResoldCustomer"
+  ],
+  [
+   "main",
+   "info",
+   "resoldsubscription",
+   "INFO",
+   "doInfoResoldSubscription"
+  ],
+  [
+   "main",
+   "info",
+   "resource",
+   "INFO",
+   "doInfoResourceCalendar"
+  ],
+  [
+   "main",
+   "info",
+   "resources",
+   "INFO",
+   "doInfoResourceCalendars"
+  ],
+  [
+   "main",
+   "info",
+   "schema",
+   "INFO",
+   "doInfoUserSchemas"
+  ],
+  [
+   "main",
+   "info",
+   "shareddrive",
+   "INFO",
+   "doInfoSharedDrive"
+  ],
+  [
+   "main",
+   "info",
+   "site",
+   "INFO",
+   "deprecatedDomainSites"
+  ],
+  [
+   "main",
+   "info",
+   "siteacl",
+   "INFO",
+   "deprecatedDomainSites"
+  ],
+  [
+   "main",
+   "info",
+   "user",
+   "INFO",
+   "doInfoUser"
+  ],
+  [
+   "main",
+   "info",
+   "users",
+   "INFO",
+   "doInfoUsers"
+  ],
+  [
+   "main",
+   "info",
+   "userinvitation",
+   "INFO",
+   "doInfoCIUserInvitations"
+  ],
+  [
+   "main",
+   "info",
+   "vaultexport",
+   "INFO",
+   "doInfoVaultExport"
+  ],
+  [
+   "main",
+   "info",
+   "vaulthold",
+   "INFO",
+   "doInfoVaultHold"
+  ],
+  [
+   "main",
+   "info",
+   "vaultmatter",
+   "INFO",
+   "doInfoVaultMatter"
+  ],
+  [
+   "main",
+   "info",
+   "vaultquery",
+   "INFO",
+   "doInfoVaultQuery"
+  ],
+  [
+   "main",
+   "info",
+   "verify",
+   "INFO",
+   "doInfoSiteVerification"
+  ],
+  [
+   "main",
+   "issuecommand",
+   "cros",
+   "ISSUE_COMMAND",
+   "doIssueCommandCrOSDevices"
+  ],
+  [
+   "main",
+   "move",
+   "browser",
+   "MOVE",
+   "doMoveBrowsers"
+  ],
+  [
+   "main",
+   "print",
+   "addresses",
+   "PRINT",
+   "doPrintAddresses"
+  ],
+  [
+   "main",
+   "print",
+   "adminrole",
+   "PRINT",
+   "doPrintShowAdminRoles"
+  ],
+  [
+   "main",
+   "print",
+   "admin",
+   "PRINT",
+   "doPrintShowAdmins"
+  ],
+  [
+   "main",
+   "print",
+   "alert",
+   "PRINT",
+   "doPrintShowAlerts"
+  ],
+  [
+   "main",
+   "print",
+   "alertfeedback",
+   "PRINT",
+   "doPrintShowAlertFeedback"
+  ],
+  [
+   "main",
+   "print",
+   "alias",
+   "PRINT",
+   "doPrintAliases"
+  ],
+  [
+   "main",
+   "print",
+   "browser",
+   "PRINT",
+   "doPrintShowBrowsers"
+  ],
+  [
+   "main",
+   "print",
+   "browsertoken",
+   "PRINT",
+   "doPrintShowBrowserTokens"
+  ],
+  [
+   "main",
+   "print",
+   "building",
+   "PRINT",
+   "doPrintShowBuildings"
+  ],
+  [
+   "main",
+   "print",
+   "caalevel",
+   "PRINT",
+   "doPrintShowCAALevels"
+  ],
+  [
+   "main",
+   "print",
+   "channelcustomer",
+   "PRINT",
+   "doPrintShowChannelCustomers"
+  ],
+  [
+   "main",
+   "print",
+   "channelcustomerentitlement",
+   "PRINT",
+   "doPrintShowChannelCustomerEntitlements"
+  ],
+  [
+   "main",
+   "print",
+   "channeloffer",
+   "PRINT",
+   "doPrintShowChannelOffers"
+  ],
+  [
+   "main",
+   "print",
+   "channelproduct",
+   "PRINT",
+   "doPrintShowChannelProducts"
+  ],
+  [
+   "main",
+   "print",
+   "channelsku",
+   "PRINT",
+   "doPrintShowChannelSKUs"
+  ],
+  [
+   "main",
+   "print",
+   "chatmember",
+   "PRINT",
+   "doPrintShowChatMembers"
+  ],
+  [
+   "main",
+   "print",
+   "chatspace",
+   "PRINT",
+   "doPrintShowChatSpaces"
+  ],
+  [
+   "main",
+   "print",
+   "chromeapp",
+   "PRINT",
+   "doPrintShowChromeApps"
+  ],
+  [
+   "main",
+   "print",
+   "chromeappdevices",
+   "PRINT",
+   "doPrintShowChromeAppDevices"
+  ],
+  [
+   "main",
+   "print",
+   "chromeaues",
+   "PRINT",
+   "doPrintShowChromeAues"
+  ],
+  [
+   "main",
+   "print",
+   "chromehistory",
+   "PRINT",
+   "doPrintShowChromeHistory"
+  ],
+  [
+   "main",
+   "print",
+   "chromeneedsattn",
+   "PRINT",
+   "doPrintShowChromeNeedsAttn"
+  ],
+  [
+   "main",
+   "print",
+   "chromepolicy",
+   "PRINT",
+   "doPrintShowChromePolicies"
+  ],
+  [
+   "main",
+   "print",
+   "chromeprofile",
+   "PRINT",
+   "doPrintShowChromeProfiles"
+  ],
+  [
+   "main",
+   "print",
+   "chromeschema",
+   "PRINT",
+   "doPrintShowChromeSchemas"
+  ],
+  [
+   "main",
+   "print",
+   "chromesnvalidity",
+   "PRINT",
+   "doPrintChromeSnValidity"
+  ],
+  [
+   "main",
+   "print",
+   "chromeversions",
+   "PRINT",
+   "doPrintShowChromeVersions"
+  ],
+  [
+   "main",
+   "print",
+   "cigroup",
+   "PRINT",
+   "doPrintCIGroups"
+  ],
+  [
+   "main",
+   "print",
+   "cigroupmembers",
+   "PRINT",
+   "doPrintCIGroupMembers"
+  ],
+  [
+   "main",
+   "print",
+   "policy",
+   "PRINT",
+   "doPrintShowCIPolicies"
+  ],
+  [
+   "main",
+   "print",
+   "classroominvitation",
+   "PRINT",
+   "doPrintShowClassroomInvitations"
+  ],
+  [
+   "main",
+   "print",
+   "contact",
+   "PRINT",
+   "doPrintShowDomainContacts"
+  ],
+  [
+   "main",
+   "print",
+   "course",
+   "PRINT",
+   "doPrintCourses"
+  ],
+  [
+   "main",
+   "print",
+   "courses",
+   "PRINT",
+   "doPrintCourses"
+  ],
+  [
+   "main",
+   "print",
+   "courseannouncements",
+   "PRINT",
+   "doPrintCourseAnnouncements"
+  ],
+  [
+   "main",
+   "print",
+   "coursematerials",
+   "PRINT",
+   "doPrintCourseMaterials"
+  ],
+  [
+   "main",
+   "print",
+   "courseparticipants",
+   "PRINT",
+   "doPrintCourseParticipants"
+  ],
+  [
+   "main",
+   "print",
+   "coursesubmissions",
+   "PRINT",
+   "doPrintCourseSubmissions"
+  ],
+  [
+   "main",
+   "print",
+   "coursetopics",
+   "PRINT",
+   "doPrintCourseTopics"
+  ],
+  [
+   "main",
+   "print",
+   "coursework",
+   "PRINT",
+   "doPrintCourseWork"
+  ],
+  [
+   "main",
+   "print",
+   "cros",
+   "PRINT",
+   "doPrintCrOSDevices"
+  ],
+  [
+   "main",
+   "print",
+   "crosactivity",
+   "PRINT",
+   "doPrintCrOSActivity"
+  ],
+  [
+   "main",
+   "print",
+   "crostelemetry",
+   "PRINT",
+   "doInfoPrintShowCrOSTelemetry"
+  ],
+  [
+   "main",
+   "print",
+   "datatransfer",
+   "PRINT",
+   "doPrintShowDataTransfers"
+  ],
+  [
+   "main",
+   "print",
+   "device",
+   "PRINT",
+   "doPrintCIDevices"
+  ],
+  [
+   "main",
+   "print",
+   "deviceuser",
+   "PRINT",
+   "doPrintCIDeviceUsers"
+  ],
+  [
+   "main",
+   "print",
+   "domain",
+   "PRINT",
+   "doPrintShowDomains"
+  ],
+  [
+   "main",
+   "print",
+   "domainalias",
+   "PRINT",
+   "doPrintShowDomainAliases"
+  ],
+  [
+   "main",
+   "print",
+   "domaincontact",
+   "PRINT",
+   "doPrintShowDomainContacts"
+  ],
+  [
+   "main",
+   "print",
+   "drivefileacl",
+   "PRINT",
+   "doPrintShowDriveFileACLs"
+  ],
+  [
+   "main",
+   "print",
+   "drivelabel",
+   "PRINT",
+   "doPrintShowDriveLabels"
+  ],
+  [
+   "main",
+   "print",
+   "drivelabelpermission",
+   "PRINT",
+   "doPrintShowDriveLabelPermissions"
+  ],
+  [
+   "main",
+   "print",
+   "feature",
+   "PRINT",
+   "doPrintShowFeatures"
+  ],
+  [
+   "main",
+   "print",
+   "gal",
+   "PRINT",
+   "doPrintShowGAL"
+  ],
+  [
+   "main",
+   "print",
+   "group",
+   "PRINT",
+   "doPrintGroups"
+  ],
+  [
+   "main",
+   "print",
+   "groupmembers",
+   "PRINT",
+   "doPrintGroupMembers"
+  ],
+  [
+   "main",
+   "print",
+   "grouptree",
+   "PRINT",
+   "doPrintShowGroupTree"
+  ],
+  [
+   "main",
+   "print",
+   "guardian",
+   "PRINT",
+   "doPrintShowGuardians"
+  ],
+  [
+   "main",
+   "print",
+   "inboundssoassignment",
+   "PRINT",
+   "doPrintShowInboundSSOAssignments"
+  ],
+  [
+   "main",
+   "print",
+   "inboundssocredential",
+   "PRINT",
+   "doPrintShowInboundSSOCredentials"
+  ],
+  [
+   "main",
+   "print",
+   "inboundssoprofile",
+   "PRINT",
+   "doPrintShowInboundSSOProfiles"
+  ],
+  [
+   "main",
+   "print",
+   "license",
+   "PRINT",
+   "doPrintLicenses"
+  ],
+  [
+   "main",
+   "print",
+   "mobile",
+   "PRINT",
+   "doPrintMobileDevices"
+  ],
+  [
+   "main",
+   "print",
+   "org",
+   "PRINT",
+   "doPrintOrgs"
+  ],
+  [
+   "main",
+   "print",
+   "orgs",
+   "PRINT",
+   "doPrintOrgs"
+  ],
+  [
+   "main",
+   "print",
+   "orgunitshareddrive",
+   "PRINT",
+   "doPrintShowOrgunitSharedDrives"
+  ],
+  [
+   "main",
+   "print",
+   "ownership",
+   "PRINT",
+   "doPrintShowOwnership"
+  ],
+  [
+   "main",
+   "print",
+   "peoplecontact",
+   "PRINT",
+   "doPrintShowDomainPeopleContacts"
+  ],
+  [
+   "main",
+   "print",
+   "peopleprofile",
+   "PRINT",
+   "doPrintShowDomainPeopleProfiles"
+  ],
+  [
+   "main",
+   "print",
+   "printer",
+   "PRINT",
+   "doPrintShowPrinters"
+  ],
+  [
+   "main",
+   "print",
+   "printermodel",
+   "PRINT",
+   "doPrintShowPrinterModels"
+  ],
+  [
+   "main",
+   "print",
+   "privileges",
+   "PRINT",
+   "doPrintShowPrivileges"
+  ],
+  [
+   "main",
+   "print",
+   "project",
+   "PRINT",
+   "doPrintShowProjects"
+  ],
+  [
+   "main",
+   "print",
+   "resoldsubscription",
+   "PRINT",
+   "doPrintShowResoldSubscriptions"
+  ],
+  [
+   "main",
+   "print",
+   "resource",
+   "PRINT",
+   "doPrintShowResourceCalendars"
+  ],
+  [
+   "main",
+   "print",
+   "resources",
+   "PRINT",
+   "doPrintShowResourceCalendars"
+  ],
+  [
+   "main",
+   "print",
+   "schema",
+   "PRINT",
+   "doPrintShowUserSchemas"
+  ],
+  [
+   "main",
+   "print",
+   "shareddrive",
+   "PRINT",
+   "doPrintShowSharedDrives"
+  ],
+  [
+   "main",
+   "print",
+   "shareddriveacls",
+   "PRINT",
+   "doPrintShowSharedDriveACLs"
+  ],
+  [
+   "main",
+   "print",
+   "site",
+   "PRINT",
+   "deprecatedDomainSites"
+  ],
+  [
+   "main",
+   "print",
+   "siteacl",
+   "PRINT",
+   "deprecatedDomainSites"
+  ],
+  [
+   "main",
+   "print",
+   "siteactivity",
+   "PRINT",
+   "deprecatedDomainSites"
+  ],
+  [
+   "main",
+   "print",
+   "svcacct",
+   "PRINT",
+   "doPrintShowSvcAccts"
+  ],
+  [
+   "main",
+   "print",
+   "token",
+   "PRINT",
+   "doPrintShowTokens"
+  ],
+  [
+   "main",
+   "print",
+   "transferapps",
+   "PRINT",
+   "doShowTransferApps"
+  ],
+  [
+   "main",
+   "print",
+   "user",
+   "PRINT",
+   "doPrintUsers"
+  ],
+  [
+   "main",
+   "print",
+   "users",
+   "PRINT",
+   "doPrintUsers"
+  ],
+  [
+   "main",
+   "print",
+   "usercountsbyorgunit",
+   "PRINT",
+   "doPrintUserCountsByOrgUnit"
+  ],
+  [
+   "main",
+   "print",
+   "userinvitation",
+   "PRINT",
+   "doPrintShowCIUserInvitations"
+  ],
+  [
+   "main",
+   "print",
+   "vaultcount",
+   "PRINT",
+   "doPrintVaultCounts"
+  ],
+  [
+   "main",
+   "print",
+   "vaultexport",
+   "PRINT",
+   "doPrintShowVaultExports"
+  ],
+  [
+   "main",
+   "print",
+   "vaulthold",
+   "PRINT",
+   "doPrintShowVaultHolds"
+  ],
+  [
+   "main",
+   "print",
+   "vaultmatter",
+   "PRINT",
+   "doPrintShowVaultMatters"
+  ],
+  [
+   "main",
+   "print",
+   "vaultquery",
+   "PRINT",
+   "doPrintShowVaultQueries"
+  ],
+  [
+   "main",
+   "remove",
+   "alias",
+   "REMOVE",
+   "doRemoveAliases"
+  ],
+  [
+   "main",
+   "remove",
+   "drivelabelpermission",
+   "REMOVE",
+   "doDeleteDriveLabelPermissions"
+  ],
+  [
+   "main",
+   "reopen",
+   "vaultmatter",
+   "REOPEN",
+   "doReopenVaultMatter"
+  ],
+  [
+   "main",
+   "replace",
+   "sakey",
+   "UPDATE",
+   "doReplaceSvcAcctKeys"
+  ],
+  [
+   "main",
+   "rotate",
+   "sakey",
+   "UPDATE",
+   "doProcessSvcAcctKeys"
+  ],
+  [
+   "main",
+   "revoke",
+   "browsertoken",
+   "REVOKE",
+   "doRevokeBrowserToken"
+  ],
+  [
+   "main",
+   "send",
+   "userinvitation",
+   "SEND",
+   "doCIUserInvitationsAction"
+  ],
+  [
+   "main",
+   "setup",
+   "chat",
+   "SETUP",
+   "doSetupChat"
+  ],
+  [
+   "main",
+   "show",
+   "adminrole",
+   "SHOW",
+   "doPrintShowAdminRoles"
+  ],
+  [
+   "main",
+   "show",
+   "admin",
+   "SHOW",
+   "doPrintShowAdmins"
+  ],
+  [
+   "main",
+   "show",
+   "alert",
+   "SHOW",
+   "doPrintShowAlerts"
+  ],
+  [
+   "main",
+   "show",
+   "alertfeedback",
+   "SHOW",
+   "doPrintShowAlertFeedback"
+  ],
+  [
+   "main",
+   "show",
+   "browser",
+   "SHOW",
+   "doPrintShowBrowsers"
+  ],
+  [
+   "main",
+   "show",
+   "browsertoken",
+   "SHOW",
+   "doPrintShowBrowserTokens"
+  ],
+  [
+   "main",
+   "show",
+   "building",
+   "SHOW",
+   "doPrintShowBuildings"
+  ],
+  [
+   "main",
+   "show",
+   "caalevel",
+   "SHOW",
+   "doPrintShowCAALevels"
+  ],
+  [
+   "main",
+   "show",
+   "channelcustomer",
+   "SHOW",
+   "doPrintShowChannelCustomers"
+  ],
+  [
+   "main",
+   "show",
+   "channelcustomerentitlement",
+   "SHOW",
+   "doPrintShowChannelCustomerEntitlements"
+  ],
+  [
+   "main",
+   "show",
+   "channeloffer",
+   "SHOW",
+   "doPrintShowChannelOffers"
+  ],
+  [
+   "main",
+   "show",
+   "channelproduct",
+   "SHOW",
+   "doPrintShowChannelProducts"
+  ],
+  [
+   "main",
+   "show",
+   "channelsku",
+   "SHOW",
+   "doPrintShowChannelSKUs"
+  ],
+  [
+   "main",
+   "show",
+   "chatmember",
+   "SHOW",
+   "doPrintShowChatMembers"
+  ],
+  [
+   "main",
+   "show",
+   "chatspace",
+   "SHOW",
+   "doPrintShowChatSpaces"
+  ],
+  [
+   "main",
+   "show",
+   "chromeapp",
+   "SHOW",
+   "doPrintShowChromeApps"
+  ],
+  [
+   "main",
+   "show",
+   "chromeappdevices",
+   "SHOW",
+   "doPrintShowChromeAppDevices"
+  ],
+  [
+   "main",
+   "show",
+   "chromeaues",
+   "SHOW",
+   "doPrintShowChromeAues"
+  ],
+  [
+   "main",
+   "show",
+   "chromehistory",
+   "SHOW",
+   "doPrintShowChromeHistory"
+  ],
+  [
+   "main",
+   "show",
+   "chromeneedsattn",
+   "SHOW",
+   "doPrintShowChromeNeedsAttn"
+  ],
+  [
+   "main",
+   "show",
+   "chromepolicy",
+   "SHOW",
+   "doPrintShowChromePolicies"
+  ],
+  [
+   "main",
+   "show",
+   "chromeprofile",
+   "SHOW",
+   "doPrintShowChromeProfiles"
+  ],
+  [
+   "main",
+   "show",
+   "chromeschema",
+   "SHOW",
+   "doPrintShowChromeSchemas"
+  ],
+  [
+   "main",
+   "show",
+   "chromeversions",
+   "SHOW",
+   "doPrintShowChromeVersions"
+  ],
+  [
+   "main",
+   "show",
+   "cigroupmembers",
+   "SHOW",
+   "doShowCIGroupMembers"
+  ],
+  [
+   "main",
+   "show",
+   "policy",
+   "SHOW",
+   "doPrintShowCIPolicies"
+  ],
+  [
+   "main",
+   "show",
+   "classroominvitation",
+   "SHOW",
+   "doPrintShowClassroomInvitations"
+  ],
+  [
+   "main",
+   "show",
+   "contact",
+   "SHOW",
+   "doPrintShowDomainContacts"
+  ],
+  [
+   "main",
+   "show",
+   "crostelemetry",
+   "SHOW",
+   "doInfoPrintShowCrOSTelemetry"
+  ],
+  [
+   "main",
+   "show",
+   "datatransfer",
+   "SHOW",
+   "doPrintShowDataTransfers"
+  ],
+  [
+   "main",
+   "show",
+   "domain",
+   "SHOW",
+   "doPrintShowDomains"
+  ],
+  [
+   "main",
+   "show",
+   "domainalias",
+   "SHOW",
+   "doPrintShowDomainAliases"
+  ],
+  [
+   "main",
+   "show",
+   "domaincontact",
+   "SHOW",
+   "doPrintShowDomainContacts"
+  ],
+  [
+   "main",
+   "show",
+   "drivefileacl",
+   "SHOW",
+   "doPrintShowDriveFileACLs"
+  ],
+  [
+   "main",
+   "show",
+   "drivelabel",
+   "SHOW",
+   "doPrintShowDriveLabels"
+  ],
+  [
+   "main",
+   "show",
+   "drivelabelpermission",
+   "SHOW",
+   "doPrintShowDriveLabelPermissions"
+  ],
+  [
+   "main",
+   "show",
+   "feature",
+   "SHOW",
+   "doPrintShowFeatures"
+  ],
+  [
+   "main",
+   "show",
+   "gal",
+   "SHOW",
+   "doPrintShowGAL"
+  ],
+  [
+   "main",
+   "show",
+   "groupmembers",
+   "SHOW",
+   "doShowGroupMembers"
+  ],
+  [
+   "main",
+   "show",
+   "grouptree",
+   "SHOW",
+   "doPrintShowGroupTree"
+  ],
+  [
+   "main",
+   "show",
+   "guardian",
+   "SHOW",
+   "doPrintShowGuardians"
+  ],
+  [
+   "main",
+   "show",
+   "inboundssoassignment",
+   "SHOW",
+   "doPrintShowInboundSSOAssignments"
+  ],
+  [
+   "main",
+   "show",
+   "inboundssocredential",
+   "SHOW",
+   "doPrintShowInboundSSOCredentials"
+  ],
+  [
+   "main",
+   "show",
+   "inboundssoprofile",
+   "SHOW",
+   "doPrintShowInboundSSOProfiles"
+  ],
+  [
+   "main",
+   "show",
+   "orgunitshareddrive",
+   "SHOW",
+   "doPrintShowOrgunitSharedDrives"
+  ],
+  [
+   "main",
+   "show",
+   "license",
+   "SHOW",
+   "doShowLicenses"
+  ],
+  [
+   "main",
+   "show",
+   "orgtree",
+   "SHOW",
+   "doShowOrgTree"
+  ],
+  [
+   "main",
+   "show",
+   "ownership",
+   "SHOW",
+   "doPrintShowOwnership"
+  ],
+  [
+   "main",
+   "show",
+   "peoplecontact",
+   "SHOW",
+   "doPrintShowDomainPeopleContacts"
+  ],
+  [
+   "main",
+   "show",
+   "peopleprofile",
+   "SHOW",
+   "doPrintShowDomainPeopleProfiles"
+  ],
+  [
+   "main",
+   "show",
+   "printer",
+   "SHOW",
+   "doPrintShowPrinters"
+  ],
+  [
+   "main",
+   "show",
+   "printermodel",
+   "SHOW",
+   "doPrintShowPrinterModels"
+  ],
+  [
+   "main",
+   "show",
+   "privileges",
+   "SHOW",
+   "doPrintShowPrivileges"
+  ],
+  [
+   "main",
+   "show",
+   "project",
+   "SHOW",
+   "doPrintShowProjects"
+  ],
+  [
+   "main",
+   "show",
+   "resoldsubscription",
+   "SHOW",
+   "doPrintShowResoldSubscriptions"
+  ],
+  [
+   "main",
+   "show",
+   "resource",
+   "SHOW",
+   "doPrintShowResourceCalendars"
+  ],
+  [
+   "main",
+   "show",
+   "resources",
+   "SHOW",
+   "doPrintShowResourceCalendars"
+  ],
+  [
+   "main",
+   "show",
+   "sakey",
+   "SHOW",
+   "doShowSvcAcctKeys"
+  ],
+  [
+   "main",
+   "show",
+   "schema",
+   "SHOW",
+   "doPrintShowUserSchemas"
+  ],
+  [
+   "main",
+   "show",
+   "shareddrive",
+   "SHOW",
+   "doPrintShowSharedDrives"
+  ],
+  [
+   "main",
+   "show",
+   "shareddriveacls",
+   "SHOW",
+   "doPrintShowSharedDriveACLs"
+  ],
+  [
+   "main",
+   "show",
+   "shareddriveinfo",
+   "SHOW",
+   "doInfoSharedDrive"
+  ],
+  [
+   "main",
+   "show",
+   "shareddrivethemes",
+   "SHOW",
+   "doShowSharedDriveThemes"
+  ],
+  [
+   "main",
+   "show",
+   "site",
+   "SHOW",
+   "deprecatedDomainSites"
+  ],
+  [
+   "main",
+   "show",
+   "siteacl",
+   "SHOW",
+   "deprecatedDomainSites"
+  ],
+  [
+   "main",
+   "show",
+   "svcacct",
+   "SHOW",
+   "doPrintShowSvcAccts"
+  ],
+  [
+   "main",
+   "show",
+   "token",
+   "SHOW",
+   "doPrintShowTokens"
+  ],
+  [
+   "main",
+   "show",
+   "transferapps",
+   "SHOW",
+   "doShowTransferApps"
+  ],
+  [
+   "main",
+   "show",
+   "userinvitation",
+   "SHOW",
+   "doPrintShowCIUserInvitations"
+  ],
+  [
+   "main",
+   "show",
+   "vaultexport",
+   "SHOW",
+   "doPrintShowVaultExports"
+  ],
+  [
+   "main",
+   "show",
+   "vaulthold",
+   "SHOW",
+   "doPrintShowVaultHolds"
+  ],
+  [
+   "main",
+   "show",
+   "vaultmatter",
+   "SHOW",
+   "doPrintShowVaultMatters"
+  ],
+  [
+   "main",
+   "show",
+   "vaultquery",
+   "SHOW",
+   "doPrintShowVaultQueries"
+  ],
+  [
+   "main",
+   "suspend",
+   "user",
+   "SUSPEND",
+   "doSuspendUnsuspendUser"
+  ],
+  [
+   "main",
+   "suspend",
+   "users",
+   "SUSPEND",
+   "doSuspendUnsuspendUsers"
+  ],
+  [
+   "main",
+   "sync",
+   "device",
+   "SYNC",
+   "doSyncCIDevices"
+  ],
+  [
+   "main",
+   "sync",
+   "shareddriveacls",
+   "SYNC",
+   "copySyncSharedDriveACLs"
+  ],
+  [
+   "main",
+   "unhide",
+   "shareddrive",
+   "UNHIDE",
+   "doHideUnhideSharedDrive"
+  ],
+  [
+   "main",
+   "update",
+   "adminrole",
+   "UPDATE",
+   "doCreateUpdateAdminRoles"
+  ],
+  [
+   "main",
+   "update",
+   "alias",
+   "UPDATE",
+   "doCreateUpdateAliases"
+  ],
+  [
+   "main",
+   "update",
+   "browser",
+   "UPDATE",
+   "doUpdateBrowsers"
+  ],
+  [
+   "main",
+   "update",
+   "building",
+   "UPDATE",
+   "doUpdateBuilding"
+  ],
+  [
+   "main",
+   "update",
+   "caalevel",
+   "UPDATE",
+   "doUpdateCAALevel"
+  ],
+  [
+   "main",
+   "update",
+   "chatmessage",
+   "UPDATE",
+   "doUpdateChatMessage"
+  ],
+  [
+   "main",
+   "update",
+   "chromepolicy",
+   "UPDATE",
+   "doUpdateChromePolicy"
+  ],
+  [
+   "main",
+   "update",
+   "cigroup",
+   "UPDATE",
+   "doUpdateCIGroups"
+  ],
+  [
+   "main",
+   "update",
+   "contact",
+   "UPDATE",
+   "doUpdateDomainContacts"
+  ],
+  [
+   "main",
+   "update",
+   "contactphoto",
+   "UPDATE",
+   "doUpdateDomainContactPhoto"
+  ],
+  [
+   "main",
+   "update",
+   "course",
+   "UPDATE",
+   "doUpdateCourse"
+  ],
+  [
+   "main",
+   "update",
+   "courses",
+   "UPDATE",
+   "doUpdateCourses"
+  ],
+  [
+   "main",
+   "update",
+   "cros",
+   "UPDATE",
+   "doUpdateCrOSDevices"
+  ],
+  [
+   "main",
+   "update",
+   "customer",
+   "UPDATE",
+   "doUpdateCustomer"
+  ],
+  [
+   "main",
+   "update",
+   "device",
+   "UPDATE",
+   "doUpdateCIDevice"
+  ],
+  [
+   "main",
+   "update",
+   "deviceuser",
+   "UPDATE",
+   "doUpdateCIDeviceUser"
+  ],
+  [
+   "main",
+   "update",
+   "deviceuserstate",
+   "UPDATE",
+   "doUpdateCIDeviceUserState"
+  ],
+  [
+   "main",
+   "update",
+   "domain",
+   "UPDATE",
+   "doUpdateDomain"
+  ],
+  [
+   "main",
+   "update",
+   "drivefileacl",
+   "UPDATE",
+   "doUpdateDriveFileACLs"
+  ],
+  [
+   "main",
+   "update",
+   "feature",
+   "UPDATE",
+   "doUpdateFeature"
+  ],
+  [
+   "main",
+   "update",
+   "group",
+   "UPDATE",
+   "doUpdateGroups"
+  ],
+  [
+   "main",
+   "update",
+   "inboundssoassignment",
+   "UPDATE",
+   "doUpdateInboundSSOAssignment"
+  ],
+  [
+   "main",
+   "update",
+   "inboundssoprofile",
+   "UPDATE",
+   "doUpdateInboundSSOProfile"
+  ],
+  [
+   "main",
+   "update",
+   "mobile",
+   "UPDATE",
+   "doUpdateMobileDevices"
+  ],
+  [
+   "main",
+   "update",
+   "org",
+   "UPDATE",
+   "doUpdateOrg"
+  ],
+  [
+   "main",
+   "update",
+   "orgs",
+   "UPDATE",
+   "doUpdateOrgs"
+  ],
+  [
+   "main",
+   "update",
+   "printer",
+   "UPDATE",
+   "doUpdatePrinter"
+  ],
+  [
+   "main",
+   "update",
+   "project",
+   "UPDATE",
+   "doUpdateProject"
+  ],
+  [
+   "main",
+   "update",
+   "resoldcustomer",
+   "UPDATE",
+   "doUpdateResoldCustomer"
+  ],
+  [
+   "main",
+   "update",
+   "resoldsubscription",
+   "UPDATE",
+   "doUpdateResoldSubscription"
+  ],
+  [
+   "main",
+   "update",
+   "resource",
+   "UPDATE",
+   "doUpdateResourceCalendar"
+  ],
+  [
+   "main",
+   "update",
+   "resources",
+   "UPDATE",
+   "doUpdateResourceCalendars"
+  ],
+  [
+   "main",
+   "update",
+   "sakey",
+   "UPDATE",
+   "doUpdateSvcAcctKeys"
+  ],
+  [
+   "main",
+   "update",
+   "schema",
+   "UPDATE",
+   "doCreateUpdateUserSchemas"
+  ],
+  [
+   "main",
+   "update",
+   "shareddrive",
+   "UPDATE",
+   "doUpdateSharedDrive"
+  ],
+  [
+   "main",
+   "update",
+   "site",
+   "UPDATE",
+   "deprecatedDomainSites"
+  ],
+  [
+   "main",
+   "update",
+   "siteacl",
+   "UPDATE",
+   "deprecatedDomainSites"
+  ],
+  [
+   "main",
+   "update",
+   "svcacct",
+   "UPDATE",
+   "doCheckUpdateSvcAcct"
+  ],
+  [
+   "main",
+   "update",
+   "user",
+   "UPDATE",
+   "doUpdateUser"
+  ],
+  [
+   "main",
+   "update",
+   "users",
+   "UPDATE",
+   "doUpdateUsers"
+  ],
+  [
+   "main",
+   "update",
+   "vaulthold",
+   "UPDATE",
+   "doUpdateVaultHold"
+  ],
+  [
+   "main",
+   "update",
+   "vaultmatter",
+   "UPDATE",
+   "doUpdateVaultMatter"
+  ],
+  [
+   "main",
+   "update",
+   "verify",
+   "UPDATE",
+   "doUpdateSiteVerification"
+  ],
+  [
+   "main",
+   "undelete",
+   "alert",
+   "UNDELETE",
+   "doDeleteOrUndeleteAlert"
+  ],
+  [
+   "main",
+   "undelete",
+   "user",
+   "UNDELETE",
+   "doUndeleteUser"
+  ],
+  [
+   "main",
+   "undelete",
+   "users",
+   "UNDELETE",
+   "doUndeleteUsers"
+  ],
+  [
+   "main",
+   "undelete",
+   "vaultmatter",
+   "UNDELETE",
+   "doUndeleteVaultMatter"
+  ],
+  [
+   "main",
+   "unsuspend",
+   "user",
+   "UNSUSPEND",
+   "doSuspendUnsuspendUser"
+  ],
+  [
+   "main",
+   "unsuspend",
+   "users",
+   "UNSUSPEND",
+   "doSuspendUnsuspendUsers"
+  ],
+  [
+   "main",
+   "upload",
+   "sakey",
+   "USE",
+   "doUploadSvcAcctKeys"
+  ],
+  [
+   "main",
+   "use",
+   "project",
+   "USE",
+   "doUseProject"
+  ],
+  [
+   "main",
+   "wipe",
+   "device",
+   "WIPE",
+   "doWipeCIDevice"
+  ],
+  [
+   "main",
+   "wipe",
+   "deviceuser",
+   "WIPE",
+   "doWipeCIDeviceUser"
+  ],
+  [
+   "main",
+   "yubikey",
+   "resetpiv",
+   "RESET_YUBIKEY_PIV",
+   "doResetYubiKeyPIV"
+  ],
+  [
+   "user",
+   "delegate",
+   null,
+   "ADD",
+   "delegateTo"
+  ],
+  [
+   "user",
+   "deprovision",
+   null,
+   "DEPROVISION",
+   "deprovisionUser"
+  ],
+  [
+   "user",
+   "draftemail",
+   null,
+   "DRAFT",
+   "draftMessage"
+  ],
+  [
+   "user",
+   "filter",
+   null,
+   "ADD",
+   "createFilter"
+  ],
+  [
+   "user",
+   "forward",
+   null,
+   "SET",
+   "setForward"
+  ],
+  [
+   "user",
+   "imap",
+   null,
+   "SET",
+   "setImap"
+  ],
+  [
+   "user",
+   "importemail",
+   null,
+   "IMPORT",
+   "importMessage"
+  ],
+  [
+   "user",
+   "insertemail",
+   null,
+   "INSERT",
+   "insertMessage"
+  ],
+  [
+   "user",
+   "label",
+   null,
+   "ADD",
+   "createLabel"
+  ],
+  [
+   "user",
+   "list",
+   null,
+   "LIST",
+   "doListUser"
+  ],
+  [
+   "user",
+   "language",
+   null,
+   "SET",
+   "setLanguage"
+  ],
+  [
+   "user",
+   "pop",
+   null,
+   "SET",
+   "setPop"
+  ],
+  [
+   "user",
+   "profile",
+   null,
+   "SET",
+   "setProfile"
+  ],
+  [
+   "user",
+   "sendas",
+   null,
+   "ADD",
+   "createUpdateSendAs"
+  ],
+  [
+   "user",
+   "sendemail",
+   null,
+   "SENDEMAIL",
+   "doSendEmail"
+  ],
+  [
+   "user",
+   "signature",
+   null,
+   "SET",
+   "setSignature"
+  ],
+  [
+   "user",
+   "signout",
+   null,
+   "SIGNOUT",
+   "signoutTurnoff2SVUsers"
+  ],
+  [
+   "user",
+   "turnoff2sv",
+   null,
+   "TURNOFF2SV",
+   "signoutTurnoff2SVUsers"
+  ],
+  [
+   "user",
+   "vacation",
+   null,
+   "SET",
+   "setVacation"
+  ],
+  [
+   "user",
+   "waitformailbox",
+   null,
+   "WAITFORMAILBOX",
+   "waitForMailbox"
+  ],
+  [
+   "user",
+   "accept",
+   "classroominvitation",
+   "ACCEPT",
+   "acceptClassroomInvitations"
+  ],
+  [
+   "user",
+   "add",
+   "calendar",
+   "ADD",
+   "addCreateCalendars"
+  ],
+  [
+   "user",
+   "add",
+   "group",
+   "ADD",
+   "addUserToGroups"
+  ],
+  [
+   "user",
+   "add",
+   "calendaracl",
+   "ADD",
+   "createCalendarACLs"
+  ],
+  [
+   "user",
+   "add",
+   "chatmember",
+   "ADD",
+   "createChatMember"
+  ],
+  [
+   "user",
+   "add",
+   "chatmessage",
+   "ADD",
+   "createChatMessage"
+  ],
+  [
+   "user",
+   "add",
+   "chatspace",
+   "ADD",
+   "createChatSpace"
+  ],
+  [
+   "user",
+   "add",
+   "classroominvitation",
+   "ADD",
+   "createClassroomInvitations"
+  ],
+  [
+   "user",
+   "add",
+   "contactdelegate",
+   "ADD",
+   "processContactDelegates"
+  ],
+  [
+   "user",
+   "add",
+   "cseidentity",
+   "ADD",
+   "createUpdateCSEIdentity"
+  ],
+  [
+   "user",
+   "add",
+   "csekeypair",
+   "ADD",
+   "createCSEKeyPair"
+  ],
+  [
+   "user",
+   "add",
+   "lookerstudiopermission",
+   "ADD",
+   "processLookerStudioPermissions"
+  ],
+  [
+   "user",
+   "add",
+   "delegate",
+   "ADD",
+   "processDelegates"
+  ],
+  [
+   "user",
+   "add",
+   "drivefile",
+   "ADD",
+   "createDriveFile"
+  ],
+  [
+   "user",
+   "add",
+   "drivefileacl",
+   "ADD",
+   "createDriveFileACL"
+  ],
+  [
+   "user",
+   "add",
+   "drivefileshortcut",
+   "ADD",
+   "createDriveFileShortcut"
+  ],
+  [
+   "user",
+   "add",
+   "drivefolderpath",
+   "ADD",
+   "createDriveFolderPath"
+  ],
+  [
+   "user",
+   "add",
+   "drivelabelpermission",
+   "ADD",
+   "createDriveLabelPermissions"
+  ],
+  [
+   "user",
+   "add",
+   "event",
+   "ADD",
+   "createCalendarEvent"
+  ],
+  [
+   "user",
+   "add",
+   "filter",
+   "ADD",
+   "createFilter"
+  ],
+  [
+   "user",
+   "add",
+   "focustime",
+   "ADD",
+   "createFocusTime"
+  ],
+  [
+   "user",
+   "add",
+   "form",
+   "ADD",
+   "createForm"
+  ],
+  [
+   "user",
+   "add",
+   "forwardingaddress",
+   "ADD",
+   "createForwardingAddresses"
+  ],
+  [
+   "user",
+   "add",
+   "guardian",
+   "ADD",
+   "inviteGuardians"
+  ],
+  [
+   "user",
+   "add",
+   "guardianinvitation",
+   "ADD",
+   "inviteGuardians"
+  ],
+  [
+   "user",
+   "add",
+   "label",
+   "ADD",
+   "createLabel"
+  ],
+  [
+   "user",
+   "add",
+   "labellist",
+   "ADD",
+   "createLabelList"
+  ],
+  [
+   "user",
+   "add",
+   "license",
+   "ADD",
+   "createLicense"
+  ],
+  [
+   "user",
+   "add",
+   "meetspace",
+   "ADD",
+   "createMeetSpace"
+  ],
+  [
+   "user",
+   "add",
+   "note",
+   "ADD",
+   "createNote"
+  ],
+  [
+   "user",
+   "add",
+   "noteacl",
+   "ADD",
+   "createNotesACLs"
+  ],
+  [
+   "user",
+   "add",
+   "outofoffice",
+   "ADD",
+   "createOutOfOffice"
+  ],
+  [
+   "user",
+   "add",
+   "peoplecontact",
+   "ADD",
+   "createUserPeopleContact"
+  ],
+  [
+   "user",
+   "add",
+   "peoplecontactgroup",
+   "ADD",
+   "createUserPeopleContactGroup"
+  ],
+  [
+   "user",
+   "add",
+   "permission",
+   "ADD",
+   "createDriveFilePermissions"
+  ],
+  [
+   "user",
+   "add",
+   "sendas",
+   "ADD",
+   "createUpdateSendAs"
+  ],
+  [
+   "user",
+   "add",
+   "shareddrive",
+   "ADD",
+   "createSharedDrive"
+  ],
+  [
+   "user",
+   "add",
+   "sheet",
+   "ADD",
+   "createSheet"
+  ],
+  [
+   "user",
+   "add",
+   "site",
+   "ADD",
+   "deprecatedUserSites"
+  ],
+  [
+   "user",
+   "add",
+   "siteacl",
+   "ADD",
+   "deprecatedUserSites"
+  ],
+  [
+   "user",
+   "add",
+   "smime",
+   "ADD",
+   "createSmime"
+  ],
+  [
+   "user",
+   "add",
+   "task",
+   "ADD",
+   "processTasks"
+  ],
+  [
+   "user",
+   "add",
+   "tasklist",
+   "ADD",
+   "processTasklists"
+  ],
+  [
+   "user",
+   "add",
+   "workinglocation",
+   "ADD",
+   "createWorkingLocation"
+  ],
+  [
+   "user",
+   "append",
+   "sheetrange",
+   "APPEND",
+   "appendSheetRanges"
+  ],
+  [
+   "user",
+   "archive",
+   "message",
+   "ARCHIVE",
+   "archiveMessages"
+  ],
+  [
+   "user",
+   "cancel",
+   "guardianinvitation",
+   "CANCEL",
+   "cancelGuardianInvitations"
+  ],
+  [
+   "user",
+   "check",
+   "drivefileshortcut",
+   "CHECK",
+   "checkDriveFileShortcut"
+  ],
+  [
+   "user",
+   "check",
+   "group",
+   "CHECK",
+   "checkUserInGroups"
+  ],
+  [
+   "user",
+   "check",
+   "isinvitable",
+   "CHECK",
+   "checkCIUserIsInvitable"
+  ],
+  [
+   "user",
+   "check",
+   "serviceaccount",
+   "CHECK",
+   "checkServiceAccount"
+  ],
+  [
+   "user",
+   "claim",
+   "ownership",
+   "CLAIM",
+   "claimOwnership"
+  ],
+  [
+   "user",
+   "clear",
+   "guardian",
+   "CLEAR",
+   "clearGuardians"
+  ],
+  [
+   "user",
+   "clear",
+   "peoplecontact",
+   "CLEAR",
+   "clearUserPeopleContacts"
+  ],
+  [
+   "user",
+   "clear",
+   "sheetrange",
+   "CLEAR",
+   "clearSheetRanges"
+  ],
+  [
+   "user",
+   "clear",
+   "tasklist",
+   "CLEAR",
+   "processTasklists"
+  ],
+  [
+   "user",
+   "collect",
+   "orphans",
+   "COLLECT",
+   "collectOrphans"
+  ],
+  [
+   "user",
+   "copy",
+   "drivefile",
+   "COPY",
+   "copyDriveFile"
+  ],
+  [
+   "user",
+   "copy",
+   "othercontact",
+   "COPY",
+   "copyUserPeopleOtherContacts"
+  ],
+  [
+   "user",
+   "copy",
+   "shareddriveacls",
+   "COPY",
+   "copySyncSharedDriveACLs"
+  ],
+  [
+   "user",
+   "create",
+   "calendar",
+   "CREATE",
+   "addCreateCalendars"
+  ],
+  [
+   "user",
+   "create",
+   "group",
+   "CREATE",
+   "addUserToGroups"
+  ],
+  [
+   "user",
+   "create",
+   "calendaracl",
+   "CREATE",
+   "createCalendarACLs"
+  ],
+  [
+   "user",
+   "create",
+   "chatmember",
+   "CREATE",
+   "createChatMember"
+  ],
+  [
+   "user",
+   "create",
+   "chatmessage",
+   "CREATE",
+   "createChatMessage"
+  ],
+  [
+   "user",
+   "create",
+   "chatspace",
+   "CREATE",
+   "createChatSpace"
+  ],
+  [
+   "user",
+   "create",
+   "classroominvitation",
+   "CREATE",
+   "createClassroomInvitations"
+  ],
+  [
+   "user",
+   "create",
+   "contactdelegate",
+   "CREATE",
+   "processContactDelegates"
+  ],
+  [
+   "user",
+   "create",
+   "cseidentity",
+   "CREATE",
+   "createUpdateCSEIdentity"
+  ],
+  [
+   "user",
+   "create",
+   "csekeypair",
+   "CREATE",
+   "createCSEKeyPair"
+  ],
+  [
+   "user",
+   "create",
+   "lookerstudiopermission",
+   "CREATE",
+   "processLookerStudioPermissions"
+  ],
+  [
+   "user",
+   "create",
+   "delegate",
+   "CREATE",
+   "processDelegates"
+  ],
+  [
+   "user",
+   "create",
+   "drivefile",
+   "CREATE",
+   "createDriveFile"
+  ],
+  [
+   "user",
+   "create",
+   "drivefileacl",
+   "CREATE",
+   "createDriveFileACL"
+  ],
+  [
+   "user",
+   "create",
+   "drivefileshortcut",
+   "CREATE",
+   "createDriveFileShortcut"
+  ],
+  [
+   "user",
+   "create",
+   "drivefolderpath",
+   "CREATE",
+   "createDriveFolderPath"
+  ],
+  [
+   "user",
+   "create",
+   "drivelabelpermission",
+   "CREATE",
+   "createDriveLabelPermissions"
+  ],
+  [
+   "user",
+   "create",
+   "event",
+   "CREATE",
+   "createCalendarEvent"
+  ],
+  [
+   "user",
+   "create",
+   "filter",
+   "CREATE",
+   "createFilter"
+  ],
+  [
+   "user",
+   "create",
+   "focustime",
+   "CREATE",
+   "createFocusTime"
+  ],
+  [
+   "user",
+   "create",
+   "form",
+   "CREATE",
+   "createForm"
+  ],
+  [
+   "user",
+   "create",
+   "forwardingaddress",
+   "CREATE",
+   "createForwardingAddresses"
+  ],
+  [
+   "user",
+   "create",
+   "guardian",
+   "CREATE",
+   "inviteGuardians"
+  ],
+  [
+   "user",
+   "create",
+   "guardianinvitation",
+   "CREATE",
+   "inviteGuardians"
+  ],
+  [
+   "user",
+   "create",
+   "label",
+   "CREATE",
+   "createLabel"
+  ],
+  [
+   "user",
+   "create",
+   "labellist",
+   "CREATE",
+   "createLabelList"
+  ],
+  [
+   "user",
+   "create",
+   "license",
+   "CREATE",
+   "createLicense"
+  ],
+  [
+   "user",
+   "create",
+   "meetspace",
+   "CREATE",
+   "createMeetSpace"
+  ],
+  [
+   "user",
+   "create",
+   "note",
+   "CREATE",
+   "createNote"
+  ],
+  [
+   "user",
+   "create",
+   "noteacl",
+   "CREATE",
+   "createNotesACLs"
+  ],
+  [
+   "user",
+   "create",
+   "outofoffice",
+   "CREATE",
+   "createOutOfOffice"
+  ],
+  [
+   "user",
+   "create",
+   "peoplecontact",
+   "CREATE",
+   "createUserPeopleContact"
+  ],
+  [
+   "user",
+   "create",
+   "peoplecontactgroup",
+   "CREATE",
+   "createUserPeopleContactGroup"
+  ],
+  [
+   "user",
+   "create",
+   "permission",
+   "CREATE",
+   "createDriveFilePermissions"
+  ],
+  [
+   "user",
+   "create",
+   "sendas",
+   "CREATE",
+   "createUpdateSendAs"
+  ],
+  [
+   "user",
+   "create",
+   "shareddrive",
+   "CREATE",
+   "createSharedDrive"
+  ],
+  [
+   "user",
+   "create",
+   "sheet",
+   "CREATE",
+   "createSheet"
+  ],
+  [
+   "user",
+   "create",
+   "site",
+   "CREATE",
+   "deprecatedUserSites"
+  ],
+  [
+   "user",
+   "create",
+   "siteacl",
+   "CREATE",
+   "deprecatedUserSites"
+  ],
+  [
+   "user",
+   "create",
+   "smime",
+   "CREATE",
+   "createSmime"
+  ],
+  [
+   "user",
+   "create",
+   "task",
+   "CREATE",
+   "processTasks"
+  ],
+  [
+   "user",
+   "create",
+   "tasklist",
+   "CREATE",
+   "processTasklists"
+  ],
+  [
+   "user",
+   "create",
+   "workinglocation",
+   "CREATE",
+   "createWorkingLocation"
+  ],
+  [
+   "user",
+   "dedup",
+   "peoplecontact",
+   "DEDUP",
+   "dedupReplaceDomainUserPeopleContacts"
+  ],
+  [
+   "user",
+   "delete",
+   "alias",
+   "DELETE",
+   "deleteUsersAliases"
+  ],
+  [
+   "user",
+   "delete",
+   "asp",
+   "DELETE",
+   "deleteASP"
+  ],
+  [
+   "user",
+   "delete",
+   "backupcode",
+   "DELETE",
+   "deleteBackupCodes"
+  ],
+  [
+   "user",
+   "delete",
+   "calendar",
+   "DELETE",
+   "deleteCalendars"
+  ],
+  [
+   "user",
+   "delete",
+   "calendaracl",
+   "DELETE",
+   "deleteCalendarACLs"
+  ],
+  [
+   "user",
+   "delete",
+   "chatmember",
+   "DELETE",
+   "deleteUpdateChatMember"
+  ],
+  [
+   "user",
+   "delete",
+   "chatmessage",
+   "DELETE",
+   "deleteChatMessage"
+  ],
+  [
+   "user",
+   "delete",
+   "chatspace",
+   "DELETE",
+   "deleteChatSpace"
+  ],
+  [
+   "user",
+   "delete",
+   "classroominvitation",
+   "DELETE",
+   "deleteClassroomInvitations"
+  ],
+  [
+   "user",
+   "delete",
+   "contactdelegate",
+   "DELETE",
+   "processContactDelegates"
+  ],
+  [
+   "user",
+   "delete",
+   "cseidentity",
+   "DELETE",
+   "processCSEIdentity"
+  ],
+  [
+   "user",
+   "delete",
+   "lookerstudiopermission",
+   "DELETE",
+   "processLookerStudioPermissions"
+  ],
+  [
+   "user",
+   "delete",
+   "delegate",
+   "DELETE",
+   "processDelegates"
+  ],
+  [
+   "user",
+   "delete",
+   "drivefile",
+   "DELETE",
+   "deleteDriveFile"
+  ],
+  [
+   "user",
+   "delete",
+   "drivefileacl",
+   "DELETE",
+   "deleteDriveFileACLs"
+  ],
+  [
+   "user",
+   "delete",
+   "drivelabelpermission",
+   "DELETE",
+   "deleteDriveLabelPermissions"
+  ],
+  [
+   "user",
+   "delete",
+   "emptydrivefolders",
+   "DELETE",
+   "deleteEmptyDriveFolders"
+  ],
+  [
+   "user",
+   "delete",
+   "event",
+   "DELETE",
+   "deleteCalendarEvents"
+  ],
+  [
+   "user",
+   "delete",
+   "filerevision",
+   "DELETE",
+   "deleteFileRevisions"
+  ],
+  [
+   "user",
+   "delete",
+   "filter",
+   "DELETE",
+   "deleteFilters"
+  ],
+  [
+   "user",
+   "delete",
+   "focustime",
+   "DELETE",
+   "deleteFocusTime"
+  ],
+  [
+   "user",
+   "delete",
+   "forwardingaddress",
+   "DELETE",
+   "deleteForwardingAddresses"
+  ],
+  [
+   "user",
+   "delete",
+   "group",
+   "DELETE",
+   "deleteUserFromGroups"
+  ],
+  [
+   "user",
+   "delete",
+   "guardian",
+   "DELETE",
+   "deleteGuardians"
+  ],
+  [
+   "user",
+   "delete",
+   "label",
+   "DELETE",
+   "deleteLabel"
+  ],
+  [
+   "user",
+   "delete",
+   "labellist",
+   "DELETE",
+   "deleteLabelList"
+  ],
+  [
+   "user",
+   "delete",
+   "labelid",
+   "DELETE",
+   "deleteLabelId"
+  ],
+  [
+   "user",
+   "delete",
+   "labelidlist",
+   "DELETE",
+   "deleteLabelIdList"
+  ],
+  [
+   "user",
+   "delete",
+   "license",
+   "DELETE",
+   "deleteLicense"
+  ],
+  [
+   "user",
+   "delete",
+   "message",
+   "DELETE",
+   "processMessages"
+  ],
+  [
+   "user",
+   "delete",
+   "note",
+   "DELETE",
+   "deleteInfoNotes"
+  ],
+  [
+   "user",
+   "delete",
+   "noteacl",
+   "DELETE",
+   "deleteNotesACLs"
+  ],
+  [
+   "user",
+   "delete",
+   "outofoffice",
+   "DELETE",
+   "deleteOutOfOffice"
+  ],
+  [
+   "user",
+   "delete",
+   "othercontact",
+   "DELETE",
+   "processUserPeopleOtherContacts"
+  ],
+  [
+   "user",
+   "delete",
+   "peoplecontact",
+   "DELETE",
+   "deleteUserPeopleContacts"
+  ],
+  [
+   "user",
+   "delete",
+   "peoplecontactgroup",
+   "DELETE",
+   "deleteUserPeopleContactGroups"
+  ],
+  [
+   "user",
+   "delete",
+   "peoplecontactphoto",
+   "DELETE",
+   "deleteUserPeopleContactPhoto"
+  ],
+  [
+   "user",
+   "delete",
+   "permission",
+   "DELETE",
+   "deletePermissions"
+  ],
+  [
+   "user",
+   "delete",
+   "photo",
+   "DELETE",
+   "deletePhoto"
+  ],
+  [
+   "user",
+   "delete",
+   "sendas",
+   "DELETE",
+   "deleteInfoSendAs"
+  ],
+  [
+   "user",
+   "delete",
+   "smime",
+   "DELETE",
+   "deleteSmime"
+  ],
+  [
+   "user",
+   "delete",
+   "shareddrive",
+   "DELETE",
+   "deleteSharedDrive"
+  ],
+  [
+   "user",
+   "delete",
+   "siteacl",
+   "DELETE",
+   "deprecatedUserSites"
+  ],
+  [
+   "user",
+   "delete",
+   "task",
+   "DELETE",
+   "processTasks"
+  ],
+  [
+   "user",
+   "delete",
+   "tasklist",
+   "DELETE",
+   "processTasklists"
+  ],
+  [
+   "user",
+   "delete",
+   "thread",
+   "DELETE",
+   "processThreads"
+  ],
+  [
+   "user",
+   "delete",
+   "token",
+   "DELETE",
+   "deleteTokens"
+  ],
+  [
+   "user",
+   "delete",
+   "user",
+   "DELETE",
+   "deleteUsers"
+  ],
+  [
+   "user",
+   "delete",
+   "workinglocation",
+   "DELETE",
+   "deleteWorkingLocation"
+  ],
+  [
+   "user",
+   "disable",
+   "csekeypair",
+   "DISABLE",
+   "processCSEKeyPair"
+  ],
+  [
+   "user",
+   "draft",
+   "message",
+   "DRAFT",
+   "draftMessage"
+  ],
+  [
+   "user",
+   "empty",
+   "calendartrash",
+   "EMPTY",
+   "emptyCalendarTrash"
+  ],
+  [
+   "user",
+   "empty",
+   "drivetrash",
+   "EMPTY",
+   "emptyDriveTrash"
+  ],
+  [
+   "user",
+   "enable",
+   "csekeypair",
+   "ENABLE",
+   "processCSEKeyPair"
+  ],
+  [
+   "user",
+   "end",
+   "meetconference",
+   "END",
+   "endMeetConference"
+  ],
+  [
+   "user",
+   "export",
+   "message",
+   "EXPORT",
+   "exportMessages"
+  ],
+  [
+   "user",
+   "export",
+   "thread",
+   "EXPORT",
+   "exportThreads"
+  ],
+  [
+   "user",
+   "get",
+   "document",
+   "DOWNLOAD",
+   "getGoogleDocument"
+  ],
+  [
+   "user",
+   "get",
+   "drivefile",
+   "DOWNLOAD",
+   "getDriveFile"
+  ],
+  [
+   "user",
+   "get",
+   "noteattachment",
+   "DOWNLOAD",
+   "getNoteAttachments"
+  ],
+  [
+   "user",
+   "get",
+   "peoplecontactphoto",
+   "DOWNLOAD",
+   "getUserPeopleContactPhoto"
+  ],
+  [
+   "user",
+   "get",
+   "photo",
+   "DOWNLOAD",
+   "getUserPhoto"
+  ],
+  [
+   "user",
+   "get",
+   "profilephoto",
+   "DOWNLOAD",
+   "getProfilePhoto"
+  ],
+  [
+   "user",
+   "hide",
+   "shareddrive",
+   "HIDE",
+   "hideUnhideSharedDrive"
+  ],
+  [
+   "user",
+   "import",
+   "event",
+   "IMPORT",
+   "importCalendarEvent"
+  ],
+  [
+   "user",
+   "import",
+   "message",
+   "IMPORT",
+   "importMessage"
+  ],
+  [
+   "user",
+   "import",
+   "tasklist",
+   "IMPORT",
+   "importTasklist"
+  ],
+  [
+   "user",
+   "info",
+   "calendar",
+   "INFO",
+   "infoCalendars"
+  ],
+  [
+   "user",
+   "info",
+   "calendaracl",
+   "INFO",
+   "infoCalendarACLs"
+  ],
+  [
+   "user",
+   "info",
+   "chatevent",
+   "INFO",
+   "infoChatEvent"
+  ],
+  [
+   "user",
+   "info",
+   "chatmember",
+   "INFO",
+   "infoChatMember"
+  ],
+  [
+   "user",
+   "info",
+   "chatmessage",
+   "INFO",
+   "infoChatMessage"
+  ],
+  [
+   "user",
+   "info",
+   "chatspace",
+   "INFO",
+   "infoChatSpace"
+  ],
+  [
+   "user",
+   "info",
+   "chatspacedm",
+   "INFO",
+   "infoChatSpaceDM"
+  ],
+  [
+   "user",
+   "info",
+   "cigroupmembers",
+   "INFO",
+   "infoCIGroupMembers"
+  ],
+  [
+   "user",
+   "info",
+   "cseidentity",
+   "INFO",
+   "processCSEIdentity"
+  ],
+  [
+   "user",
+   "info",
+   "csekeypair",
+   "INFO",
+   "processCSEKeyPair"
+  ],
+  [
+   "user",
+   "info",
+   "drivefile",
+   "INFO",
+   "showFileInfo"
+  ],
+  [
+   "user",
+   "info",
+   "drivefileacl",
+   "INFO",
+   "infoDriveFileACLs"
+  ],
+  [
+   "user",
+   "info",
+   "drivelabel",
+   "INFO",
+   "infoDriveLabels"
+  ],
+  [
+   "user",
+   "info",
+   "event",
+   "INFO",
+   "infoCalendarEvents"
+  ],
+  [
+   "user",
+   "info",
+   "filter",
+   "INFO",
+   "infoFilters"
+  ],
+  [
+   "user",
+   "info",
+   "forwardingaddress",
+   "INFO",
+   "infoForwardingAddresses"
+  ],
+  [
+   "user",
+   "info",
+   "groupmembers",
+   "INFO",
+   "infoGroupMembers"
+  ],
+  [
+   "user",
+   "info",
+   "meetspace",
+   "INFO",
+   "infoMeetSpace"
+  ],
+  [
+   "user",
+   "info",
+   "note",
+   "INFO",
+   "deleteInfoNotes"
+  ],
+  [
+   "user",
+   "info",
+   "peoplecontact",
+   "INFO",
+   "infoUserPeopleContacts"
+  ],
+  [
+   "user",
+   "info",
+   "peoplecontactgroup",
+   "INFO",
+   "infoUserPeopleContactGroups"
+  ],
+  [
+   "user",
+   "info",
+   "sendas",
+   "INFO",
+   "deleteInfoSendAs"
+  ],
+  [
+   "user",
+   "info",
+   "shareddrive",
+   "INFO",
+   "infoSharedDrive"
+  ],
+  [
+   "user",
+   "info",
+   "sheet",
+   "INFO",
+   "infoPrintShowSheets"
+  ],
+  [
+   "user",
+   "info",
+   "site",
+   "INFO",
+   "deprecatedUserSites"
+  ],
+  [
+   "user",
+   "info",
+   "siteacl",
+   "INFO",
+   "deprecatedUserSites"
+  ],
+  [
+   "user",
+   "info",
+   "task",
+   "INFO",
+   "processTasks"
+  ],
+  [
+   "user",
+   "info",
+   "tasklist",
+   "INFO",
+   "processTasklists"
+  ],
+  [
+   "user",
+   "info",
+   "user",
+   "INFO",
+   "infoUsers"
+  ],
+  [
+   "user",
+   "insert",
+   "message",
+   "INSERT",
+   "insertMessage"
+  ],
+  [
+   "user",
+   "modify",
+   "calendar",
+   "MODIFY",
+   "modifyCalendars"
+  ],
+  [
+   "user",
+   "modify",
+   "chatmember",
+   "MODIFY",
+   "deleteUpdateChatMember"
+  ],
+  [
+   "user",
+   "modify",
+   "message",
+   "MODIFY",
+   "processMessages"
+  ],
+  [
+   "user",
+   "modify",
+   "thread",
+   "MODIFY",
+   "processThreads"
+  ],
+  [
+   "user",
+   "move",
+   "drivefile",
+   "MOVE",
+   "moveDriveFile"
+  ],
+  [
+   "user",
+   "move",
+   "event",
+   "MOVE",
+   "moveCalendarEvents"
+  ],
+  [
+   "user",
+   "move",
+   "othercontact",
+   "MOVE",
+   "processUserPeopleOtherContacts"
+  ],
+  [
+   "user",
+   "move",
+   "task",
+   "MOVE",
+   "processTasks"
+  ],
+  [
+   "user",
+   "obliterate",
+   "csekeypair",
+   "OBLITERATE",
+   "processCSEKeyPair"
+  ],
+  [
+   "user",
+   "purge",
+   "drivefile",
+   "PURGE",
+   "purgeDriveFile"
+  ],
+  [
+   "user",
+   "purge",
+   "event",
+   "PURGE",
+   "purgeCalendarEvents"
+  ],
+  [
+   "user",
+   "print",
+   "analyticaccount",
+   "PRINT",
+   "printShowAnalyticAccounts"
+  ],
+  [
+   "user",
+   "print",
+   "analyticaccountsummary",
+   "PRINT",
+   "printShowAnalyticAccountSummaries"
+  ],
+  [
+   "user",
+   "print",
+   "analyticdatastream",
+   "PRINT",
+   "printShowAnalyticDatastreams"
+  ],
+  [
+   "user",
+   "print",
+   "analyticproperty",
+   "PRINT",
+   "printShowAnalyticProperties"
+  ],
+  [
+   "user",
+   "print",
+   "analyticuaproperty",
+   "PRINT",
+   "printShowAnalyticUAProperties"
+  ],
+  [
+   "user",
+   "print",
+   "asp",
+   "PRINT",
+   "printShowASPs"
+  ],
+  [
+   "user",
+   "print",
+   "backupcode",
+   "PRINT",
+   "printShowBackupCodes"
+  ],
+  [
+   "user",
+   "print",
+   "calendar",
+   "PRINT",
+   "printShowCalendars"
+  ],
+  [
+   "user",
+   "print",
+   "calendaracl",
+   "PRINT",
+   "printShowCalendarACLs"
+  ],
+  [
+   "user",
+   "print",
+   "calsettings",
+   "PRINT",
+   "printShowCalSettings"
+  ],
+  [
+   "user",
+   "print",
+   "chatevent",
+   "PRINT",
+   "printShowChatEvents"
+  ],
+  [
+   "user",
+   "print",
+   "chatmember",
+   "PRINT",
+   "printShowChatMembers"
+  ],
+  [
+   "user",
+   "print",
+   "chatmessage",
+   "PRINT",
+   "printShowChatMessages"
+  ],
+  [
+   "user",
+   "print",
+   "chatspace",
+   "PRINT",
+   "printShowChatSpaces"
+  ],
+  [
+   "user",
+   "print",
+   "classroominvitation",
+   "PRINT",
+   "printShowClassroomInvitations"
+  ],
+  [
+   "user",
+   "print",
+   "classroomprofile",
+   "PRINT",
+   "printShowClassroomProfile"
+  ],
+  [
+   "user",
+   "print",
+   "contactdelegate",
+   "PRINT",
+   "printShowContactDelegates"
+  ],
+  [
+   "user",
+   "print",
+   "cseidentity",
+   "PRINT",
+   "printShowCSEIdentities"
+  ],
+  [
+   "user",
+   "print",
+   "csekeypair",
+   "PRINT",
+   "printShowCSEKeyPairs"
+  ],
+  [
+   "user",
+   "print",
+   "lookerstudioasset",
+   "PRINT",
+   "printShowLookerStudioAssets"
+  ],
+  [
+   "user",
+   "print",
+   "lookerstudiopermission",
+   "PRINT",
+   "printShowLookerStudioPermissions"
+  ],
+  [
+   "user",
+   "print",
+   "delegate",
+   "PRINT",
+   "printShowDelegates"
+  ],
+  [
+   "user",
+   "print",
+   "diskusage",
+   "PRINT",
+   "printDiskUsage"
+  ],
+  [
+   "user",
+   "print",
+   "driveactivity",
+   "PRINT",
+   "printDriveActivity"
+  ],
+  [
+   "user",
+   "print",
+   "drivefileacl",
+   "PRINT",
+   "printShowDriveFileACLs"
+  ],
+  [
+   "user",
+   "print",
+   "drivelabel",
+   "PRINT",
+   "printShowDriveLabels"
+  ],
+  [
+   "user",
+   "print",
+   "drivelabelpermission",
+   "PRINT",
+   "printShowDriveLabelPermissions"
+  ],
+  [
+   "user",
+   "print",
+   "drivelastmodification",
+   "PRINT",
+   "printShowDrivelastModifications"
+  ],
+  [
+   "user",
+   "print",
+   "drivesettings",
+   "PRINT",
+   "printShowDriveSettings"
+  ],
+  [
+   "user",
+   "print",
+   "emptydrivefolders",
+   "PRINT",
+   "printEmptyDriveFolders"
+  ],
+  [
+   "user",
+   "print",
+   "event",
+   "PRINT",
+   "printShowCalendarEvents"
+  ],
+  [
+   "user",
+   "print",
+   "filecomment",
+   "PRINT",
+   "printShowFileComments"
+  ],
+  [
+   "user",
+   "print",
+   "filecount",
+   "PRINT",
+   "printShowFileCounts"
+  ],
+  [
+   "user",
+   "print",
+   "fileinfo",
+   "PRINT",
+   "showFileInfo"
+  ],
+  [
+   "user",
+   "print",
+   "filelist",
+   "PRINT",
+   "printFileList"
+  ],
+  [
+   "user",
+   "print",
+   "filepath",
+   "PRINT",
+   "printShowFilePaths"
+  ],
+  [
+   "user",
+   "print",
+   "filerevision",
+   "PRINT",
+   "printShowFileRevisions"
+  ],
+  [
+   "user",
+   "print",
+   "filesharecount",
+   "PRINT",
+   "printShowFileShareCounts"
+  ],
+  [
+   "user",
+   "print",
+   "filetree",
+   "PRINT",
+   "printShowFileTree"
+  ],
+  [
+   "user",
+   "print",
+   "filter",
+   "PRINT",
+   "printShowFilters"
+  ],
+  [
+   "user",
+   "print",
+   "focustime",
+   "PRINT",
+   "printShowFocusTime"
+  ],
+  [
+   "user",
+   "print",
+   "form",
+   "PRINT",
+   "printShowForms"
+  ],
+  [
+   "user",
+   "print",
+   "formresponse",
+   "PRINT",
+   "printShowFormResponses"
+  ],
+  [
+   "user",
+   "print",
+   "forward",
+   "PRINT",
+   "printShowForward"
+  ],
+  [
+   "user",
+   "print",
+   "forwardingaddress",
+   "PRINT",
+   "printShowForwardingAddresses"
+  ],
+  [
+   "user",
+   "print",
+   "gmailprofile",
+   "PRINT",
+   "printShowGmailProfile"
+  ],
+  [
+   "user",
+   "print",
+   "group",
+   "PRINT",
+   "printShowUserGroups"
+  ],
+  [
+   "user",
+   "print",
+   "groupslist",
+   "PRINT",
+   "printUserGroupsList"
+  ],
+  [
+   "user",
+   "print",
+   "grouptree",
+   "PRINT",
+   "printShowGroupTree"
+  ],
+  [
+   "user",
+   "print",
+   "guardian",
+   "PRINT",
+   "printShowGuardians"
+  ],
+  [
+   "user",
+   "print",
+   "imap",
+   "PRINT",
+   "printShowImap"
+  ],
+  [
+   "user",
+   "print",
+   "label",
+   "PRINT",
+   "printShowLabels"
+  ],
+  [
+   "user",
+   "print",
+   "language",
+   "PRINT",
+   "printShowLanguage"
+  ],
+  [
+   "user",
+   "print",
+   "meetconference",
+   "PRINT",
+   "printShowMeetConferences"
+  ],
+  [
+   "user",
+   "print",
+   "meetparticipant",
+   "PRINT",
+   "printShowMeetParticipants"
+  ],
+  [
+   "user",
+   "print",
+   "meetrecording",
+   "PRINT",
+   "printShowMeetRecordings"
+  ],
+  [
+   "user",
+   "print",
+   "meettranscript",
+   "PRINT",
+   "printShowMeetTranscripts"
+  ],
+  [
+   "user",
+   "print",
+   "message",
+   "PRINT",
+   "printShowMessages"
+  ],
+  [
+   "user",
+   "print",
+   "note",
+   "PRINT",
+   "printShowNotes"
+  ],
+  [
+   "user",
+   "print",
+   "othercontact",
+   "PRINT",
+   "printShowUserPeopleOtherContacts"
+  ],
+  [
+   "user",
+   "print",
+   "outofoffice",
+   "PRINT",
+   "printShowOutOfOffice"
+  ],
+  [
+   "user",
+   "print",
+   "fileparenttree",
+   "PRINT",
+   "printFileParentTree"
+  ],
+  [
+   "user",
+   "print",
+   "peoplecontact",
+   "PRINT",
+   "printShowUserPeopleContacts"
+  ],
+  [
+   "user",
+   "print",
+   "peoplecontactgroup",
+   "PRINT",
+   "printShowUserPeopleContactGroups"
+  ],
+  [
+   "user",
+   "print",
+   "peopleprofile",
+   "PRINT",
+   "printShowUserPeopleProfiles"
+  ],
+  [
+   "user",
+   "print",
+   "pop",
+   "PRINT",
+   "printShowPop"
+  ],
+  [
+   "user",
+   "print",
+   "sendas",
+   "PRINT",
+   "printShowSendAs"
+  ],
+  [
+   "user",
+   "print",
+   "shareddrive",
+   "PRINT",
+   "printShowSharedDrives"
+  ],
+  [
+   "user",
+   "print",
+   "shareddriveacls",
+   "PRINT",
+   "printShowSharedDriveACLs"
+  ],
+  [
+   "user",
+   "print",
+   "sheet",
+   "PRINT",
+   "infoPrintShowSheets"
+  ],
+  [
+   "user",
+   "print",
+   "sheetrange",
+   "PRINT",
+   "printShowSheetRanges"
+  ],
+  [
+   "user",
+   "print",
+   "signature",
+   "PRINT",
+   "printShowSignature"
+  ],
+  [
+   "user",
+   "print",
+   "smime",
+   "PRINT",
+   "printShowSmimes"
+  ],
+  [
+   "user",
+   "print",
+   "site",
+   "PRINT",
+   "deprecatedUserSites"
+  ],
+  [
+   "user",
+   "print",
+   "siteacl",
+   "PRINT",
+   "deprecatedUserSites"
+  ],
+  [
+   "user",
+   "print",
+   "siteactivity",
+   "PRINT",
+   "deprecatedUserSites"
+  ],
+  [
+   "user",
+   "print",
+   "task",
+   "PRINT",
+   "printShowTasks"
+  ],
+  [
+   "user",
+   "print",
+   "tasklist",
+   "PRINT",
+   "printShowTasklists"
+  ],
+  [
+   "user",
+   "print",
+   "thread",
+   "PRINT",
+   "printShowThreads"
+  ],
+  [
+   "user",
+   "print",
+   "token",
+   "PRINT",
+   "printShowTokens"
+  ],
+  [
+   "user",
+   "print",
+   "user",
+   "PRINT",
+   "doPrintUserEntity"
+  ],
+  [
+   "user",
+   "print",
+   "userlist",
+   "PRINT",
+   "doPrintUserList"
+  ],
+  [
+   "user",
+   "print",
+   "vacation",
+   "PRINT",
+   "printShowVacation"
+  ],
+  [
+   "user",
+   "print",
+   "vaulthold",
+   "PRINT",
+   "printShowUserVaultHolds"
+  ],
+  [
+   "user",
+   "print",
+   "workinglocation",
+   "PRINT",
+   "printShowWorkingLocation"
+  ],
+  [
+   "user",
+   "print",
+   "youtubechannel",
+   "PRINT",
+   "printShowYouTubeChannel"
+  ],
+  [
+   "user",
+   "process",
+   "filedrivelabel",
+   "PROCESS",
+   "processFileDriveLabels"
+  ],
+  [
+   "user",
+   "remove",
+   "calendar",
+   "REMOVE",
+   "removeCalendars"
+  ],
+  [
+   "user",
+   "remove",
+   "chatmember",
+   "REMOVE",
+   "deleteUpdateChatMember"
+  ],
+  [
+   "user",
+   "remove",
+   "drivelabelpermission",
+   "REMOVE",
+   "deleteDriveLabelPermissions"
+  ],
+  [
+   "user",
+   "replacedomain",
+   "peoplecontact",
+   "REPLACE_DOMAIN",
+   "dedupReplaceDomainUserPeopleContacts"
+  ],
+  [
+   "user",
+   "show",
+   "analyticaccount",
+   "SHOW",
+   "printShowAnalyticAccounts"
+  ],
+  [
+   "user",
+   "show",
+   "analyticaccountsummary",
+   "SHOW",
+   "printShowAnalyticAccountSummaries"
+  ],
+  [
+   "user",
+   "show",
+   "analyticdatastream",
+   "SHOW",
+   "printShowAnalyticDatastreams"
+  ],
+  [
+   "user",
+   "show",
+   "analyticproperty",
+   "SHOW",
+   "printShowAnalyticProperties"
+  ],
+  [
+   "user",
+   "show",
+   "analyticuaproperty",
+   "SHOW",
+   "printShowAnalyticUAProperties"
+  ],
+  [
+   "user",
+   "show",
+   "asp",
+   "SHOW",
+   "printShowASPs"
+  ],
+  [
+   "user",
+   "show",
+   "backupcode",
+   "SHOW",
+   "printShowBackupCodes"
+  ],
+  [
+   "user",
+   "show",
+   "calendar",
+   "SHOW",
+   "printShowCalendars"
+  ],
+  [
+   "user",
+   "show",
+   "calendaracl",
+   "SHOW",
+   "printShowCalendarACLs"
+  ],
+  [
+   "user",
+   "show",
+   "calsettings",
+   "SHOW",
+   "printShowCalSettings"
+  ],
+  [
+   "user",
+   "show",
+   "chatevent",
+   "SHOW",
+   "printShowChatEvents"
+  ],
+  [
+   "user",
+   "show",
+   "chatmember",
+   "SHOW",
+   "printShowChatMembers"
+  ],
+  [
+   "user",
+   "show",
+   "chatmessage",
+   "SHOW",
+   "printShowChatMessages"
+  ],
+  [
+   "user",
+   "show",
+   "chatspace",
+   "SHOW",
+   "printShowChatSpaces"
+  ],
+  [
+   "user",
+   "show",
+   "classroominvitation",
+   "SHOW",
+   "printShowClassroomInvitations"
+  ],
+  [
+   "user",
+   "show",
+   "classroomprofile",
+   "SHOW",
+   "printShowClassroomProfile"
+  ],
+  [
+   "user",
+   "show",
+   "contactdelegate",
+   "SHOW",
+   "printShowContactDelegates"
+  ],
+  [
+   "user",
+   "show",
+   "count",
+   "SHOW",
+   "showCountUser"
+  ],
+  [
+   "user",
+   "show",
+   "cseidentity",
+   "SHOW",
+   "printShowCSEIdentities"
+  ],
+  [
+   "user",
+   "show",
+   "csekeypair",
+   "SHOW",
+   "printShowCSEKeyPairs"
+  ],
+  [
+   "user",
+   "show",
+   "lookerstudioasset",
+   "SHOW",
+   "printShowLookerStudioAssets"
+  ],
+  [
+   "user",
+   "show",
+   "lookerstudiopermission",
+   "SHOW",
+   "printShowLookerStudioPermissions"
+  ],
+  [
+   "user",
+   "show",
+   "delegate",
+   "SHOW",
+   "printShowDelegates"
+  ],
+  [
+   "user",
+   "show",
+   "diskusage",
+   "SHOW",
+   "printDiskUsage"
+  ],
+  [
+   "user",
+   "show",
+   "driveactivity",
+   "SHOW",
+   "printDriveActivity"
+  ],
+  [
+   "user",
+   "show",
+   "drivefileacl",
+   "SHOW",
+   "printShowDriveFileACLs"
+  ],
+  [
+   "user",
+   "show",
+   "drivelabel",
+   "SHOW",
+   "printShowDriveLabels"
+  ],
+  [
+   "user",
+   "show",
+   "drivelabelpermission",
+   "SHOW",
+   "printShowDriveLabelPermissions"
+  ],
+  [
+   "user",
+   "show",
+   "drivelastmodification",
+   "SHOW",
+   "printShowDrivelastModifications"
+  ],
+  [
+   "user",
+   "show",
+   "drivesettings",
+   "SHOW",
+   "printShowDriveSettings"
+  ],
+  [
+   "user",
+   "show",
+   "event",
+   "SHOW",
+   "printShowCalendarEvents"
+  ],
+  [
+   "user",
+   "show",
+   "filecomment",
+   "SHOW",
+   "printShowFileComments"
+  ],
+  [
+   "user",
+   "show",
+   "filecount",
+   "SHOW",
+   "printShowFileCounts"
+  ],
+  [
+   "user",
+   "show",
+   "fileinfo",
+   "SHOW",
+   "showFileInfo"
+  ],
+  [
+   "user",
+   "show",
+   "filelist",
+   "SHOW",
+   "printFileList"
+  ],
+  [
+   "user",
+   "show",
+   "filepath",
+   "SHOW",
+   "printShowFilePaths"
+  ],
+  [
+   "user",
+   "show",
+   "filerevision",
+   "SHOW",
+   "printShowFileRevisions"
+  ],
+  [
+   "user",
+   "show",
+   "filesharecount",
+   "SHOW",
+   "printShowFileShareCounts"
+  ],
+  [
+   "user",
+   "show",
+   "filetree",
+   "SHOW",
+   "printShowFileTree"
+  ],
+  [
+   "user",
+   "show",
+   "filter",
+   "SHOW",
+   "printShowFilters"
+  ],
+  [
+   "user",
+   "show",
+   "focustime",
+   "SHOW",
+   "printShowFocusTime"
+  ],
+  [
+   "user",
+   "show",
+   "form",
+   "SHOW",
+   "printShowForms"
+  ],
+  [
+   "user",
+   "show",
+   "formresponse",
+   "SHOW",
+   "printShowFormResponses"
+  ],
+  [
+   "user",
+   "show",
+   "forward",
+   "SHOW",
+   "printShowForward"
+  ],
+  [
+   "user",
+   "show",
+   "forwardingaddress",
+   "SHOW",
+   "printShowForwardingAddresses"
+  ],
+  [
+   "user",
+   "show",
+   "gmailprofile",
+   "SHOW",
+   "printShowGmailProfile"
+  ],
+  [
+   "user",
+   "show",
+   "group",
+   "SHOW",
+   "printShowUserGroups"
+  ],
+  [
+   "user",
+   "show",
+   "grouptree",
+   "SHOW",
+   "printShowGroupTree"
+  ],
+  [
+   "user",
+   "show",
+   "guardian",
+   "SHOW",
+   "printShowGuardians"
+  ],
+  [
+   "user",
+   "show",
+   "imap",
+   "SHOW",
+   "printShowImap"
+  ],
+  [
+   "user",
+   "show",
+   "label",
+   "SHOW",
+   "printShowLabels"
+  ],
+  [
+   "user",
+   "show",
+   "language",
+   "SHOW",
+   "printShowLanguage"
+  ],
+  [
+   "user",
+   "show",
+   "meetconference",
+   "SHOW",
+   "printShowMeetConferences"
+  ],
+  [
+   "user",
+   "show",
+   "meetparticipant",
+   "SHOW",
+   "printShowMeetParticipants"
+  ],
+  [
+   "user",
+   "show",
+   "meetrecording",
+   "SHOW",
+   "printShowMeetRecordings"
+  ],
+  [
+   "user",
+   "show",
+   "meettranscript",
+   "SHOW",
+   "printShowMeetTranscripts"
+  ],
+  [
+   "user",
+   "show",
+   "message",
+   "SHOW",
+   "printShowMessages"
+  ],
+  [
+   "user",
+   "show",
+   "note",
+   "SHOW",
+   "printShowNotes"
+  ],
+  [
+   "user",
+   "show",
+   "othercontact",
+   "SHOW",
+   "printShowUserPeopleOtherContacts"
+  ],
+  [
+   "user",
+   "show",
+   "outofoffice",
+   "SHOW",
+   "printShowOutOfOffice"
+  ],
+  [
+   "user",
+   "show",
+   "peoplecontact",
+   "SHOW",
+   "printShowUserPeopleContacts"
+  ],
+  [
+   "user",
+   "show",
+   "peoplecontactgroup",
+   "SHOW",
+   "printShowUserPeopleContactGroups"
+  ],
+  [
+   "user",
+   "show",
+   "peopleprofile",
+   "SHOW",
+   "printShowUserPeopleProfiles"
+  ],
+  [
+   "user",
+   "show",
+   "pop",
+   "SHOW",
+   "printShowPop"
+  ],
+  [
+   "user",
+   "show",
+   "profile",
+   "SHOW",
+   "showProfile"
+  ],
+  [
+   "user",
+   "show",
+   "sendas",
+   "SHOW",
+   "printShowSendAs"
+  ],
+  [
+   "user",
+   "show",
+   "shareddrive",
+   "SHOW",
+   "printShowSharedDrives"
+  ],
+  [
+   "user",
+   "show",
+   "shareddriveacls",
+   "SHOW",
+   "printShowSharedDriveACLs"
+  ],
+  [
+   "user",
+   "show",
+   "shareddriveinfo",
+   "SHOW",
+   "infoSharedDrive"
+  ],
+  [
+   "user",
+   "show",
+   "shareddrivethemes",
+   "SHOW",
+   "showSharedDriveThemes"
+  ],
+  [
+   "user",
+   "show",
+   "sheet",
+   "SHOW",
+   "infoPrintShowSheets"
+  ],
+  [
+   "user",
+   "show",
+   "sheetrange",
+   "SHOW",
+   "printShowSheetRanges"
+  ],
+  [
+   "user",
+   "show",
+   "signature",
+   "SHOW",
+   "printShowSignature"
+  ],
+  [
+   "user",
+   "show",
+   "site",
+   "SHOW",
+   "deprecatedUserSites"
+  ],
+  [
+   "user",
+   "show",
+   "siteacl",
+   "SHOW",
+   "deprecatedUserSites"
+  ],
+  [
+   "user",
+   "show",
+   "smime",
+   "SHOW",
+   "printShowSmimes"
+  ],
+  [
+   "user",
+   "show",
+   "task",
+   "SHOW",
+   "printShowTasks"
+  ],
+  [
+   "user",
+   "show",
+   "tasklist",
+   "SHOW",
+   "printShowTasklists"
+  ],
+  [
+   "user",
+   "show",
+   "thread",
+   "SHOW",
+   "printShowThreads"
+  ],
+  [
+   "user",
+   "show",
+   "token",
+   "SHOW",
+   "printShowTokens"
+  ],
+  [
+   "user",
+   "show",
+   "vaulthold",
+   "SHOW",
+   "printShowUserVaultHolds"
+  ],
+  [
+   "user",
+   "show",
+   "vacation",
+   "SHOW",
+   "printShowVacation"
+  ],
+  [
+   "user",
+   "show",
+   "workinglocation",
+   "SHOW",
+   "printShowWorkingLocation"
+  ],
+  [
+   "user",
+   "show",
+   "youtubechannel",
+   "SHOW",
+   "printShowYouTubeChannel"
+  ],
+  [
+   "user",
+   "spam",
+   "message",
+   "SPAM",
+   "processMessages"
+  ],
+  [
+   "user",
+   "spam",
+   "thread",
+   "SPAM",
+   "processThreads"
+  ],
+  [
+   "user",
+   "suspend",
+   "user",
+   "SUSPEND",
+   "suspendUnsuspendUsers"
+  ],
+  [
+   "user",
+   "sync",
+   "chatmember",
+   "SYNC",
+   "syncChatMembers"
+  ],
+  [
+   "user",
+   "sync",
+   "group",
+   "SYNC",
+   "syncUserWithGroups"
+  ],
+  [
+   "user",
+   "sync",
+   "guardian",
+   "SYNC",
+   "syncGuardians"
+  ],
+  [
+   "user",
+   "sync",
+   "license",
+   "SYNC",
+   "syncLicense"
+  ],
+  [
+   "user",
+   "sync",
+   "shareddriveacls",
+   "SYNC",
+   "copySyncSharedDriveACLs"
+  ],
+  [
+   "user",
+   "transfer",
+   "drive",
+   "TRANSFER",
+   "transferDrive"
+  ],
+  [
+   "user",
+   "transfer",
+   "calendar",
+   "TRANSFER",
+   "transferCalendars"
+  ],
+  [
+   "user",
+   "transfer",
+   "ownership",
+   "TRANSFER",
+   "transferOwnership"
+  ],
+  [
+   "user",
+   "trash",
+   "drivefile",
+   "TRASH",
+   "trashDriveFile"
+  ],
+  [
+   "user",
+   "trash",
+   "message",
+   "TRASH",
+   "processMessages"
+  ],
+  [
+   "user",
+   "trash",
+   "thread",
+   "TRASH",
+   "processThreads"
+  ],
+  [
+   "user",
+   "undelete",
+   "user",
+   "UNDELETE",
+   "undeleteUsers"
+  ],
+  [
+   "user",
+   "unhide",
+   "shareddrive",
+   "UNHIDE",
+   "hideUnhideSharedDrive"
+  ],
+  [
+   "user",
+   "unsuspend",
+   "user",
+   "UNSUSPEND",
+   "suspendUnsuspendUsers"
+  ],
+  [
+   "user",
+   "untrash",
+   "drivefile",
+   "UNTRASH",
+   "untrashDriveFile"
+  ],
+  [
+   "user",
+   "untrash",
+   "message",
+   "UNTRASH",
+   "processMessages"
+  ],
+  [
+   "user",
+   "untrash",
+   "thread",
+   "UNTRASH",
+   "processThreads"
+  ],
+  [
+   "user",
+   "update",
+   "backupcode",
+   "UPDATE",
+   "updateBackupCodes"
+  ],
+  [
+   "user",
+   "update",
+   "calattendees",
+   "UPDATE",
+   "updateCalendarAttendees"
+  ],
+  [
+   "user",
+   "update",
+   "calendar",
+   "UPDATE",
+   "updateCalendars"
+  ],
+  [
+   "user",
+   "update",
+   "calendaracl",
+   "UPDATE",
+   "updateCalendarACLs"
+  ],
+  [
+   "user",
+   "update",
+   "chatmember",
+   "UPDATE",
+   "deleteUpdateChatMember"
+  ],
+  [
+   "user",
+   "update",
+   "chatmessage",
+   "UPDATE",
+   "updateChatMessage"
+  ],
+  [
+   "user",
+   "update",
+   "chatspace",
+   "UPDATE",
+   "updateChatSpace"
+  ],
+  [
+   "user",
+   "update",
+   "cseidentity",
+   "UPDATE",
+   "createUpdateCSEIdentity"
+  ],
+  [
+   "user",
+   "update",
+   "lookerstudiopermission",
+   "UPDATE",
+   "processLookerStudioPermissions"
+  ],
+  [
+   "user",
+   "update",
+   "delegate",
+   "UPDATE",
+   "updateDelegates"
+  ],
+  [
+   "user",
+   "update",
+   "document",
+   "UPDATE",
+   "updateGoogleDocument"
+  ],
+  [
+   "user",
+   "update",
+   "drivefile",
+   "UPDATE",
+   "updateDriveFile"
+  ],
+  [
+   "user",
+   "update",
+   "drivefileacl",
+   "UPDATE",
+   "updateDriveFileACLs"
+  ],
+  [
+   "user",
+   "update",
+   "event",
+   "UPDATE",
+   "updateCalendarEvents"
+  ],
+  [
+   "user",
+   "update",
+   "filerevision",
+   "UPDATE",
+   "updateFileRevisions"
+  ],
+  [
+   "user",
+   "update",
+   "form",
+   "UPDATE",
+   "updateForm"
+  ],
+  [
+   "user",
+   "update",
+   "group",
+   "UPDATE",
+   "updateUserGroups"
+  ],
+  [
+   "user",
+   "update",
+   "label",
+   "UPDATE",
+   "updateLabels"
+  ],
+  [
+   "user",
+   "update",
+   "labelid",
+   "UPDATE",
+   "updateLabelSettingsById"
+  ],
+  [
+   "user",
+   "update",
+   "labelsettings",
+   "UPDATE",
+   "updateLabelSettings"
+  ],
+  [
+   "user",
+   "update",
+   "license",
+   "UPDATE",
+   "updateLicense"
+  ],
+  [
+   "user",
+   "update",
+   "meetspace",
+   "UPDATE",
+   "updateMeetSpace"
+  ],
+  [
+   "user",
+   "update",
+   "othercontact",
+   "UPDATE",
+   "processUserPeopleOtherContacts"
+  ],
+  [
+   "user",
+   "update",
+   "peoplecontact",
+   "UPDATE",
+   "updateUserPeopleContacts"
+  ],
+  [
+   "user",
+   "update",
+   "peoplecontactgroup",
+   "UPDATE",
+   "updateUserPeopleContactGroup"
+  ],
+  [
+   "user",
+   "update",
+   "peoplecontactphoto",
+   "UPDATE",
+   "updateUserPeopleContactPhoto"
+  ],
+  [
+   "user",
+   "update",
+   "photo",
+   "UPDATE",
+   "updatePhoto"
+  ],
+  [
+   "user",
+   "update",
+   "sendas",
+   "UPDATE",
+   "createUpdateSendAs"
+  ],
+  [
+   "user",
+   "update",
+   "serviceaccount",
+   "UPDATE",
+   "checkServiceAccount"
+  ],
+  [
+   "user",
+   "update",
+   "shareddrive",
+   "UPDATE",
+   "updateSharedDrive"
+  ],
+  [
+   "user",
+   "update",
+   "sheet",
+   "UPDATE",
+   "updateSheets"
+  ],
+  [
+   "user",
+   "update",
+   "sheetrange",
+   "UPDATE",
+   "updateSheetRanges"
+  ],
+  [
+   "user",
+   "update",
+   "smime",
+   "UPDATE",
+   "updateSmime"
+  ],
+  [
+   "user",
+   "update",
+   "site",
+   "UPDATE",
+   "deprecatedUserSites"
+  ],
+  [
+   "user",
+   "update",
+   "siteacl",
+   "UPDATE",
+   "deprecatedUserSites"
+  ],
+  [
+   "user",
+   "update",
+   "task",
+   "UPDATE",
+   "processTasks"
+  ],
+  [
+   "user",
+   "update",
+   "tasklist",
+   "UPDATE",
+   "processTasklists"
+  ],
+  [
+   "user",
+   "update",
+   "user",
+   "UPDATE",
+   "updateUsers"
+  ],
+  [
+   "user",
+   "watch",
+   "gmail",
+   "WATCH",
+   "watchGmail"
+  ],
+  [
+   "user",
+   "wipe",
+   "event",
+   "WIPE",
+   "wipeCalendarEvents"
+  ],
+  [
+   "cros",
+   "getcommand",
+   null,
+   "GET_COMMAND_RESULT",
+   "getCommandResultCrOSDevices"
+  ],
+  [
+   "cros",
+   "info",
+   null,
+   "INFO",
+   "infoCrOSDevices"
+  ],
+  [
+   "cros",
+   "issuecommand",
+   null,
+   "ISSUE_COMMAND",
+   "issueCommandCrOSDevices"
+  ],
+  [
+   "cros",
+   "list",
+   null,
+   "LIST",
+   "doListCrOS"
+  ],
+  [
+   "cros",
+   "print",
+   null,
+   "PRINT",
+   "doPrintCrOSEntity"
+  ],
+  [
+   "cros",
+   "update",
+   null,
+   "UPDATE",
+   "updateCrOSDevices"
+  ],
+  [
+   "cros",
+   "get",
+   "devicefile",
+   "DOWNLOAD",
+   "getCrOSDeviceFiles"
+  ],
+  [
+   "cros",
+   "show",
+   "count",
+   "SHOW",
+   "showCountCrOS"
+  ],
+  [
+   "oauth",
+   "create",
+   null,
+   "CREATE",
+   "doOAuthCreate"
+  ],
+  [
+   "oauth",
+   "delete",
+   null,
+   "DELETE",
+   "doOAuthDelete"
+  ],
+  [
+   "oauth",
+   "export",
+   null,
+   "EXPORT",
+   "doOAuthExport"
+  ],
+  [
+   "oauth",
+   "info",
+   null,
+   "INFO",
+   "doOAuthInfo"
+  ],
+  [
+   "oauth",
+   "refresh",
+   null,
+   "REFRESH",
+   "doOAuthRefresh"
+  ],
+  [
+   "oauth",
+   "update",
+   null,
+   "UPDATE",
+   "doOAuthUpdate"
+  ],
+  [
+   "calendar",
+   "showacl",
+   null,
+   "SHOW",
+   "doCalendarsPrintShowACLs"
+  ],
+  [
+   "calendar",
+   "printacl",
+   null,
+   "PRINT",
+   "doCalendarsPrintShowACLs"
+  ],
+  [
+   "calendar",
+   "addevent",
+   null,
+   "ADD",
+   "doCalendarsCreateEvent"
+  ],
+  [
+   "calendar",
+   "deleteevent",
+   null,
+   "DELETE",
+   "doCalendarsDeleteEventsOld"
+  ],
+  [
+   "calendar",
+   "moveevent",
+   null,
+   "MOVE",
+   "doCalendarsMoveEventsOld"
+  ],
+  [
+   "calendar",
+   "updateevent",
+   null,
+   "UPDATE",
+   "doCalendarsUpdateEventsOld"
+  ],
+  [
+   "calendar",
+   "printevents",
+   null,
+   "PRINT",
+   "doCalendarsPrintShowEvents"
+  ],
+  [
+   "calendar",
+   "wipe",
+   null,
+   "WIPE",
+   "doCalendarsWipeEvents"
+  ],
+  [
+   "calendar",
+   "modify",
+   null,
+   "MODIFY",
+   "doCalendarsModifySettings"
+  ],
+  [
+   "calendar",
+   "add",
+   null,
+   "ADD",
+   "doCalendarsCreateACL"
+  ],
+  [
+   "calendar",
+   "create",
+   null,
+   "CREATE",
+   "doCalendarsCreateACL"
+  ],
+  [
+   "calendar",
+   "delete",
+   null,
+   "DELETE",
+   "doCalendarsDeleteACL"
+  ],
+  [
+   "calendar",
+   "update",
+   null,
+   "UPDATE",
+   "doCalendarsUpdateACL"
+  ],
+  [
+   "calendar",
+   "add",
+   "calendaracl",
+   "ADD",
+   "doCalendarsCreateACLs"
+  ],
+  [
+   "calendar",
+   "add",
+   "event",
+   "ADD",
+   "doCalendarsCreateEvent"
+  ],
+  [
+   "calendar",
+   "create",
+   "calendaracl",
+   "CREATE",
+   "doCalendarsCreateACLs"
+  ],
+  [
+   "calendar",
+   "create",
+   "event",
+   "CREATE",
+   "doCalendarsCreateEvent"
+  ],
+  [
+   "calendar",
+   "delete",
+   "calendaracl",
+   "DELETE",
+   "doCalendarsDeleteACLs"
+  ],
+  [
+   "calendar",
+   "delete",
+   "event",
+   "DELETE",
+   "doCalendarsDeleteEvents"
+  ],
+  [
+   "calendar",
+   "empty",
+   "calendartrash",
+   "EMPTY",
+   "doCalendarsEmptyTrash"
+  ],
+  [
+   "calendar",
+   "import",
+   "event",
+   "IMPORT",
+   "doCalendarsImportEvent"
+  ],
+  [
+   "calendar",
+   "info",
+   "calendaracl",
+   "INFO",
+   "doCalendarsInfoACLs"
+  ],
+  [
+   "calendar",
+   "info",
+   "event",
+   "INFO",
+   "doCalendarsInfoEvents"
+  ],
+  [
+   "calendar",
+   "move",
+   "event",
+   "MOVE",
+   "doCalendarsMoveEvents"
+  ],
+  [
+   "calendar",
+   "print",
+   "calendaracl",
+   "PRINT",
+   "doCalendarsPrintShowACLs"
+  ],
+  [
+   "calendar",
+   "print",
+   "event",
+   "PRINT",
+   "doCalendarsPrintShowEvents"
+  ],
+  [
+   "calendar",
+   "print",
+   "settings",
+   "PRINT",
+   "doCalendarsPrintShowSettings"
+  ],
+  [
+   "calendar",
+   "purge",
+   "event",
+   "PURGE",
+   "doCalendarsPurgeEvents"
+  ],
+  [
+   "calendar",
+   "show",
+   "calendaracl",
+   "SHOW",
+   "doCalendarsPrintShowACLs"
+  ],
+  [
+   "calendar",
+   "show",
+   "event",
+   "SHOW",
+   "doCalendarsPrintShowEvents"
+  ],
+  [
+   "calendar",
+   "show",
+   "settings",
+   "SHOW",
+   "doCalendarsPrintShowSettings"
+  ],
+  [
+   "calendar",
+   "update",
+   "calendaracl",
+   "UPDATE",
+   "doCalendarsUpdateACLs"
+  ],
+  [
+   "calendar",
+   "update",
+   "event",
+   "UPDATE",
+   "doCalendarsUpdateEvents"
+  ],
+  [
+   "calendar",
+   "wipe",
+   "event",
+   "WIPE",
+   "doCalendarsWipeEvents"
+  ],
+  [
+   "course",
+   "add",
+   null,
+   "ADD",
+   "doCourseAddItems"
+  ],
+  [
+   "course",
+   "clear",
+   null,
+   "REMOVE",
+   "doCourseClearParticipants"
+  ],
+  [
+   "course",
+   "remove",
+   null,
+   "REMOVE",
+   "doCourseRemoveItems"
+  ],
+  [
+   "course",
+   "sync",
+   null,
+   "SYNC",
+   "doCourseSyncParticipants"
+  ],
+  [
+   "resource",
+   "add",
+   "calendaracl",
+   "ADD",
+   "doResourceCreateCalendarACLs"
+  ],
+  [
+   "resource",
+   "create",
+   "calendaracl",
+   "CREATE",
+   "doResourceCreateCalendarACLs"
+  ],
+  [
+   "resource",
+   "update",
+   "calendaracl",
+   "UPDATE",
+   "doResourceUpdateCalendarACLs"
+  ],
+  [
+   "resource",
+   "delete",
+   "calendaracl",
+   "DELETE",
+   "doResourceDeleteCalendarACLs"
+  ],
+  [
+   "resource",
+   "info",
+   "calendaracl",
+   "INFO",
+   "doResourceInfoCalendarACLs"
+  ],
+  [
+   "resource",
+   "print",
+   "calendaracl",
+   "PRINT",
+   "doResourcePrintShowCalendarACLs"
+  ],
+  [
+   "resource",
+   "show",
+   "calendaracl",
+   "SHOW",
+   "doResourcePrintShowCalendarACLs"
+  ],
+  [
+   "audit",
+   "monitor",
+   "create",
+   "CREATE",
+   "doCreateMonitor"
+  ],
+  [
+   "audit",
+   "monitor",
+   "delete",
+   "DELETE",
+   "doDeleteMonitor"
+  ],
+  [
+   "audit",
+   "monitor",
+   "list",
+   "LIST",
+   "doShowMonitors"
+  ]
+ ],
+ "tables": {
+  "AUDIT_SUBCOMMANDS_WITH_OBJECTS": {
+   "monitor": {
+    "create": [
+     "CREATE",
+     "doCreateMonitor"
+    ],
+    "delete": [
+     "DELETE",
+     "doDeleteMonitor"
+    ],
+    "list": [
+     "LIST",
+     "doShowMonitors"
+    ]
+   }
+  },
+  "BATCH_CSV_COMMANDS": {
+   "batch": [
+    "PERFORM",
+    "doBatch"
+   ],
+   "csv": [
+    "PERFORM",
+    "doCSV"
+   ],
+   "csvtest": [
+    "PERFORM",
+    "doCSVTest"
+   ],
+   "tbatch": [
+    "PERFORM",
+    "doThreadBatch"
+   ]
+  },
+  "CALENDARS_SUBCOMMANDS_OBJECT_ALIASES": {
+   "acl": "calendaracl",
+   "acls": "calendaracl",
+   "calendaracls": "calendaracl",
+   "events": "event"
+  },
+  "CALENDARS_SUBCOMMANDS_WITH_OBJECTS": {
+   "add": [
+    "ADD",
+    {
+     "calendaracl": "doCalendarsCreateACLs",
+     "event": "doCalendarsCreateEvent"
+    }
+   ],
+   "create": [
+    "CREATE",
+    {
+     "calendaracl": "doCalendarsCreateACLs",
+     "event": "doCalendarsCreateEvent"
+    }
+   ],
+   "delete": [
+    "DELETE",
+    {
+     "calendaracl": "doCalendarsDeleteACLs",
+     "event": "doCalendarsDeleteEvents"
+    }
+   ],
+   "empty": [
+    "EMPTY",
+    {
+     "calendartrash": "doCalendarsEmptyTrash"
+    }
+   ],
+   "import": [
+    "IMPORT",
+    {
+     "event": "doCalendarsImportEvent"
+    }
+   ],
+   "info": [
+    "INFO",
+    {
+     "calendaracl": "doCalendarsInfoACLs",
+     "event": "doCalendarsInfoEvents"
+    }
+   ],
+   "move": [
+    "MOVE",
+    {
+     "event": "doCalendarsMoveEvents"
+    }
+   ],
+   "print": [
+    "PRINT",
+    {
+     "calendaracl": "doCalendarsPrintShowACLs",
+     "event": "doCalendarsPrintShowEvents",
+     "settings": "doCalendarsPrintShowSettings"
+    }
+   ],
+   "purge": [
+    "PURGE",
+    {
+     "event": "doCalendarsPurgeEvents"
+    }
+   ],
+   "show": [
+    "SHOW",
+    {
+     "calendaracl": "doCalendarsPrintShowACLs",
+     "event": "doCalendarsPrintShowEvents",
+     "settings": "doCalendarsPrintShowSettings"
+    }
+   ],
+   "update": [
+    "UPDATE",
+    {
+     "calendaracl": "doCalendarsUpdateACLs",
+     "event": "doCalendarsUpdateEvents"
+    }
+   ],
+   "wipe": [
+    "WIPE",
+    {
+     "event": "doCalendarsWipeEvents"
+    }
+   ]
+  },
+  "CALENDAR_OLDACL_SUBCOMMANDS": {
+   "add": [
+    "ADD",
+    "doCalendarsCreateACL"
+   ],
+   "create": [
+    "CREATE",
+    "doCalendarsCreateACL"
+   ],
+   "delete": [
+    "DELETE",
+    "doCalendarsDeleteACL"
+   ],
+   "update": [
+    "UPDATE",
+    "doCalendarsUpdateACL"
+   ]
+  },
+  "CALENDAR_OLDACL_SUBCOMMAND_ALIASES": {
+   "del": "delete"
+  },
+  "CALENDAR_SUBCOMMANDS": {
+   "addevent": [
+    "ADD",
+    "doCalendarsCreateEvent"
+   ],
+   "deleteevent": [
+    "DELETE",
+    "doCalendarsDeleteEventsOld"
+   ],
+   "modify": [
+    "MODIFY",
+    "doCalendarsModifySettings"
+   ],
+   "moveevent": [
+    "MOVE",
+    "doCalendarsMoveEventsOld"
+   ],
+   "printacl": [
+    "PRINT",
+    "doCalendarsPrintShowACLs"
+   ],
+   "printevents": [
+    "PRINT",
+    "doCalendarsPrintShowEvents"
+   ],
+   "showacl": [
+    "SHOW",
+    "doCalendarsPrintShowACLs"
+   ],
+   "updateevent": [
+    "UPDATE",
+    "doCalendarsUpdateEventsOld"
+   ],
+   "wipe": [
+    "WIPE",
+    "doCalendarsWipeEvents"
+   ]
+  },
+  "COMMANDS_ALIASES": {
+   "calendar": "calendars",
+   "oauth2": "oauth"
+  },
+  "COMMANDS_MAP": {
+   "audit": "processAuditCommands",
+   "calendars": "processCalendarsCommands",
+   "course": "processCourseCommands",
+   "courses": "processCoursesCommands",
+   "oauth": "processOauthCommands",
+   "resource": "processResourceCommands",
+   "resources": "processResourcesCommands"
+  },
+  "COURSE_SUBCOMMANDS": {
+   "add": [
+    "ADD",
+    "doCourseAddItems"
+   ],
+   "clear": [
+    "REMOVE",
+    "doCourseClearParticipants"
+   ],
+   "remove": [
+    "REMOVE",
+    "doCourseRemoveItems"
+   ],
+   "sync": [
+    "SYNC",
+    "doCourseSyncParticipants"
+   ]
+  },
+  "COURSE_SUBCOMMAND_ALIASES": {
+   "create": "add",
+   "del": "remove",
+   "delete": "remove"
+  },
+  "CROS_COMMANDS": {
+   "getcommand": [
+    "GET_COMMAND_RESULT",
+    "getCommandResultCrOSDevices"
+   ],
+   "info": [
+    "INFO",
+    "infoCrOSDevices"
+   ],
+   "issuecommand": [
+    "ISSUE_COMMAND",
+    "issueCommandCrOSDevices"
+   ],
+   "list": [
+    "LIST",
+    "doListCrOS"
+   ],
+   "print": [
+    "PRINT",
+    "doPrintCrOSEntity"
+   ],
+   "update": [
+    "UPDATE",
+    "updateCrOSDevices"
+   ]
+  },
+  "CROS_COMMANDS_OBJ_ALIASES": {
+   "counts": "count",
+   "devicefiles": "devicefile"
+  },
+  "CROS_COMMANDS_WITH_OBJECTS": {
+   "get": [
+    "DOWNLOAD",
+    {
+     "devicefile": "getCrOSDeviceFiles"
+    }
+   ],
+   "show": [
+    "SHOW",
+    {
+     "count": "showCountCrOS"
+    }
+   ]
+  },
+  "CROS_COMMAND_CHOICE_MAP": {
+   "reboot": "REBOOT",
+   "remotepowerwash": "REMOTE_POWERWASH",
+   "setvolume": "SET_VOLUME",
+   "takeascreenshot": "TAKE_A_SCREENSHOT",
+   "wipeusers": "WIPE_USERS"
+  },
+  "MAIN_COMMANDS": {
+   "checkconn": [
+    "CHECK",
+    "doCheckConnection"
+   ],
+   "checkconnection": [
+    "CHECK",
+    "doCheckConnection"
+   ],
+   "comment": [
+    "COMMENT",
+    "doComment"
+   ],
+   "help": [
+    "PERFORM",
+    "doUsage"
+   ],
+   "list": [
+    "LIST",
+    "doListType"
+   ],
+   "report": [
+    "REPORT",
+    "doReport"
+   ],
+   "sendemail": [
+    "SENDEMAIL",
+    "doSendEmail"
+   ],
+   "version": [
+    "PERFORM",
+    "doVersion"
+   ],
+   "whatis": [
+    "INFO",
+    "doWhatIs"
+   ]
+  },
+  "MAIN_COMMANDS_OBJ_ALIASES": {
+   "adminroles": "adminrole",
+   "admins": "admin",
+   "alertfeedbacks": "alertfeedback",
+   "alerts": "alert",
+   "alertsfeedback": "alertfeedback",
+   "aliasdomain": "domainalias",
+   "aliasdomains": "domainalias",
+   "aliases": "alias",
+   "apiproject": "project",
+   "apis": "api",
+   "appdetails": "chromeapp",
+   "browsers": "browser",
+   "browsertokens": "browsertoken",
+   "bucket": "storagebucket",
+   "buckets": "storagebucket",
+   "buildings": "building",
+   "caalevels": "caalevel",
+   "channelcustomerentitlements": "channelcustomerentitlement",
+   "channelcustomers": "channelcustomer",
+   "channeloffers": "channeloffer",
+   "channelproducts": "channelproduct",
+   "channelskus": "channelsku",
+   "chatmembers": "chatmember",
+   "chatspaces": "chatspace",
+   "chromeapps": "chromeapp",
+   "chromenetworks": "chromenetwork",
+   "chromepolicies": "chromepolicy",
+   "chromeprofiles": "chromeprofile",
+   "chromeschemas": "chromeschema",
+   "cigroups": "cigroup",
+   "cigroupsmembers": "cigroupmembers",
+   "cimember": "cigroupmembers",
+   "cimembers": "cigroupmembers",
+   "class": "course",
+   "classes": "courses",
+   "classificationlabel": "drivelabel",
+   "classificationlabelpermission": "drivelabelpermission",
+   "classificationlabelpermissions": "drivelabelpermission",
+   "classificationlabels": "drivelabel",
+   "classparticipants": "courseparticipants",
+   "classroominvitations": "classroominvitation",
+   "contactphotos": "contactphoto",
+   "contacts": "contact",
+   "croses": "cros",
+   "datatransfers": "datatransfer",
+   "devicefiles": "devicefile",
+   "devices": "device",
+   "deviceusers": "deviceuser",
+   "domainaliases": "domainalias",
+   "domaincontact": "peoplecontact",
+   "domaincontacts": "peoplecontact",
+   "domainprofiles": "peopleprofile",
+   "domains": "domain",
+   "drivefileacls": "drivefileacl",
+   "drivelabelpermissions": "drivelabelpermission",
+   "drivelabels": "drivelabel",
+   "export": "vaultexport",
+   "exports": "vaultexport",
+   "features": "feature",
+   "forms": "form",
+   "groups": "group",
+   "groupsmembers": "groupmembers",
+   "guardianinvitations": "guardianinvitation",
+   "guardianinvite": "guardianinvitation",
+   "guardians": "guardian",
+   "hold": "vaulthold",
+   "holds": "vaulthold",
+   "inboundssoassignments": "inboundssoassignment",
+   "inboundssocredentials": "inboundssocredential",
+   "inboundssoprofiles": "inboundssoprofile",
+   "inviteguardian": "guardianinvitation",
+   "licence": "license",
+   "licences": "license",
+   "licenses": "license",
+   "matter": "vaultmatter",
+   "matters": "vaultmatter",
+   "member": "groupmembers",
+   "members": "groupmembers",
+   "mobiles": "mobile",
+   "nickname": "alias",
+   "nicknames": "alias",
+   "orgunit": "org",
+   "orgunits": "orgs",
+   "orgunitshareddrives": "orgunitshareddrive",
+   "ou": "org",
+   "ous": "orgs",
+   "oushareddrive": "orgunitshareddrive",
+   "oushareddrives": "orgunitshareddrive",
+   "outree": "orgtree",
+   "participants": "courseparticipants",
+   "people": "peopleprofile",
+   "peoplecontacts": "peoplecontact",
+   "peopleprofiles": "peopleprofile",
+   "permissions": "permission",
+   "policies": "policy",
+   "printermodels": "printermodel",
+   "printers": "printer",
+   "projects": "project",
+   "resellercustomers": "resoldcustomer",
+   "resellersubscriptions": "resoldsubscription",
+   "resoldcustomers": "resoldcustomer",
+   "resoldsubscriptions": "resoldsubscription",
+   "role": "adminrole",
+   "roles": "adminrole",
+   "sakeys": "sakey",
+   "schemas": "schema",
+   "shareddrives": "shareddrive",
+   "signjwtserviceaccount": "gcpserviceaccount",
+   "siteacls": "siteacl",
+   "sites": "site",
+   "storagebuckets": "storagebucket",
+   "storagefiles": "storagefile",
+   "svcaccts": "svcacct",
+   "teamdrive": "shareddrive",
+   "teamdriveacls": "shareddriveacls",
+   "teamdriveinfo": "shareddriveinfo",
+   "teamdrives": "shareddrive",
+   "teamdrivethemes": "shareddrivethemes",
+   "tokens": "token",
+   "transfer": "datatransfer",
+   "transfers": "datatransfer",
+   "userinvitations": "userinvitation",
+   "vaultcounts": "vaultcount",
+   "vaultexports": "vaultexport",
+   "vaultholds": "vaulthold",
+   "vaultmatters": "vaultmatter",
+   "vaultqueries": "vaultquery",
+   "verification": "verify"
+  },
+  "MAIN_COMMANDS_WITH_OBJECTS": {
+   "add": [
+    "ADD",
+    {
+     "admin": "doCreateAdmin",
+     "adminrole": "doCreateUpdateAdminRoles",
+     "alertfeedback": "doCreateAlertFeedback",
+     "alias": "doCreateUpdateAliases",
+     "browsertoken": "doCreateBrowserToken",
+     "building": "doCreateBuilding",
+     "caalevel": "doCreateCAALevel",
+     "chatmessage": "doCreateChatMessage",
+     "chromenetwork": "doCreateChromeNetwork",
+     "chromepolicyimage": "doCreateChromePolicyImage",
+     "cigroup": "doCreateCIGroup",
+     "contact": "doCreateDomainContact",
+     "course": "doCreateCourse",
+     "datatransfer": "doCreateDataTransfer",
+     "device": "doCreateCIDevice",
+     "domain": "doCreateDomain",
+     "domainalias": "doCreateDomainAlias",
+     "drivefileacl": "doCreateDriveFileACL",
+     "drivelabelpermission": "doCreateDriveLabelPermissions",
+     "feature": "doCreateFeature",
+     "gcpfolder": "doCreateGCPFolder",
+     "gcpserviceaccount": "doCreateGCPServiceAccount",
+     "group": "doCreateGroup",
+     "guardian": "doInviteGuardian",
+     "guardianinvitation": "doInviteGuardian",
+     "inboundssoassignment": "doCreateInboundSSOAssignment",
+     "inboundssocredential": "doCreateInboundSSOCredential",
+     "inboundssoprofile": "doCreateInboundSSOProfile",
+     "org": "doCreateOrg",
+     "permission": "doCreatePermissions",
+     "printer": "doCreatePrinter",
+     "project": "doCreateProject",
+     "resoldcustomer": "doCreateResoldCustomer",
+     "resoldsubscription": "doCreateResoldSubscription",
+     "resource": "doCreateResourceCalendar",
+     "sakey": "doCreateSvcAcctKeys",
+     "schema": "doCreateUpdateUserSchemas",
+     "shareddrive": "doCreateSharedDrive",
+     "site": "deprecatedDomainSites",
+     "siteacl": "deprecatedDomainSites",
+     "svcacct": "doCreateSvcAcct",
+     "user": "doCreateUser",
+     "vaultexport": "doCreateVaultExport",
+     "vaulthold": "doCreateVaultHold",
+     "vaultmatter": "doCreateVaultMatter",
+     "verify": "doCreateSiteVerification"
+    }
+   ],
+   "approve": [
+    "APPROVE",
+    {
+     "deviceuser": "doApproveCIDeviceUser"
+    }
+   ],
+   "block": [
+    "BLOCK",
+    {
+     "deviceuser": "doBlockCIDeviceUser"
+    }
+   ],
+   "cancel": [
+    "CANCEL",
+    {
+     "guardianinvitation": "doCancelGuardianInvitation",
+     "userinvitation": "doCIUserInvitationsAction"
+    }
+   ],
+   "cancelwipe": [
+    "CANCEL_WIPE",
+    {
+     "device": "doCancelWipeCIDevice",
+     "deviceuser": "doCancelWipeCIDeviceUser"
+    }
+   ],
+   "check": [
+    "CHECK",
+    {
+     "isinvitable": "doCheckCIUserInvitations",
+     "org": "doCheckOrgUnit",
+     "svcacct": "doCheckUpdateSvcAcct",
+     "userinvitation": "doCheckCIUserInvitations"
+    }
+   ],
+   "clear": [
+    "CLEAR",
+    {
+     "contact": "doClearDomainContacts"
+    }
+   ],
+   "close": [
+    "CLOSE",
+    {
+     "vaultmatter": "doCloseVaultMatter"
+    }
+   ],
+   "copy": [
+    "COPY",
+    {
+     "shareddriveacls": "doCopySyncSharedDriveACLs",
+     "storagebucket": "doCopyCloudStorageBucket",
+     "vaultexport": "doCopyVaultExport"
+    }
+   ],
+   "create": [
+    "CREATE",
+    {
+     "admin": "doCreateAdmin",
+     "adminrole": "doCreateUpdateAdminRoles",
+     "alertfeedback": "doCreateAlertFeedback",
+     "alias": "doCreateUpdateAliases",
+     "browsertoken": "doCreateBrowserToken",
+     "building": "doCreateBuilding",
+     "caalevel": "doCreateCAALevel",
+     "chatmessage": "doCreateChatMessage",
+     "chromenetwork": "doCreateChromeNetwork",
+     "chromepolicyimage": "doCreateChromePolicyImage",
+     "cigroup": "doCreateCIGroup",
+     "contact": "doCreateDomainContact",
+     "course": "doCreateCourse",
+     "datatransfer": "doCreateDataTransfer",
+     "device": "doCreateCIDevice",
+     "domain": "doCreateDomain",
+     "domainalias": "doCreateDomainAlias",
+     "drivefileacl": "doCreateDriveFileACL",
+     "drivelabelpermission": "doCreateDriveLabelPermissions",
+     "feature": "doCreateFeature",
+     "gcpfolder": "doCreateGCPFolder",
+     "gcpserviceaccount": "doCreateGCPServiceAccount",
+     "group": "doCreateGroup",
+     "guardian": "doInviteGuardian",
+     "guardianinvitation": "doInviteGuardian",
+     "inboundssoassignment": "doCreateInboundSSOAssignment",
+     "inboundssocredential": "doCreateInboundSSOCredential",
+     "inboundssoprofile": "doCreateInboundSSOProfile",
+     "org": "doCreateOrg",
+     "permission": "doCreatePermissions",
+     "printer": "doCreatePrinter",
+     "project": "doCreateProject",
+     "resoldcustomer": "doCreateResoldCustomer",
+     "resoldsubscription": "doCreateResoldSubscription",
+     "resource": "doCreateResourceCalendar",
+     "sakey": "doCreateSvcAcctKeys",
+     "schema": "doCreateUpdateUserSchemas",
+     "shareddrive": "doCreateSharedDrive",
+     "site": "deprecatedDomainSites",
+     "siteacl": "deprecatedDomainSites",
+     "svcacct": "doCreateSvcAcct",
+     "user": "doCreateUser",
+     "vaultexport": "doCreateVaultExport",
+     "vaulthold": "doCreateVaultHold",
+     "vaultmatter": "doCreateVaultMatter",
+     "verify": "doCreateSiteVerification"
+    }
+   ],
+   "dedup": [
+    "DEDUP",
+    {
+     "contact": "doDedupDomainContacts"
+    }
+   ],
+   "delete": [
+    "DELETE",
+    {
+     "admin": "doDeleteAdmin",
+     "adminrole": "doDeleteAdminRole",
+     "alert": "doDeleteOrUndeleteAlert",
+     "alias": "doDeleteAliases",
+     "browser": "doDeleteBrowsers",
+     "building": "doDeleteBuilding",
+     "caalevel": "doDeleteCAALevel",
+     "chatmessage": "doDeleteChatMessage",
+     "chromenetwork": "doDeleteChromeNetwork",
+     "chromepolicy": "doDeleteChromePolicy",
+     "chromeprofile": "doDeleteChromeProfile",
+     "cigroup": "doDeleteCIGroups",
+     "classroominvitation": "doDeleteClassroomInvitations",
+     "contact": "doDeleteDomainContacts",
+     "contactphoto": "doDeleteDomainContactPhoto",
+     "course": "doDeleteCourse",
+     "courses": "doDeleteCourses",
+     "device": "doDeleteCIDevice",
+     "deviceuser": "doDeleteCIDeviceUser",
+     "domain": "doDeleteDomain",
+     "domainalias": "doDeleteDomainAlias",
+     "domaincontact": "doDeleteDomainContacts",
+     "drivefileacl": "doDeleteDriveFileACLs",
+     "drivelabelpermission": "doDeleteDriveLabelPermissions",
+     "feature": "doDeleteFeature",
+     "group": "doDeleteGroups",
+     "guardian": "doDeleteGuardian",
+     "inboundssoassignment": "doDeleteInboundSSOAssignment",
+     "inboundssocredential": "doDeleteInboundSSOCredential",
+     "inboundssoprofile": "doDeleteInboundSSOProfile",
+     "mobile": "doDeleteMobileDevices",
+     "org": "doDeleteOrg",
+     "orgs": "doDeleteOrgs",
+     "permission": "doDeletePermissions",
+     "printer": "doDeletePrinter",
+     "project": "doDeleteProject",
+     "resoldsubscription": "doDeleteResoldSubscription",
+     "resource": "doDeleteResourceCalendar",
+     "resources": "doDeleteResourceCalendars",
+     "sakey": "doDeleteSvcAcctKeys",
+     "schema": "doDeleteUserSchemas",
+     "shareddrive": "doDeleteSharedDrive",
+     "siteacl": "deprecatedDomainSites",
+     "svcacct": "doDeleteSvcAcct",
+     "user": "doDeleteUser",
+     "users": "doDeleteUsers",
+     "vaultexport": "doDeleteVaultExport",
+     "vaulthold": "doDeleteVaultHold",
+     "vaultmatter": "doDeleteVaultMatter"
+    }
+   ],
+   "download": [
+    "DOWNLOAD",
+    {
+     "storagebucket": "doDownloadCloudStorageBucket",
+     "storagefile": "doDownloadCloudStorageFile",
+     "vaultexport": "doDownloadVaultExport"
+    }
+   ],
+   "enable": [
+    "ENABLE",
+    {
+     "api": "doEnableAPIs"
+    }
+   ],
+   "get": [
+    "DOWNLOAD",
+    {
+     "contactphoto": "doGetDomainContactPhoto",
+     "devicefile": "doGetCrOSDeviceFiles"
+    }
+   ],
+   "getcommand": [
+    "GET_COMMAND_RESULT",
+    {
+     "cros": "doGetCommandResultCrOSDevices"
+    }
+   ],
+   "hide": [
+    "HIDE",
+    {
+     "shareddrive": "doHideUnhideSharedDrive"
+    }
+   ],
+   "info": [
+    "INFO",
+    {
+     "adminrole": "doInfoAdminRole",
+     "alert": "doInfoAlert",
+     "alias": "doInfoAliases",
+     "browser": "doInfoBrowsers",
+     "building": "doInfoBuilding",
+     "chatevent": "doInfoChatEvent",
+     "chatmember": "doInfoChatMember",
+     "chatmessage": "doInfoChatMessage",
+     "chatspace": "doInfoChatSpace",
+     "chromeapp": "doInfoChromeApp",
+     "chromeprofile": "doInfoChromeProfile",
+     "chromeschema": "doInfoChromePolicySchemas",
+     "cigroup": "doInfoCIGroups",
+     "cigroupmembers": "doInfoCIGroupMembers",
+     "contact": "doInfoDomainContacts",
+     "course": "doInfoCourse",
+     "courses": "doInfoCourses",
+     "cros": "doInfoCrOSDevices",
+     "crostelemetry": "doInfoPrintShowCrOSTelemetry",
+     "currentprojectid": "doInfoCurrentProjectId",
+     "customer": "doInfoCustomer",
+     "datatransfer": "doInfoDataTransfer",
+     "device": "doInfoCIDevice",
+     "deviceuser": "doInfoCIDeviceUser",
+     "deviceuserstate": "doInfoCIDeviceUserState",
+     "domain": "doInfoDomain",
+     "domainalias": "doInfoDomainAlias",
+     "domaincontact": "doInfoDomainContacts",
+     "drivefileacl": "doInfoDriveFileACLs",
+     "drivelabel": "doInfoDriveLabels",
+     "gal": "doInfoGAL",
+     "group": "doInfoGroups",
+     "groupmembers": "doInfoGroupMembers",
+     "inboundssoassignment": "doInfoInboundSSOAssignment",
+     "inboundssocredential": "doInfoInboundSSOCredential",
+     "inboundssoprofile": "doInfoInboundSSOProfile",
+     "instance": "doInfoInstance",
+     "mobile": "doInfoMobileDevices",
+     "org": "doInfoOrg",
+     "orgs": "doInfoOrgs",
+     "peoplecontact": "doInfoDomainPeopleContacts",
+     "peopleprofile": "doInfoDomainPeopleProfile",
+     "policy": "doInfoCIPolicies",
+     "printer": "doInfoPrinter",
+     "resoldcustomer": "doInfoResoldCustomer",
+     "resoldsubscription": "doInfoResoldSubscription",
+     "resource": "doInfoResourceCalendar",
+     "resources": "doInfoResourceCalendars",
+     "schema": "doInfoUserSchemas",
+     "shareddrive": "doInfoSharedDrive",
+     "site": "deprecatedDomainSites",
+     "siteacl": "deprecatedDomainSites",
+     "user": "doInfoUser",
+     "userinvitation": "doInfoCIUserInvitations",
+     "users": "doInfoUsers",
+     "vaultexport": "doInfoVaultExport",
+     "vaulthold": "doInfoVaultHold",
+     "vaultmatter": "doInfoVaultMatter",
+     "vaultquery": "doInfoVaultQuery",
+     "verify": "doInfoSiteVerification"
+    }
+   ],
+   "issuecommand": [
+    "ISSUE_COMMAND",
+    {
+     "cros": "doIssueCommandCrOSDevices"
+    }
+   ],
+   "move": [
+    "MOVE",
+    {
+     "browser": "doMoveBrowsers"
+    }
+   ],
+   "print": [
+    "PRINT",
+    {
+     "addresses": "doPrintAddresses",
+     "admin": "doPrintShowAdmins",
+     "adminrole": "doPrintShowAdminRoles",
+     "alert": "doPrintShowAlerts",
+     "alertfeedback": "doPrintShowAlertFeedback",
+     "alias": "doPrintAliases",
+     "browser": "doPrintShowBrowsers",
+     "browsertoken": "doPrintShowBrowserTokens",
+     "building": "doPrintShowBuildings",
+     "caalevel": "doPrintShowCAALevels",
+     "channelcustomer": "doPrintShowChannelCustomers",
+     "channelcustomerentitlement": "doPrintShowChannelCustomerEntitlements",
+     "channeloffer": "doPrintShowChannelOffers",
+     "channelproduct": "doPrintShowChannelProducts",
+     "channelsku": "doPrintShowChannelSKUs",
+     "chatmember": "doPrintShowChatMembers",
+     "chatspace": "doPrintShowChatSpaces",
+     "chromeapp": "doPrintShowChromeApps",
+     "chromeappdevices": "doPrintShowChromeAppDevices",
+     "chromeaues": "doPrintShowChromeAues",
+     "chromehistory": "doPrintShowChromeHistory",
+     "chromeneedsattn": "doPrintShowChromeNeedsAttn",
+     "chromepolicy": "doPrintShowChromePolicies",
+     "chromeprofile": "doPrintShowChromeProfiles",
+     "chromeschema": "doPrintShowChromeSchemas",
+     "chromesnvalidity": "doPrintChromeSnValidity",
+     "chromeversions": "doPrintShowChromeVersions",
+     "cigroup": "doPrintCIGroups",
+     "cigroupmembers": "doPrintCIGroupMembers",
+     "classroominvitation": "doPrintShowClassroomInvitations",
+     "contact": "doPrintShowDomainContacts",
+     "course": "doPrintCourses",
+     "courseannouncements": "doPrintCourseAnnouncements",
+     "coursematerials": "doPrintCourseMaterials",
+     "courseparticipants": "doPrintCourseParticipants",
+     "courses": "doPrintCourses",
+     "coursesubmissions": "doPrintCourseSubmissions",
+     "coursetopics": "doPrintCourseTopics",
+     "coursework": "doPrintCourseWork",
+     "cros": "doPrintCrOSDevices",
+     "crosactivity": "doPrintCrOSActivity",
+     "crostelemetry": "doInfoPrintShowCrOSTelemetry",
+     "datatransfer": "doPrintShowDataTransfers",
+     "device": "doPrintCIDevices",
+     "deviceuser": "doPrintCIDeviceUsers",
+     "domain": "doPrintShowDomains",
+     "domainalias": "doPrintShowDomainAliases",
+     "domaincontact": "doPrintShowDomainContacts",
+     "drivefileacl": "doPrintShowDriveFileACLs",
+     "drivelabel": "doPrintShowDriveLabels",
+     "drivelabelpermission": "doPrintShowDriveLabelPermissions",
+     "feature": "doPrintShowFeatures",
+     "gal": "doPrintShowGAL",
+     "group": "doPrintGroups",
+     "groupmembers": "doPrintGroupMembers",
+     "grouptree": "doPrintShowGroupTree",
+     "guardian": "doPrintShowGuardians",
+     "inboundssoassignment": "doPrintShowInboundSSOAssignments",
+     "inboundssocredential": "doPrintShowInboundSSOCredentials",
+     "inboundssoprofile": "doPrintShowInboundSSOProfiles",
+     "license": "doPrintLicenses",
+     "mobile": "doPrintMobileDevices",
+     "org": "doPrintOrgs",
+     "orgs": "doPrintOrgs",
+     "orgunitshareddrive": "doPrintShowOrgunitSharedDrives",
+     "ownership": "doPrintShowOwnership",
+     "peoplecontact": "doPrintShowDomainPeopleContacts",
+     "peopleprofile": "doPrintShowDomainPeopleProfiles",
+     "policy": "doPrintShowCIPolicies",
+     "printer": "doPrintShowPrinters",
+     "printermodel": "doPrintShowPrinterModels",
+     "privileges": "doPrintShowPrivileges",
+     "project": "doPrintShowProjects",
+     "resoldsubscription": "doPrintShowResoldSubscriptions",
+     "resource": "doPrintShowResourceCalendars",
+     "resources": "doPrintShowResourceCalendars",
+     "schema": "doPrintShowUserSchemas",
+     "shareddrive": "doPrintShowSharedDrives",
+     "shareddriveacls": "doPrintShowSharedDriveACLs",
+     "site": "deprecatedDomainSites",
+     "siteacl": "deprecatedDomainSites",
+     "siteactivity": "deprecatedDomainSites",
+     "svcacct": "doPrintShowSvcAccts",
+     "token": "doPrintShowTokens",
+     "transferapps": "doShowTransferApps",
+     "user": "doPrintUsers",
+     "usercountsbyorgunit": "doPrintUserCountsByOrgUnit",
+     "userinvitation": "doPrintShowCIUserInvitations",
+     "users": "doPrintUsers",
+     "vaultcount": "doPrintVaultCounts",
+     "vaultexport": "doPrintShowVaultExports",
+     "vaulthold": "doPrintShowVaultHolds",
+     "vaultmatter": "doPrintShowVaultMatters",
+     "vaultquery": "doPrintShowVaultQueries"
+    }
+   ],
+   "remove": [
+    "REMOVE",
+    {
+     "alias": "doRemoveAliases",
+     "drivelabelpermission": "doDeleteDriveLabelPermissions"
+    }
+   ],
+   "reopen": [
+    "REOPEN",
+    {
+     "vaultmatter": "doReopenVaultMatter"
+    }
+   ],
+   "replace": [
+    "UPDATE",
+    {
+     "sakey": "doReplaceSvcAcctKeys"
+    }
+   ],
+   "revoke": [
+    "REVOKE",
+    {
+     "browsertoken": "doRevokeBrowserToken"
+    }
+   ],
+   "rotate": [
+    "UPDATE",
+    {
+     "sakey": "doProcessSvcAcctKeys"
+    }
+   ],
+   "send": [
+    "SEND",
+    {
+     "userinvitation": "doCIUserInvitationsAction"
+    }
+   ],
+   "setup": [
+    "SETUP",
+    {
+     "chat": "doSetupChat"
+    }
+   ],
+   "show": [
+    "SHOW",
+    {
+     "admin": "doPrintShowAdmins",
+     "adminrole": "doPrintShowAdminRoles",
+     "alert": "doPrintShowAlerts",
+     "alertfeedback": "doPrintShowAlertFeedback",
+     "browser": "doPrintShowBrowsers",
+     "browsertoken": "doPrintShowBrowserTokens",
+     "building": "doPrintShowBuildings",
+     "caalevel": "doPrintShowCAALevels",
+     "channelcustomer": "doPrintShowChannelCustomers",
+     "channelcustomerentitlement": "doPrintShowChannelCustomerEntitlements",
+     "channeloffer": "doPrintShowChannelOffers",
+     "channelproduct": "doPrintShowChannelProducts",
+     "channelsku": "doPrintShowChannelSKUs",
+     "chatmember": "doPrintShowChatMembers",
+     "chatspace": "doPrintShowChatSpaces",
+     "chromeapp": "doPrintShowChromeApps",
+     "chromeappdevices": "doPrintShowChromeAppDevices",
+     "chromeaues": "doPrintShowChromeAues",
+     "chromehistory": "doPrintShowChromeHistory",
+     "chromeneedsattn": "doPrintShowChromeNeedsAttn",
+     "chromepolicy": "doPrintShowChromePolicies",
+     "chromeprofile": "doPrintShowChromeProfiles",
+     "chromeschema": "doPrintShowChromeSchemas",
+     "chromeversions": "doPrintShowChromeVersions",
+     "cigroupmembers": "doShowCIGroupMembers",
+     "classroominvitation": "doPrintShowClassroomInvitations",
+     "contact": "doPrintShowDomainContacts",
+     "crostelemetry": "doInfoPrintShowCrOSTelemetry",
+     "datatransfer": "doPrintShowDataTransfers",
+     "domain": "doPrintShowDomains",
+     "domainalias": "doPrintShowDomainAliases",
+     "domaincontact": "doPrintShowDomainContacts",
+     "drivefileacl": "doPrintShowDriveFileACLs",
+     "drivelabel": "doPrintShowDriveLabels",
+     "drivelabelpermission": "doPrintShowDriveLabelPermissions",
+     "feature": "doPrintShowFeatures",
+     "gal": "doPrintShowGAL",
+     "groupmembers": "doShowGroupMembers",
+     "grouptree": "doPrintShowGroupTree",
+     "guardian": "doPrintShowGuardians",
+     "inboundssoassignment": "doPrintShowInboundSSOAssignments",
+     "inboundssocredential": "doPrintShowInboundSSOCredentials",
+     "inboundssoprofile": "doPrintShowInboundSSOProfiles",
+     "license": "doShowLicenses",
+     "orgtree": "doShowOrgTree",
+     "orgunitshareddrive": "doPrintShowOrgunitSharedDrives",
+     "ownership": "doPrintShowOwnership",
+     "peoplecontact": "doPrintShowDomainPeopleContacts",
+     "peopleprofile": "doPrintShowDomainPeopleProfiles",
+     "policy": "doPrintShowCIPolicies",
+     "printer": "doPrintShowPrinters",
+     "printermodel": "doPrintShowPrinterModels",
+     "privileges": "doPrintShowPrivileges",
+     "project": "doPrintShowProjects",
+     "resoldsubscription": "doPrintShowResoldSubscriptions",
+     "resource": "doPrintShowResourceCalendars",
+     "resources": "doPrintShowResourceCalendars",
+     "sakey": "doShowSvcAcctKeys",
+     "schema": "doPrintShowUserSchemas",
+     "shareddrive": "doPrintShowSharedDrives",
+     "shareddriveacls": "doPrintShowSharedDriveACLs",
+     "shareddriveinfo": "doInfoSharedDrive",
+     "shareddrivethemes": "doShowSharedDriveThemes",
+     "site": "deprecatedDomainSites",
+     "siteacl": "deprecatedDomainSites",
+     "svcacct": "doPrintShowSvcAccts",
+     "token": "doPrintShowTokens",
+     "transferapps": "doShowTransferApps",
+     "userinvitation": "doPrintShowCIUserInvitations",
+     "vaultexport": "doPrintShowVaultExports",
+     "vaulthold": "doPrintShowVaultHolds",
+     "vaultmatter": "doPrintShowVaultMatters",
+     "vaultquery": "doPrintShowVaultQueries"
+    }
+   ],
+   "suspend": [
+    "SUSPEND",
+    {
+     "user": "doSuspendUnsuspendUser",
+     "users": "doSuspendUnsuspendUsers"
+    }
+   ],
+   "sync": [
+    "SYNC",
+    {
+     "device": "doSyncCIDevices",
+     "shareddriveacls": "copySyncSharedDriveACLs"
+    }
+   ],
+   "undelete": [
+    "UNDELETE",
+    {
+     "alert": "doDeleteOrUndeleteAlert",
+     "user": "doUndeleteUser",
+     "users": "doUndeleteUsers",
+     "vaultmatter": "doUndeleteVaultMatter"
+    }
+   ],
+   "unhide": [
+    "UNHIDE",
+    {
+     "shareddrive": "doHideUnhideSharedDrive"
+    }
+   ],
+   "unsuspend": [
+    "UNSUSPEND",
+    {
+     "user": "doSuspendUnsuspendUser",
+     "users": "doSuspendUnsuspendUsers"
+    }
+   ],
+   "update": [
+    "UPDATE",
+    {
+     "adminrole": "doCreateUpdateAdminRoles",
+     "alias": "doCreateUpdateAliases",
+     "browser": "doUpdateBrowsers",
+     "building": "doUpdateBuilding",
+     "caalevel": "doUpdateCAALevel",
+     "chatmessage": "doUpdateChatMessage",
+     "chromepolicy": "doUpdateChromePolicy",
+     "cigroup": "doUpdateCIGroups",
+     "contact": "doUpdateDomainContacts",
+     "contactphoto": "doUpdateDomainContactPhoto",
+     "course": "doUpdateCourse",
+     "courses": "doUpdateCourses",
+     "cros": "doUpdateCrOSDevices",
+     "customer": "doUpdateCustomer",
+     "device": "doUpdateCIDevice",
+     "deviceuser": "doUpdateCIDeviceUser",
+     "deviceuserstate": "doUpdateCIDeviceUserState",
+     "domain": "doUpdateDomain",
+     "drivefileacl": "doUpdateDriveFileACLs",
+     "feature": "doUpdateFeature",
+     "group": "doUpdateGroups",
+     "inboundssoassignment": "doUpdateInboundSSOAssignment",
+     "inboundssoprofile": "doUpdateInboundSSOProfile",
+     "mobile": "doUpdateMobileDevices",
+     "org": "doUpdateOrg",
+     "orgs": "doUpdateOrgs",
+     "printer": "doUpdatePrinter",
+     "project": "doUpdateProject",
+     "resoldcustomer": "doUpdateResoldCustomer",
+     "resoldsubscription": "doUpdateResoldSubscription",
+     "resource": "doUpdateResourceCalendar",
+     "resources": "doUpdateResourceCalendars",
+     "sakey": "doUpdateSvcAcctKeys",
+     "schema": "doCreateUpdateUserSchemas",
+     "shareddrive": "doUpdateSharedDrive",
+     "site": "deprecatedDomainSites",
+     "siteacl": "deprecatedDomainSites",
+     "svcacct": "doCheckUpdateSvcAcct",
+     "user": "doUpdateUser",
+     "users": "doUpdateUsers",
+     "vaulthold": "doUpdateVaultHold",
+     "vaultmatter": "doUpdateVaultMatter",
+     "verify": "doUpdateSiteVerification"
+    }
+   ],
+   "upload": [
+    "USE",
+    {
+     "sakey": "doUploadSvcAcctKeys"
+    }
+   ],
+   "use": [
+    "USE",
+    {
+     "project": "doUseProject"
+    }
+   ],
+   "wipe": [
+    "WIPE",
+    {
+     "device": "doWipeCIDevice",
+     "deviceuser": "doWipeCIDeviceUser"
+    }
+   ],
+   "yubikey": [
+    "RESET_YUBIKEY_PIV",
+    {
+     "resetpiv": "doResetYubiKeyPIV"
+    }
+   ]
+  },
+  "OAUTH2_SUBCOMMANDS": {
+   "create": [
+    "CREATE",
+    "doOAuthCreate"
+   ],
+   "delete": [
+    "DELETE",
+    "doOAuthDelete"
+   ],
+   "export": [
+    "EXPORT",
+    "doOAuthExport"
+   ],
+   "info": [
+    "INFO",
+    "doOAuthInfo"
+   ],
+   "refresh": [
+    "REFRESH",
+    "doOAuthRefresh"
+   ],
+   "update": [
+    "UPDATE",
+    "doOAuthUpdate"
+   ]
+  },
+  "OAUTH2_SUBCOMMAND_ALIASES": {
+   "request": "create",
+   "revoke": "delete",
+   "verify": "info"
+  },
+  "RESOURCE_SUBCOMMANDS_OBJECT_ALIASES": {
+   "acl": "calendaracl",
+   "acls": "calendaracl",
+   "calendaracls": "calendaracl"
+  },
+  "RESOURCE_SUBCOMMANDS_WITH_OBJECTS": {
+   "add": [
+    "ADD",
+    {
+     "calendaracl": "doResourceCreateCalendarACLs"
+    }
+   ],
+   "create": [
+    "CREATE",
+    {
+     "calendaracl": "doResourceCreateCalendarACLs"
+    }
+   ],
+   "delete": [
+    "DELETE",
+    {
+     "calendaracl": "doResourceDeleteCalendarACLs"
+    }
+   ],
+   "info": [
+    "INFO",
+    {
+     "calendaracl": "doResourceInfoCalendarACLs"
+    }
+   ],
+   "print": [
+    "PRINT",
+    {
+     "calendaracl": "doResourcePrintShowCalendarACLs"
+    }
+   ],
+   "show": [
+    "SHOW",
+    {
+     "calendaracl": "doResourcePrintShowCalendarACLs"
+    }
+   ],
+   "update": [
+    "UPDATE",
+    {
+     "calendaracl": "doResourceUpdateCalendarACLs"
+    }
+   ]
+  },
+  "RESOURCE_SUBCOMMAND_ALIASES": {
+   "del": "delete"
+  },
+  "USER_COMMANDS": {
+   "delegate": [
+    "ADD",
+    "delegateTo"
+   ],
+   "deprovision": [
+    "DEPROVISION",
+    "deprovisionUser"
+   ],
+   "draftemail": [
+    "DRAFT",
+    "draftMessage"
+   ],
+   "filter": [
+    "ADD",
+    "createFilter"
+   ],
+   "forward": [
+    "SET",
+    "setForward"
+   ],
+   "imap": [
+    "SET",
+    "setImap"
+   ],
+   "importemail": [
+    "IMPORT",
+    "importMessage"
+   ],
+   "insertemail": [
+    "INSERT",
+    "insertMessage"
+   ],
+   "label": [
+    "ADD",
+    "createLabel"
+   ],
+   "language": [
+    "SET",
+    "setLanguage"
+   ],
+   "list": [
+    "LIST",
+    "doListUser"
+   ],
+   "pop": [
+    "SET",
+    "setPop"
+   ],
+   "profile": [
+    "SET",
+    "setProfile"
+   ],
+   "sendas": [
+    "ADD",
+    "createUpdateSendAs"
+   ],
+   "sendemail": [
+    "SENDEMAIL",
+    "doSendEmail"
+   ],
+   "signature": [
+    "SET",
+    "setSignature"
+   ],
+   "signout": [
+    "SIGNOUT",
+    "signoutTurnoff2SVUsers"
+   ],
+   "turnoff2sv": [
+    "TURNOFF2SV",
+    "signoutTurnoff2SVUsers"
+   ],
+   "vacation": [
+    "SET",
+    "setVacation"
+   ],
+   "waitformailbox": [
+    "WAITFORMAILBOX",
+    "waitForMailbox"
+   ]
+  },
+  "USER_COMMANDS_ALIASES": {
+   "del": "delete",
+   "delegates": "delegate",
+   "deprov": "deprovision",
+   "imap4": "imap",
+   "pop3": "pop",
+   "sig": "signature",
+   "utf": "unicode",
+   "utf-8": "unicode",
+   "utf8": "unicode"
+  },
+  "USER_COMMANDS_OBJ_ALIASES": {
+   "3lo": "token",
+   "aliases": "alias",
+   "analyticaccounts": "analyticaccount",
+   "analyticaccountsummaries": "analyticaccountsummary",
+   "analyticdatastreams": "analyticdatastream",
+   "analyticproperties": "analyticproperty",
+   "analyticuaproperties": "analyticuaproperty",
+   "applicationspecificpasswords": "asp",
+   "asps": "asp",
+   "backupcodes": "backupcode",
+   "calendaracls": "calendaracl",
+   "calendars": "calendar",
+   "chatevents": "chatevent",
+   "chatmembers": "chatmember",
+   "chatmessages": "chatmessage",
+   "chatspaces": "chatspace",
+   "cimember": "cigroupmembers",
+   "cimembers": "cigroupmembers",
+   "classificationlabel": "drivelabel",
+   "classificationlabelpermission": "drivelabelpermission",
+   "classificationlabelpermissions": "drivelabelpermission",
+   "classificationlabels": "drivelabel",
+   "classroominvitations": "classroominvitation",
+   "contact": "peoplecontact",
+   "contactdelegates": "contactdelegate",
+   "contactgroup": "peoplecontactgroup",
+   "contactgroups": "peoplecontactgroup",
+   "contactphoto": "peoplecontactphoto",
+   "contactphotos": "peoplecontactphoto",
+   "contacts": "peoplecontact",
+   "counts": "count",
+   "cseidentities": "cseidentity",
+   "csekeypairs": "csekeypair",
+   "datastudioasset": "lookerstudioasset",
+   "datastudioassets": "lookerstudioasset",
+   "datastudiopermission": "lookerstudiopermission",
+   "datastudiopermissions": "lookerstudiopermission",
+   "delegates": "delegate",
+   "domaincontact": "peoplecontact",
+   "domaincontacts": "peoplecontact",
+   "drivefileacls": "drivefileacl",
+   "drivefileshortcuts": "drivefileshortcut",
+   "drivelabelpermissions": "drivelabelpermission",
+   "drivelabels": "drivelabel",
+   "drivelastmodifications": "drivelastmodification",
+   "events": "event",
+   "filecomments": "filecomment",
+   "filecounts": "filecount",
+   "filedrivelabels": "filedrivelabel",
+   "filepaths": "filepath",
+   "filerevisions": "filerevision",
+   "filesharecounts": "filesharecount",
+   "filters": "filter",
+   "focustimes": "focustime",
+   "formresponses": "formresponse",
+   "forms": "form",
+   "forwardingaddresses": "forwardingaddress",
+   "forwards": "forward",
+   "grouplist": "groupslist",
+   "groups": "group",
+   "groupsmembers": "groupmembers",
+   "guardianinvitations": "guardianinvitation",
+   "guardianinvite": "guardianinvitation",
+   "guardians": "guardian",
+   "hold": "vaulthold",
+   "holds": "vaulthold",
+   "imap4": "imap",
+   "inviteguardian": "guardianinvitation",
+   "labels": "label",
+   "licence": "license",
+   "licences": "license",
+   "licenses": "license",
+   "lookerstudioassets": "lookerstudioasset",
+   "lookerstudiopermissions": "lookerstudiopermission",
+   "meetconferences": "meetconference",
+   "meetparticipants": "meetparticipant",
+   "meetrecordings": "meetrecording",
+   "meetspaces": "meetspace",
+   "meettranscripts": "meettranscript",
+   "member": "groupmembers",
+   "members": "groupmembers",
+   "messages": "message",
+   "noteacls": "noteacl",
+   "noteattachments": "noteattachment",
+   "notes": "note",
+   "notesacl": "noteacl",
+   "notesacls": "noteacl",
+   "oauth": "token",
+   "othercontacts": "othercontact",
+   "outofoffices": "outofoffice",
+   "people": "peopleprofile",
+   "peoplecontactgroups": "peoplecontactgroup",
+   "peoplecontactphotos": "peoplecontactphoto",
+   "peoplecontacts": "peoplecontact",
+   "peopleprofiles": "peopleprofile",
+   "permissions": "permission",
+   "pop3": "pop",
+   "seccals": "calendar",
+   "shareddrives": "shareddrive",
+   "sheetranges": "sheetrange",
+   "sheets": "sheet",
+   "sig": "signature",
+   "siteacls": "siteacl",
+   "sites": "site",
+   "smimes": "smime",
+   "tasklists": "tasklist",
+   "tasks": "task",
+   "teamdrive": "shareddrive",
+   "teamdriveacls": "shareddriveacls",
+   "teamdriveinfo": "shareddriveinfo",
+   "teamdrives": "shareddrive",
+   "teamdrivethemes": "shareddrivethemes",
+   "threads": "thread",
+   "tokens": "token",
+   "users": "user",
+   "vaultholds": "vaulthold",
+   "verificationcodes": "backupcode",
+   "workinglocations": "workinglocation",
+   "youtubechannels": "youtubechannel"
+  },
+  "USER_COMMANDS_WITH_OBJECTS": {
+   "accept": [
+    "ACCEPT",
+    {
+     "classroominvitation": "acceptClassroomInvitations"
+    }
+   ],
+   "add": [
+    "ADD",
+    {
+     "calendar": "addCreateCalendars",
+     "calendaracl": "createCalendarACLs",
+     "chatmember": "createChatMember",
+     "chatmessage": "createChatMessage",
+     "chatspace": "createChatSpace",
+     "classroominvitation": "createClassroomInvitations",
+     "contactdelegate": "processContactDelegates",
+     "cseidentity": "createUpdateCSEIdentity",
+     "csekeypair": "createCSEKeyPair",
+     "delegate": "processDelegates",
+     "drivefile": "createDriveFile",
+     "drivefileacl": "createDriveFileACL",
+     "drivefileshortcut": "createDriveFileShortcut",
+     "drivefolderpath": "createDriveFolderPath",
+     "drivelabelpermission": "createDriveLabelPermissions",
+     "event": "createCalendarEvent",
+     "filter": "createFilter",
+     "focustime": "createFocusTime",
+     "form": "createForm",
+     "forwardingaddress": "createForwardingAddresses",
+     "group": "addUserToGroups",
+     "guardian": "inviteGuardians",
+     "guardianinvitation": "inviteGuardians",
+     "label": "createLabel",
+     "labellist": "createLabelList",
+     "license": "createLicense",
+     "lookerstudiopermission": "processLookerStudioPermissions",
+     "meetspace": "createMeetSpace",
+     "note": "createNote",
+     "noteacl": "createNotesACLs",
+     "outofoffice": "createOutOfOffice",
+     "peoplecontact": "createUserPeopleContact",
+     "peoplecontactgroup": "createUserPeopleContactGroup",
+     "permission": "createDriveFilePermissions",
+     "sendas": "createUpdateSendAs",
+     "shareddrive": "createSharedDrive",
+     "sheet": "createSheet",
+     "site": "deprecatedUserSites",
+     "siteacl": "deprecatedUserSites",
+     "smime": "createSmime",
+     "task": "processTasks",
+     "tasklist": "processTasklists",
+     "workinglocation": "createWorkingLocation"
+    }
+   ],
+   "append": [
+    "APPEND",
+    {
+     "sheetrange": "appendSheetRanges"
+    }
+   ],
+   "archive": [
+    "ARCHIVE",
+    {
+     "message": "archiveMessages"
+    }
+   ],
+   "cancel": [
+    "CANCEL",
+    {
+     "guardianinvitation": "cancelGuardianInvitations"
+    }
+   ],
+   "check": [
+    "CHECK",
+    {
+     "drivefileshortcut": "checkDriveFileShortcut",
+     "group": "checkUserInGroups",
+     "isinvitable": "checkCIUserIsInvitable",
+     "serviceaccount": "checkServiceAccount"
+    }
+   ],
+   "claim": [
+    "CLAIM",
+    {
+     "ownership": "claimOwnership"
+    }
+   ],
+   "clear": [
+    "CLEAR",
+    {
+     "guardian": "clearGuardians",
+     "peoplecontact": "clearUserPeopleContacts",
+     "sheetrange": "clearSheetRanges",
+     "tasklist": "processTasklists"
+    }
+   ],
+   "collect": [
+    "COLLECT",
+    {
+     "orphans": "collectOrphans"
+    }
+   ],
+   "copy": [
+    "COPY",
+    {
+     "drivefile": "copyDriveFile",
+     "othercontact": "copyUserPeopleOtherContacts",
+     "shareddriveacls": "copySyncSharedDriveACLs"
+    }
+   ],
+   "create": [
+    "CREATE",
+    {
+     "calendar": "addCreateCalendars",
+     "calendaracl": "createCalendarACLs",
+     "chatmember": "createChatMember",
+     "chatmessage": "createChatMessage",
+     "chatspace": "createChatSpace",
+     "classroominvitation": "createClassroomInvitations",
+     "contactdelegate": "processContactDelegates",
+     "cseidentity": "createUpdateCSEIdentity",
+     "csekeypair": "createCSEKeyPair",
+     "delegate": "processDelegates",
+     "drivefile": "createDriveFile",
+     "drivefileacl": "createDriveFileACL",
+     "drivefileshortcut": "createDriveFileShortcut",
+     "drivefolderpath": "createDriveFolderPath",
+     "drivelabelpermission": "createDriveLabelPermissions",
+     "event": "createCalendarEvent",
+     "filter": "createFilter",
+     "focustime": "createFocusTime",
+     "form": "createForm",
+     "forwardingaddress": "createForwardingAddresses",
+     "group": "addUserToGroups",
+     "guardian": "inviteGuardians",
+     "guardianinvitation": "inviteGuardians",
+     "label": "createLabel",
+     "labellist": "createLabelList",
+     "license": "createLicense",
+     "lookerstudiopermission": "processLookerStudioPermissions",
+     "meetspace": "createMeetSpace",
+     "note": "createNote",
+     "noteacl": "createNotesACLs",
+     "outofoffice": "createOutOfOffice",
+     "peoplecontact": "createUserPeopleContact",
+     "peoplecontactgroup": "createUserPeopleContactGroup",
+     "permission": "createDriveFilePermissions",
+     "sendas": "createUpdateSendAs",
+     "shareddrive": "createSharedDrive",
+     "sheet": "createSheet",
+     "site": "deprecatedUserSites",
+     "siteacl": "deprecatedUserSites",
+     "smime": "createSmime",
+     "task": "processTasks",
+     "tasklist": "processTasklists",
+     "workinglocation": "createWorkingLocation"
+    }
+   ],
+   "dedup": [
+    "DEDUP",
+    {
+     "peoplecontact": "dedupReplaceDomainUserPeopleContacts"
+    }
+   ],
+   "delete": [
+    "DELETE",
+    {
+     "alias": "deleteUsersAliases",
+     "asp": "deleteASP",
+     "backupcode": "deleteBackupCodes",
+     "calendar": "deleteCalendars",
+     "calendaracl": "deleteCalendarACLs",
+     "chatmember": "deleteUpdateChatMember",
+     "chatmessage": "deleteChatMessage",
+     "chatspace": "deleteChatSpace",
+     "classroominvitation": "deleteClassroomInvitations",
+     "contactdelegate": "processContactDelegates",
+     "cseidentity": "processCSEIdentity",
+     "delegate": "processDelegates",
+     "drivefile": "deleteDriveFile",
+     "drivefileacl": "deleteDriveFileACLs",
+     "drivelabelpermission": "deleteDriveLabelPermissions",
+     "emptydrivefolders": "deleteEmptyDriveFolders",
+     "event": "deleteCalendarEvents",
+     "filerevision": "deleteFileRevisions",
+     "filter": "deleteFilters",
+     "focustime": "deleteFocusTime",
+     "forwardingaddress": "deleteForwardingAddresses",
+     "group": "deleteUserFromGroups",
+     "guardian": "deleteGuardians",
+     "label": "deleteLabel",
+     "labelid": "deleteLabelId",
+     "labelidlist": "deleteLabelIdList",
+     "labellist": "deleteLabelList",
+     "license": "deleteLicense",
+     "lookerstudiopermission": "processLookerStudioPermissions",
+     "message": "processMessages",
+     "note": "deleteInfoNotes",
+     "noteacl": "deleteNotesACLs",
+     "othercontact": "processUserPeopleOtherContacts",
+     "outofoffice": "deleteOutOfOffice",
+     "peoplecontact": "deleteUserPeopleContacts",
+     "peoplecontactgroup": "deleteUserPeopleContactGroups",
+     "peoplecontactphoto": "deleteUserPeopleContactPhoto",
+     "permission": "deletePermissions",
+     "photo": "deletePhoto",
+     "sendas": "deleteInfoSendAs",
+     "shareddrive": "deleteSharedDrive",
+     "siteacl": "deprecatedUserSites",
+     "smime": "deleteSmime",
+     "task": "processTasks",
+     "tasklist": "processTasklists",
+     "thread": "processThreads",
+     "token": "deleteTokens",
+     "user": "deleteUsers",
+     "workinglocation": "deleteWorkingLocation"
+    }
+   ],
+   "disable": [
+    "DISABLE",
+    {
+     "csekeypair": "processCSEKeyPair"
+    }
+   ],
+   "draft": [
+    "DRAFT",
+    {
+     "message": "draftMessage"
+    }
+   ],
+   "empty": [
+    "EMPTY",
+    {
+     "calendartrash": "emptyCalendarTrash",
+     "drivetrash": "emptyDriveTrash"
+    }
+   ],
+   "enable": [
+    "ENABLE",
+    {
+     "csekeypair": "processCSEKeyPair"
+    }
+   ],
+   "end": [
+    "END",
+    {
+     "meetconference": "endMeetConference"
+    }
+   ],
+   "export": [
+    "EXPORT",
+    {
+     "message": "exportMessages",
+     "thread": "exportThreads"
+    }
+   ],
+   "get": [
+    "DOWNLOAD",
+    {
+     "document": "getGoogleDocument",
+     "drivefile": "getDriveFile",
+     "noteattachment": "getNoteAttachments",
+     "peoplecontactphoto": "getUserPeopleContactPhoto",
+     "photo": "getUserPhoto",
+     "profilephoto": "getProfilePhoto"
+    }
+   ],
+   "hide": [
+    "HIDE",
+    {
+     "shareddrive": "hideUnhideSharedDrive"
+    }
+   ],
+   "import": [
+    "IMPORT",
+    {
+     "event": "importCalendarEvent",
+     "message": "importMessage",
+     "tasklist": "importTasklist"
+    }
+   ],
+   "info": [
+    "INFO",
+    {
+     "calendar": "infoCalendars",
+     "calendaracl": "infoCalendarACLs",
+     "chatevent": "infoChatEvent",
+     "chatmember": "infoChatMember",
+     "chatmessage": "infoChatMessage",
+     "chatspace": "infoChatSpace",
+     "chatspacedm": "infoChatSpaceDM",
+     "cigroupmembers": "infoCIGroupMembers",
+     "cseidentity": "processCSEIdentity",
+     "csekeypair": "processCSEKeyPair",
+     "drivefile": "showFileInfo",
+     "drivefileacl": "infoDriveFileACLs",
+     "drivelabel": "infoDriveLabels",
+     "event": "infoCalendarEvents",
+     "filter": "infoFilters",
+     "forwardingaddress": "infoForwardingAddresses",
+     "groupmembers": "infoGroupMembers",
+     "meetspace": "infoMeetSpace",
+     "note": "deleteInfoNotes",
+     "peoplecontact": "infoUserPeopleContacts",
+     "peoplecontactgroup": "infoUserPeopleContactGroups",
+     "sendas": "deleteInfoSendAs",
+     "shareddrive": "infoSharedDrive",
+     "sheet": "infoPrintShowSheets",
+     "site": "deprecatedUserSites",
+     "siteacl": "deprecatedUserSites",
+     "task": "processTasks",
+     "tasklist": "processTasklists",
+     "user": "infoUsers"
+    }
+   ],
+   "insert": [
+    "INSERT",
+    {
+     "message": "insertMessage"
+    }
+   ],
+   "modify": [
+    "MODIFY",
+    {
+     "calendar": "modifyCalendars",
+     "chatmember": "deleteUpdateChatMember",
+     "message": "processMessages",
+     "thread": "processThreads"
+    }
+   ],
+   "move": [
+    "MOVE",
+    {
+     "drivefile": "moveDriveFile",
+     "event": "moveCalendarEvents",
+     "othercontact": "processUserPeopleOtherContacts",
+     "task": "processTasks"
+    }
+   ],
+   "obliterate": [
+    "OBLITERATE",
+    {
+     "csekeypair": "processCSEKeyPair"
+    }
+   ],
+   "print": [
+    "PRINT",
+    {
+     "analyticaccount": "printShowAnalyticAccounts",
+     "analyticaccountsummary": "printShowAnalyticAccountSummaries",
+     "analyticdatastream": "printShowAnalyticDatastreams",
+     "analyticproperty": "printShowAnalyticProperties",
+     "analyticuaproperty": "printShowAnalyticUAProperties",
+     "asp": "printShowASPs",
+     "backupcode": "printShowBackupCodes",
+     "calendar": "printShowCalendars",
+     "calendaracl": "printShowCalendarACLs",
+     "calsettings": "printShowCalSettings",
+     "chatevent": "printShowChatEvents",
+     "chatmember": "printShowChatMembers",
+     "chatmessage": "printShowChatMessages",
+     "chatspace": "printShowChatSpaces",
+     "classroominvitation": "printShowClassroomInvitations",
+     "classroomprofile": "printShowClassroomProfile",
+     "contactdelegate": "printShowContactDelegates",
+     "cseidentity": "printShowCSEIdentities",
+     "csekeypair": "printShowCSEKeyPairs",
+     "delegate": "printShowDelegates",
+     "diskusage": "printDiskUsage",
+     "driveactivity": "printDriveActivity",
+     "drivefileacl": "printShowDriveFileACLs",
+     "drivelabel": "printShowDriveLabels",
+     "drivelabelpermission": "printShowDriveLabelPermissions",
+     "drivelastmodification": "printShowDrivelastModifications",
+     "drivesettings": "printShowDriveSettings",
+     "emptydrivefolders": "printEmptyDriveFolders",
+     "event": "printShowCalendarEvents",
+     "filecomment": "printShowFileComments",
+     "filecount": "printShowFileCounts",
+     "fileinfo": "showFileInfo",
+     "filelist": "printFileList",
+     "fileparenttree": "printFileParentTree",
+     "filepath": "printShowFilePaths",
+     "filerevision": "printShowFileRevisions",
+     "filesharecount": "printShowFileShareCounts",
+     "filetree": "printShowFileTree",
+     "filter": "printShowFilters",
+     "focustime": "printShowFocusTime",
+     "form": "printShowForms",
+     "formresponse": "printShowFormResponses",
+     "forward": "printShowForward",
+     "forwardingaddress": "printShowForwardingAddresses",
+     "gmailprofile": "printShowGmailProfile",
+     "group": "printShowUserGroups",
+     "groupslist": "printUserGroupsList",
+     "grouptree": "printShowGroupTree",
+     "guardian": "printShowGuardians",
+     "imap": "printShowImap",
+     "label": "printShowLabels",
+     "language": "printShowLanguage",
+     "lookerstudioasset": "printShowLookerStudioAssets",
+     "lookerstudiopermission": "printShowLookerStudioPermissions",
+     "meetconference": "printShowMeetConferences",
+     "meetparticipant": "printShowMeetParticipants",
+     "meetrecording": "printShowMeetRecordings",
+     "meettranscript": "printShowMeetTranscripts",
+     "message": "printShowMessages",
+     "note": "printShowNotes",
+     "othercontact": "printShowUserPeopleOtherContacts",
+     "outofoffice": "printShowOutOfOffice",
+     "peoplecontact": "printShowUserPeopleContacts",
+     "peoplecontactgroup": "printShowUserPeopleContactGroups",
+     "peopleprofile": "printShowUserPeopleProfiles",
+     "pop": "printShowPop",
+     "sendas": "printShowSendAs",
+     "shareddrive": "printShowSharedDrives",
+     "shareddriveacls": "printShowSharedDriveACLs",
+     "sheet": "infoPrintShowSheets",
+     "sheetrange": "printShowSheetRanges",
+     "signature": "printShowSignature",
+     "site": "deprecatedUserSites",
+     "siteacl": "deprecatedUserSites",
+     "siteactivity": "deprecatedUserSites",
+     "smime": "printShowSmimes",
+     "task": "printShowTasks",
+     "tasklist": "printShowTasklists",
+     "thread": "printShowThreads",
+     "token": "printShowTokens",
+     "user": "doPrintUserEntity",
+     "userlist": "doPrintUserList",
+     "vacation": "printShowVacation",
+     "vaulthold": "printShowUserVaultHolds",
+     "workinglocation": "printShowWorkingLocation",
+     "youtubechannel": "printShowYouTubeChannel"
+    }
+   ],
+   "process": [
+    "PROCESS",
+    {
+     "filedrivelabel": "processFileDriveLabels"
+    }
+   ],
+   "purge": [
+    "PURGE",
+    {
+     "drivefile": "purgeDriveFile",
+     "event": "purgeCalendarEvents"
+    }
+   ],
+   "remove": [
+    "REMOVE",
+    {
+     "calendar": "removeCalendars",
+     "chatmember": "deleteUpdateChatMember",
+     "drivelabelpermission": "deleteDriveLabelPermissions"
+    }
+   ],
+   "replacedomain": [
+    "REPLACE_DOMAIN",
+    {
+     "peoplecontact": "dedupReplaceDomainUserPeopleContacts"
+    }
+   ],
+   "show": [
+    "SHOW",
+    {
+     "analyticaccount": "printShowAnalyticAccounts",
+     "analyticaccountsummary": "printShowAnalyticAccountSummaries",
+     "analyticdatastream": "printShowAnalyticDatastreams",
+     "analyticproperty": "printShowAnalyticProperties",
+     "analyticuaproperty": "printShowAnalyticUAProperties",
+     "asp": "printShowASPs",
+     "backupcode": "printShowBackupCodes",
+     "calendar": "printShowCalendars",
+     "calendaracl": "printShowCalendarACLs",
+     "calsettings": "printShowCalSettings",
+     "chatevent": "printShowChatEvents",
+     "chatmember": "printShowChatMembers",
+     "chatmessage": "printShowChatMessages",
+     "chatspace": "printShowChatSpaces",
+     "classroominvitation": "printShowClassroomInvitations",
+     "classroomprofile": "printShowClassroomProfile",
+     "contactdelegate": "printShowContactDelegates",
+     "count": "showCountUser",
+     "cseidentity": "printShowCSEIdentities",
+     "csekeypair": "printShowCSEKeyPairs",
+     "delegate": "printShowDelegates",
+     "diskusage": "printDiskUsage",
+     "driveactivity": "printDriveActivity",
+     "drivefileacl": "printShowDriveFileACLs",
+     "drivelabel": "printShowDriveLabels",
+     "drivelabelpermission": "printShowDriveLabelPermissions",
+     "drivelastmodification": "printShowDrivelastModifications",
+     "drivesettings": "printShowDriveSettings",
+     "event": "printShowCalendarEvents",
+     "filecomment": "printShowFileComments",
+     "filecount": "printShowFileCounts",
+     "fileinfo": "showFileInfo",
+     "filelist": "printFileList",
+     "filepath": "printShowFilePaths",
+     "filerevision": "printShowFileRevisions",
+     "filesharecount": "printShowFileShareCounts",
+     "filetree": "printShowFileTree",
+     "filter": "printShowFilters",
+     "focustime": "printShowFocusTime",
+     "form": "printShowForms",
+     "formresponse": "printShowFormResponses",
+     "forward": "printShowForward",
+     "forwardingaddress": "printShowForwardingAddresses",
+     "gmailprofile": "printShowGmailProfile",
+     "group": "printShowUserGroups",
+     "grouptree": "printShowGroupTree",
+     "guardian": "printShowGuardians",
+     "imap": "printShowImap",
+     "label": "printShowLabels",
+     "language": "printShowLanguage",
+     "lookerstudioasset": "printShowLookerStudioAssets",
+     "lookerstudiopermission": "printShowLookerStudioPermissions",
+     "meetconference": "printShowMeetConferences",
+     "meetparticipant": "printShowMeetParticipants",
+     "meetrecording": "printShowMeetRecordings",
+     "meettranscript": "printShowMeetTranscripts",
+     "message": "printShowMessages",
+     "note": "printShowNotes",
+     "othercontact": "printShowUserPeopleOtherContacts",
+     "outofoffice": "printShowOutOfOffice",
+     "peoplecontact": "printShowUserPeopleContacts",
+     "peoplecontactgroup": "printShowUserPeopleContactGroups",
+     "peopleprofile": "printShowUserPeopleProfiles",
+     "pop": "printShowPop",
+     "profile": "showProfile",
+     "sendas": "printShowSendAs",
+     "shareddrive": "printShowSharedDrives",
+     "shareddriveacls": "printShowSharedDriveACLs",
+     "shareddriveinfo": "infoSharedDrive",
+     "shareddrivethemes": "showSharedDriveThemes",
+     "sheet": "infoPrintShowSheets",
+     "sheetrange": "printShowSheetRanges",
+     "signature": "printShowSignature",
+     "site": "deprecatedUserSites",
+     "siteacl": "deprecatedUserSites",
+     "smime": "printShowSmimes",
+     "task": "printShowTasks",
+     "tasklist": "printShowTasklists",
+     "thread": "printShowThreads",
+     "token": "printShowTokens",
+     "vacation": "printShowVacation",
+     "vaulthold": "printShowUserVaultHolds",
+     "workinglocation": "printShowWorkingLocation",
+     "youtubechannel": "printShowYouTubeChannel"
+    }
+   ],
+   "spam": [
+    "SPAM",
+    {
+     "message": "processMessages",
+     "thread": "processThreads"
+    }
+   ],
+   "suspend": [
+    "SUSPEND",
+    {
+     "user": "suspendUnsuspendUsers"
+    }
+   ],
+   "sync": [
+    "SYNC",
+    {
+     "chatmember": "syncChatMembers",
+     "group": "syncUserWithGroups",
+     "guardian": "syncGuardians",
+     "license": "syncLicense",
+     "shareddriveacls": "copySyncSharedDriveACLs"
+    }
+   ],
+   "transfer": [
+    "TRANSFER",
+    {
+     "calendar": "transferCalendars",
+     "drive": "transferDrive",
+     "ownership": "transferOwnership"
+    }
+   ],
+   "trash": [
+    "TRASH",
+    {
+     "drivefile": "trashDriveFile",
+     "message": "processMessages",
+     "thread": "processThreads"
+    }
+   ],
+   "undelete": [
+    "UNDELETE",
+    {
+     "user": "undeleteUsers"
+    }
+   ],
+   "unhide": [
+    "UNHIDE",
+    {
+     "shareddrive": "hideUnhideSharedDrive"
+    }
+   ],
+   "unsuspend": [
+    "UNSUSPEND",
+    {
+     "user": "suspendUnsuspendUsers"
+    }
+   ],
+   "untrash": [
+    "UNTRASH",
+    {
+     "drivefile": "untrashDriveFile",
+     "message": "processMessages",
+     "thread": "processThreads"
+    }
+   ],
+   "update": [
+    "UPDATE",
+    {
+     "backupcode": "updateBackupCodes",
+     "calattendees": "updateCalendarAttendees",
+     "calendar": "updateCalendars",
+     "calendaracl": "updateCalendarACLs",
+     "chatmember": "deleteUpdateChatMember",
+     "chatmessage": "updateChatMessage",
+     "chatspace": "updateChatSpace",
+     "cseidentity": "createUpdateCSEIdentity",
+     "delegate": "updateDelegates",
+     "document": "updateGoogleDocument",
+     "drivefile": "updateDriveFile",
+     "drivefileacl": "updateDriveFileACLs",
+     "event": "updateCalendarEvents",
+     "filerevision": "updateFileRevisions",
+     "form": "updateForm",
+     "group": "updateUserGroups",
+     "label": "updateLabels",
+     "labelid": "updateLabelSettingsById",
+     "labelsettings": "updateLabelSettings",
+     "license": "updateLicense",
+     "lookerstudiopermission": "processLookerStudioPermissions",
+     "meetspace": "updateMeetSpace",
+     "othercontact": "processUserPeopleOtherContacts",
+     "peoplecontact": "updateUserPeopleContacts",
+     "peoplecontactgroup": "updateUserPeopleContactGroup",
+     "peoplecontactphoto": "updateUserPeopleContactPhoto",
+     "photo": "updatePhoto",
+     "sendas": "createUpdateSendAs",
+     "serviceaccount": "checkServiceAccount",
+     "shareddrive": "updateSharedDrive",
+     "sheet": "updateSheets",
+     "sheetrange": "updateSheetRanges",
+     "site": "deprecatedUserSites",
+     "siteacl": "deprecatedUserSites",
+     "smime": "updateSmime",
+     "task": "processTasks",
+     "tasklist": "processTasklists",
+     "user": "updateUsers"
+    }
+   ],
+   "watch": [
+    "WATCH",
+    {
+     "gmail": "watchGmail"
+    }
+   ],
+   "wipe": [
+    "WIPE",
+    {
+     "event": "wipeCalendarEvents"
+    }
+   ]
+  }
+ }
+}

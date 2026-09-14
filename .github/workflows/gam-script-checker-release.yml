@@ -1,0 +1,56 @@
+name: gam script checker release
+
+# Every gam-script-checker-v* release gets its download zip built from the
+# tagged commit, so the zip can never lag behind the code or carry files that
+# are not in the repo. Other tools' releases in this repo are ignored.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    if: startsWith(github.event.release.tag_name, 'gam-script-checker-v')
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - name: Tag matches gamcheck.py __version__
+        working-directory: GAM Script Checker
+        run: |
+          v=$(python -c "import gamcheck; print(gamcheck.__version__)")
+          test "gam-script-checker-v$v" = "$TAG" || { echo "::error::tag $TAG but gamcheck.py says $v"; exit 1; }
+      - name: Tests
+        working-directory: GAM Script Checker
+        run: |
+          python developers/test_gamcheck.py
+          python developers/real-world/blind-adversarial-2026-09-13/blind_run.py gamcheck.py
+      - name: Build zip and hashes
+        run: |
+          zip="$TAG.zip"
+          git archive --format=zip --prefix="GAM Script Checker/" -o "$zip" "HEAD:GAM Script Checker"
+          {
+            echo
+            echo "## SHA256"
+            echo
+            echo '```'
+            sha256sum "$zip"
+            (cd "GAM Script Checker" && sha256sum gamcheck.py verbs/*.json)
+            echo '```'
+          } > hashes.md
+          cat hashes.md
+      - name: Attach zip and append hashes to the notes
+        run: |
+          gh release upload "$TAG" "$TAG.zip" --clobber
+          gh release view "$TAG" --json body -q .body > notes.md
+          grep -q '^## SHA256' notes.md || cat hashes.md >> notes.md
+          gh release edit "$TAG" --notes-file notes.md
