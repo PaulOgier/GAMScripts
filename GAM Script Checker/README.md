@@ -114,12 +114,34 @@ These commands are only for practising with the checker. **Do not run them in ga
 ```
 gam print users
 gam update user bob@example.com suspended on
+gam $VERB user bob@example.com
 gam delete user bob@example.com
 ```
 
-Paste all three in paste mode. The checker should say DESTRUCTIVE: one read, one change, one delete, with a 20-day UNDO note on the delete.
+Paste all four in paste mode. The checker should say DESTRUCTIVE, with one line at each level: a read, a change, a cannot tell (the verb is in a variable, so it cannot be judged), and a delete carrying a 20-day UNDO note.
 
 For file mode, check `developers/fixtures/offboard.sh` from inside the checker folder. It should also say DESTRUCTIVE (1 changes, 3 destructive).
+
+### Checking it yourself on Windows, macOS and Linux
+
+Save the four lines above as `demo.txt` and run the checker over it. One run shows all four levels, so it doubles as a test that the output renders properly on your machine.
+
+macOS and Linux:
+
+```
+python3 gamcheck.py demo.txt
+```
+
+Windows, in cmd or PowerShell:
+
+```
+python -c "import sys;print('encoding:', sys.stdout.encoding)"
+python gamcheck.py demo.txt
+```
+
+The encoding line matters on Windows. The report prefixes each level with a coloured dot, and a console that cannot encode those characters gets the plain ASCII report instead, which is the intended behaviour rather than a fault. So `utf-8` should show the dots and `cp1252` should show clean ASCII with no dots. **Either one is a pass.** What is not a pass is question marks, empty boxes, or a `UnicodeEncodeError`; report that as a bug.
+
+Two places this bites: a Windows console on a legacy code page, where `chcp 65001` before the run switches it to UTF-8, and an SSH session into Windows, which reports `cp1252` even when the desktop console is UTF-8.
 
 ## Handy options
 
@@ -141,7 +163,7 @@ In paste mode the checker also tidies what you pasted, and tells you when it doe
 - **Obfuscated code is flagged, not decoded.**
 - **Row counts need the file.** "Deletes every user in leavers.csv (212 rows)" only appears when the CSV is next to the script or in the current folder.
 - **Placeholders read as CANNOT TELL.** A command copied from documentation with `<GOOGLE SHEET ID>` or `<UserTypeEntity>` still in it cannot be judged.
-- **It says what a script would do, not whether it works.** A command GAM7 would reject can still get a verdict when its verb is valid.
+- **It says what a script would do, not whether it works.** A command GAM7 would reject can still get a verdict when its verb is valid. A green READ-ONLY is not a syntax check: `gam info cros crosquery "id:X"` reads as READ-ONLY although GAM7 rejects it, because `crosquery` is an entity word that belongs before the verb, not after `info cros`. Check the grammar in GAM's own wiki before you run something you have not run before.
 - **Python that calls Google's APIs directly** (`googleapiclient`) without gam is not analysed.
 - **The command tables go out of date.** They are built from GAM's own source (GAM7 7.48.07, GAMADV-XTD3 7.06.04, legacy GAM 6.58). A command they do not know is CANNOT TELL. A new safety switch added to a command GAM already had is not picked up automatically.
 

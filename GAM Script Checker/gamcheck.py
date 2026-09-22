@@ -72,7 +72,7 @@ import sys
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
-__version__ = '0.3.0'
+__version__ = '0.3.1'
 
 HERE = Path(__file__).resolve().parent
 VERBS_DIR = HERE / 'verbs'
@@ -1492,13 +1492,32 @@ def verdict(findings):
     return max((f.level for f in findings), default=UNKNOWN)
 
 
-def render(path, findings, tables, quiet=False):
-    """Plain-text report, ASCII only so it survives any Windows console."""
+DOTS = ['\U0001F7E2', '\U0001F7E0', '⚪', '\U0001F534', '\U0001F534']  # green, orange, white, red, red; by level
+
+
+def can_print_dots(stream):
+    """True when the stream can encode the level dots.
+
+    A Windows console on a legacy code page cannot print emoji, and
+    errors='replace' would turn each dot into '?', so those consoles keep the
+    plain ASCII report.
+    """
+    try:
+        ''.join(DOTS).encode(stream.encoding or 'ascii')
+        return True
+    except (UnicodeEncodeError, LookupError):
+        return False
+
+
+def render(path, findings, tables, quiet=False, dots=False):
+    """Plain-text report. ASCII unless dots=True, which prefixes each level with a coloured dot."""
     v = verdict(findings)
+    dot = (lambda lvl: DOTS[lvl] + ' ') if dots else (lambda lvl: '')
+    pad = '   ' if dots else ''  # a dot is two columns wide plus its space
     counts = {name: sum(1 for f in findings if f.level == lvl) for lvl, name in enumerate(LEVEL_NAMES)}
     sec = sum(1 for f in findings if f.security)
     out = [f'gamcheck {__version__}: {path}', f'Checked against GAM7 {tables.version}', '',
-           f'VERDICT: {LEVEL_NAMES[v]}',
+           f'VERDICT: {dot(v)}{LEVEL_NAMES[v]}',
            '  ' + ', '.join(f'{n} {k.lower()}' for k, n in counts.items() if n)
            + (f'; {sec} security-sensitive' if sec else ''), '']
     older = sorted({f.note.split(';')[0][len('written for '):] for f in findings if f.note.startswith('written for ')})
@@ -1508,18 +1527,19 @@ def render(path, findings, tables, quiet=False):
         if quiet and f.level == READ:
             continue
         where = f'L{f.line}' if f.file == str(path) else f'{Path(f.file).name}:L{f.line}'
-        out.append(f'  {where:<8} {LEVEL_NAMES[f.level]:<12} {f.what}')
+        out.append(f'  {where:<8} {dot(f.level)}{LEVEL_NAMES[f.level]:<12} {f.what}')
         if f.security:
-            out.append(f'  {"":<8} {"SECURITY":<12} {f.security}')
+            out.append(f'  {"":<8} {pad}{"SECURITY":<12} {f.security}')
         if f.note:
-            out.append(f'  {"":<8} {"":<12} ({f.note})')
+            out.append(f'  {"":<8} {pad}{"":<12} ({f.note})')
         if f.undo:
-            out.append(f'  {"":<8} {"UNDO":<12} {f.undo}')
+            out.append(f'  {"":<8} {pad}{"UNDO":<12} {f.undo}')
         if f.command:
-            out.append(f'  {"":<8} {"":<12} > {f.command}')
+            out.append(f'  {"":<8} {pad}{"":<12} > {f.command}')
         if f.docs and f.level > READ:
-            out.append(f'  {"":<8} {"":<12} docs: {f.docs}')
-    out += ['', 'This is a reading of the script text, not a guarantee. Values chosen at runtime show as CANNOT TELL.']
+            out.append(f'  {"":<8} {pad}{"":<12} docs: {f.docs}')
+    out += ['', 'This is a reading of the script text, not a guarantee. It says what a command would DO,',
+            'never whether GAM will accept it. Values chosen at runtime show as CANNOT TELL.']
     return '\n'.join(out)
 
 
@@ -1623,7 +1643,7 @@ def main(argv=None):
             reports.append({'file': s, 'gam_version': checker.tables.version, 'verdict': LEVEL_NAMES[verdict(findings)],
                             'findings': [f.as_dict() for f in findings]})
         else:
-            print(render(s, findings, checker.tables, opts.quiet))
+            print(render(s, findings, checker.tables, opts.quiet, can_print_dots(sys.stdout)))
             print()
     if opts.json:
         print(json.dumps(reports, indent=2))
