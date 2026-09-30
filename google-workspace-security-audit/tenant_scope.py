@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Google Workspace Tenant Scoping Audit
+Google Workspace Security Audit (Tenant Scoping Audit)
 =============================================================================
 Copyright (c) 2026 Paul Ogier, Outsource House (South Africa)
 Website: https://osh.co.za | Email: support@osh.co.za
@@ -42,8 +42,8 @@ YOU ASSUME ALL RISK ASSOCIATED WITH THE USE OF THIS SOFTWARE.
 
 Author:       Paul Ogier
 Created:      2026-08-15
-Updated:      2026-09-01
-Version:      1.5.0
+Updated:      2026-09-30
+Version:      1.5.1
 Status:       Production
 Python:       3.9+
 Dependencies: GAM ADV X (GAM7) only. Stdlib only on the Python side.
@@ -106,6 +106,12 @@ Notes that matter when reading results:
     in the report where they apply.
 
 Changelog
+  2026-09-30 - v1.5.1 - Repository folder renamed from "Tenant Scoping
+                        Audit" to google-workspace-security-audit; the
+                        startup update check now reads VERSION from the new
+                        path. A VERSION copy stays at the old path so
+                        earlier releases keep checking. No functional
+                        change.
   2026-09-01 - v1.5.0 - Tenant-level modules collect four at a time; the
                         tier-3 Drive sweeps and calendar ACLs run as one GAM
                         batch per module instead of one process per user;
@@ -171,13 +177,13 @@ csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
 # CONFIGURATION
 ###############################################################################
 
-SCRIPT_VERSION = "1.5.0"
+SCRIPT_VERSION = "1.5.1"
 
 # [OPTIONAL] Startup check against the remote VERSION file. Fail-silent.
 CHECK_FOR_UPDATES = True
 UPDATE_CHECK_URL = (
     "https://raw.githubusercontent.com/PaulOgier/GAMScripts/main/"
-    "Tenant%20Scoping%20Audit/VERSION"
+    "google-workspace-security-audit/VERSION"
 )
 
 # [IMPORTANT] The GAM command name or full path. If "gam" is not on PATH the
