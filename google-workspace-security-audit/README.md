@@ -402,7 +402,7 @@ by default and removes its own grant when the scan finishes.
 **Does it work with GAMADV-XTD3?**
 It is built and tested against GAM7 (GAM ADV X), the successor to
 GAMADV-XTD3, and looks for the `gam7` binary. If you are still on
-GAMADV-XTD3, upgrade first; the [GAM7 Update](../GAM7%20Update/) wrapper in
+GAMADV-XTD3, upgrade first; the [GAM7 Update](../gam7-update/) wrapper in
 this repository does that safely on macOS and Linux.
 
 **Do I need a service account with domain-wide delegation?**

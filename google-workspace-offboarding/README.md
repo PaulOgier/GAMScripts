@@ -276,7 +276,7 @@ mailbox again. A backup that comes up short against GYB's own message
 database fails the run.
 
 Messages whose headers Gmail refuses on import are recorded in a
-skipped-messages CSV. The [GYB Mailbox Tools](../GYB%20Mailbox%20Tools/) in
+skipped-messages CSV. The [GYB Mailbox Tools](../gyb-gmail-backup-tools/) in
 this repository check a backup and find those messages.
 
 ## Drive transfer and backup
@@ -360,7 +360,7 @@ must have a destination or the run aborts before any change.
 **Does it work with GAMADV-XTD3?**
 It targets GAM7 (GAM ADV X), the successor to GAMADV-XTD3, and is verified
 against the GAM7 command set. Upgrade first; the
-[GAM7 Update](../GAM7%20Update/) wrapper in this repository does that.
+[GAM7 Update](../gam7-update/) wrapper in this repository does that.
 
 **Does it work on Windows?**
 Yes. Both test suites run on Windows and Ubuntu in GitHub Actions on every

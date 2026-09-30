@@ -25,26 +25,26 @@ jobs:
         with:
           python-version: "3.9"
       - name: Tag matches gamcheck.py __version__
-        working-directory: GAM Script Checker
+        working-directory: gam-script-checker
         run: |
           v=$(python -c "import gamcheck; print(gamcheck.__version__)")
           test "gam-script-checker-v$v" = "$TAG" || { echo "::error::tag $TAG but gamcheck.py says $v"; exit 1; }
       - name: Tests
-        working-directory: GAM Script Checker
+        working-directory: gam-script-checker
         run: |
           python developers/test_gamcheck.py
           python developers/real-world/blind-adversarial-2026-09-13/blind_run.py gamcheck.py
       - name: Build zip and hashes
         run: |
           zip="$TAG.zip"
-          git archive --format=zip --prefix="GAM Script Checker/" -o "$zip" "HEAD:GAM Script Checker"
+          git archive --format=zip --prefix="gam-script-checker/" -o "$zip" "HEAD:gam-script-checker"
           {
             echo
             echo "## SHA256"
             echo
             echo '```'
             sha256sum "$zip"
-            (cd "GAM Script Checker" && sha256sum gamcheck.py verbs/*.json)
+            (cd "gam-script-checker" && sha256sum gamcheck.py verbs/*.json)
             echo '```'
           } > hashes.md
           cat hashes.md
