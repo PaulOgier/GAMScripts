@@ -1,12 +1,43 @@
-# Tenant Scoping Audit
+# Google Workspace Security Audit Script for GAM7 (Tenant Scoping Audit)
 
-A read-only Google Workspace tenant audit in a single Python file. It collects
-tenant and security-posture data through [GAM7](https://github.com/GAM-team/GAM),
-runs a findings engine over it, and renders a report your client (or your
-manager) can actually read: what was found, why it matters, what to do.
+A free, open-source, **read-only Google Workspace security audit** in a single
+Python file. `tenant_scope.py` collects tenant configuration and
+security-posture data through [GAM7](https://github.com/GAM-team/GAM), runs a
+findings engine over it, and renders a self-contained HTML report your client
+(or your manager) can actually read: what was found, why it matters, what to do.
+
+Use it to audit a Google Workspace tenant on day one of a new client, to
+baseline a security uplift, to scope a Google Workspace migration or domain
+move, or to produce the security section of an acquisition due-diligence pack.
 
 Built and maintained by Paul Ogier, [Outsource House](https://osh.co.za).
 Training at [Taming.Tech](https://taming.tech).
+
+## Contents
+
+- [Who this is for](#who-this-is-for)
+- [Why this exists](#why-this-exists)
+- [What the audit checks](#what-the-audit-checks)
+- [What you get](#what-you-get)
+- [Safety posture: read-only by design](#safety-posture-read-only-by-design)
+- [Requirements](#requirements)
+- [Install](#install)
+- [Usage](#usage)
+- [How it compares to other Google Workspace audit tools](#how-it-compares-to-other-google-workspace-audit-tools)
+- [Frequently asked questions](#frequently-asked-questions)
+- [Tests](#tests)
+- [Licence](#licence)
+
+## Who this is for
+
+- **Google Workspace administrators** who want a security review of their own
+  tenant without clicking through every Admin console screen.
+- **Managed service providers (MSPs) and IT consultants** who inherit tenants
+  built by other people and need to know what is about to bite.
+- **Security and compliance teams** who need evidence, not a screenshot: every
+  finding traces back to a CSV of raw data.
+- **Buyers and advisers** who need a Google Workspace security assessment as
+  part of due diligence before an acquisition.
 
 ## Why this exists
 
@@ -37,6 +68,94 @@ batch script on the
 That question inspired us to open ours up to the Google admin community.
 Thank you, Dirk.
 
+## What the audit checks
+
+Every check is graded **Critical**, **High**, **Medium** or **Info**. The
+grade is shown in brackets below. Run `python3 tenant_scope.py --list` for
+the full module registry with keys and tiers.
+
+### Google Drive external sharing and public files
+
+- Files **public on the web** [Critical]
+- "Anyone with the link" sharing at scale [High]
+- Files shared with entire external domains [High]
+- Files shared to named external people [Medium]
+- Externally-owned files shared into the tenant [Info]
+
+### Shared Drives
+
+- Shared Drives with **no manager** (orphaned Shared Drives) [Critical]
+- Shared Drives open to external sharing, or holding external members [High]
+- New Shared Drives defaulting to external sharing [Medium]
+- Shared Drives the auditing admin could not scan are listed as **UNSCANNED**,
+  never as clean
+
+### Super admins, admin roles and 2-step verification
+
+- Fewer than two super admins [Critical]
+- Super admins **without 2-step verification** (2SV / MFA) [Critical]
+- Super admins with app passwords [Critical]
+- Admin accounts nobody has signed into for months [High]
+- Delegates on admin mailboxes [High]
+- Admin roles still held by suspended accounts [High]
+- Organisational units where policy blocks 2SV enrolment [High]
+- 2SV enrolment percentage across the tenant [Medium]
+- Super admins with personal recovery addresses [Medium]
+- Admin role assignments pointing at deleted accounts [Medium]
+- Admin rights spread across a large share of the userbase [Medium]
+- The admin role map and the 2SV policy per organisational unit [Info]
+
+### Gmail: email forwarding, delegation, filters, POP and IMAP
+
+- Mailboxes **forwarding outside the organisation** [Critical]
+- Gmail filters forwarding externally [High]
+- POP or IMAP enabled [Medium]
+- Mailbox delegation involving suspended or dormant accounts [Medium]
+- The full mailbox delegation map [Info]
+
+### Google Groups
+
+- Groups anyone can join, anyone can post to, or that allow external members
+  [High]
+
+### Accounts, licences and dormant users
+
+- Unmanaged (personal) Google accounts on company domains [High]
+- Accounts stacking multiple risk factors [High]
+- Licensed accounts that were never signed into, or dormant for more than
+  90 days [Medium]
+- Suspended accounts still holding paid licences [Medium]
+- Licences owned but not assigned to anyone (licence waste) [Medium]
+- Suspended accounts still holding data or Shared Drive roles [Info]
+
+### Third-party OAuth apps
+
+- Third-party apps holding full Gmail or Drive access [Medium]
+
+### Domain DNS: MX, SPF, DKIM and DMARC
+
+- Domains without a DMARC record [High]
+- MX, SPF, DKIM and DMARC checked per domain, including aliases
+
+### Calendar
+
+- Public primary calendars [Medium]
+
+### Tenant policies
+
+- Password policy below current practice [Medium]
+- Web sessions longer than Google's 14-day default [Medium]
+- Which Google services are switched on or off [Info]
+
+### Tenant inventory
+
+- The tenant at a glance: users, licences, groups, Shared Drives, mobile and
+  ChromeOS devices, Vault, SSO [Info]
+
+Anything that could not be checked (missing authorisation, module error,
+unscanned drives) is listed in the report. Absence of a finding never means
+"checked and clean" unless the module ran.
+
 ## What you get
 
 - `audit_report.html`: a single self-contained HTML file (no external
@@ -48,7 +167,7 @@ Thank you, Dirk.
   data.
 - `tenant_scope.log` + `gam_stderr.log`: the full audit trail.
 
-## Safety posture
+## Safety posture: read-only by design
 
 Every GAM command the script issues is a read (`print`, `report`, `info`,
 `oauth info`, `check serviceaccount`), with one opt-in exception:
@@ -61,49 +180,27 @@ those drives are reported **UNSCANNED** instead.
 Backup verification codes never reach disk. The collector keeps only the
 per-user count.
 
-## What it checks
-
-**Critical:** files public on the web; fewer than two super admins; super
-admins without 2-step verification; super admins with app passwords;
-mailboxes forwarding outside the organisation; Shared Drives with no manager.
-
-**High:** "anyone with the link" sharing at scale; files shared with entire
-external domains; Shared Drives open to external sharing or holding external
-members; groups anyone can join, post to, or that allow external members;
-Gmail filters forwarding externally; unmanaged (personal) accounts on company
-domains; domains without DMARC; admin accounts nobody has signed into for
-months; delegates on admin mailboxes; accounts stacking multiple risk
-factors; organisational units where policy blocks 2-step verification
-enrolment; admin roles still held by suspended accounts.
-
-**Medium:** 2-step verification enrolment percentage; POP/IMAP enabled;
-files shared to named external people; licensed accounts that were never
-signed into, or dormant more than 90 days; suspended accounts still holding
-paid licences; mailbox delegation involving suspended or dormant accounts;
-third-party apps holding full Gmail or Drive access; super admins with
-personal recovery addresses; public primary calendars; password policy below
-current practice; web sessions longer than Google's 14-day default; new
-Shared Drives defaulting to external sharing; licences owned but not
-assigned to anyone; admin role assignments pointing at deleted accounts;
-admin rights spread across a large share of the userbase.
-
-**Info:** the tenant at a glance (users, licences, groups, drives, devices,
-Vault, SSO); the mailbox delegation map; the admin role map; 2-step
-verification policy per organisational unit; which Google services are
-switched on or off; suspended accounts still holding data or drive roles;
-externally-owned files shared into the tenant.
-
-Anything that could not be checked (missing authorisation, module error,
-unscanned drives) is listed in the report. Absence of a finding never means
-"checked and clean" unless the module ran.
+It is safe to run against a production tenant. Nothing is changed, suspended,
+deleted or transferred.
 
 ## Requirements
 
-- Python 3.9+ (standard library only)
+- Python 3.9+ (standard library only, no packages to install)
 - GAM7 (GAM ADV X) installed and authorised against the tenant you are
   auditing. The script finds it on PATH, at `~/bin/gam7/gam` (macOS
   installer), or `C:\GAM7\gam.exe` (Windows).
 - Works on Windows, macOS and Linux.
+
+## Install
+
+Clone the repository, or download `tenant_scope.py` on its own; it has no
+dependencies beyond Python and GAM7.
+
+```
+git clone https://github.com/PaulOgier/GAMScripts.git
+cd "GAMScripts/Tenant Scoping Audit"
+python3 tenant_scope.py --admin admin@yourdomain.com
+```
 
 ## Usage
 
@@ -277,6 +374,62 @@ which path ran.
   that genuinely differs between two SKUs in one org unit shows only the
   winner.
 
+## How it compares to other Google Workspace audit tools
+
+- **The Admin console security checklist and Security Center.** Google's own
+  tools show one setting at a time and never tell you what you did not look
+  at. This script checks the whole tenant in one pass and lists what it could
+  not check.
+- **Google Workspace security audit checklists** (the blog-post kind). Those
+  tell you what to look for. This script looks, and writes the report.
+- **Commercial auditing platforms** such as GAT Labs. Those are subscription
+  products with continuous monitoring and remediation. This is a free,
+  point-in-time audit you run yourself, with the raw CSVs next to the report.
+- **Sheets-based checklists driven by the Admin SDK**, such as DoiT
+  AdminPulse. Similar goals; this one runs locally through GAM7 you already
+  have, adds Drive and Shared Drive sharing scans, Gmail forwarding and
+  delegation, licence waste and DNS, and renders a client-ready HTML report.
+- **Drive-only sharing audit scripts**. External file sharing is one section
+  of this report, alongside admins, 2SV, Gmail, Groups, licences, OAuth apps
+  and DNS.
+
+## Frequently asked questions
+
+**Is it safe to run against a live production tenant?**
+Yes. Every command is a read. The only write, `--grant-temp-access`, is off
+by default and removes its own grant when the scan finishes.
+
+**Does it work with GAMADV-XTD3?**
+It is built and tested against GAM7 (GAM ADV X), the successor to
+GAMADV-XTD3, and looks for the `gam7` binary. If you are still on
+GAMADV-XTD3, upgrade first; the [GAM7 Update](../GAM7%20Update/) wrapper in
+this repository does that safely on macOS and Linux.
+
+**Do I need a service account with domain-wide delegation?**
+For the tenant-level modules, no. The per-mailbox modules (forwarding,
+delegates, IMAP/POP, send-as) and the Drive scans do need domain-wide
+delegation, which is the standard GAM7 setup. The preflight tells you which
+scopes are missing, and the report lists any module that could not run.
+
+**Can I use it before a Google Workspace to Google Workspace migration?**
+That is one of the reasons it exists. Run it on the source tenant to
+inventory users, licences, groups, Shared Drives, external sharing and
+forwarding before you move anything, and again on the target tenant when the
+migration is done.
+
+**How long does a Google Workspace audit take with this script?**
+A few minutes on a small tenant. On large tenants the Drive sharing scans are
+the slow part; run them overnight with `--run-dir` resume, or skip tier 3 for
+a quick first picture.
+
+**Does it fix anything?**
+No. It reports. Fixing is a decision for a human with context, and the "what
+to do" copy in each finding is written for that human.
+
+**Which GAM commands does it run?**
+`--dry-run` prints every GAM command without executing it, so you can review
+the whole list before the first real run.
+
 ## Tests
 
 ```
@@ -289,3 +442,11 @@ python3 -m unittest test_tenant_scope -v
 
 Apache 2.0; see `LICENSE` at the repository root. Keep the attribution
 header in `tenant_scope.py` intact if you redistribute it.
+
+## Author
+
+Paul Ogier is a Google Workspace consultant and trainer at
+[Outsource House](https://osh.co.za) in South Africa, and teaches the
+[Taming GAM7 & GAMADV-XTD3](https://taming.tech/GAMCourse) course on Udemy.
+Questions and bug reports are welcome as
+[GitHub issues](https://github.com/PaulOgier/GAMScripts/issues).
