@@ -2,44 +2,44 @@
 .obsidian/
 .claude/
 **/__pycache__/
-OffBoarding Google Workspace Users/logs/
-OffBoarding Google Workspace Users/offboarding_backups/
-OffBoarding Google Workspace Users/chart.mmd
-OffBoarding Google Workspace Users/chart.png
+google-workspace-offboarding/logs/
+google-workspace-offboarding/offboarding_backups/
+google-workspace-offboarding/chart.mmd
+google-workspace-offboarding/chart.png
 
 # Local-only tooling and dev artifacts (intentionally NOT on GitHub).
 # regen-dev-guide.sh: substitutes dev.osh.co.za into the test guide.
 # offboarding_test_setup_guide.dev.md: its generated output.
-OffBoarding Google Workspace Users/regen-dev-guide.sh
-OffBoarding Google Workspace Users/offboarding_test_setup_guide.dev.md
-OffBoarding Google Workspace Users/webinar_script.md
-OffBoarding Google Workspace Users/udemy_student_email.md
-OffBoarding Google Workspace Users/udemy_student_email_workspace_admin.md
-OffBoarding Google Workspace Users/linkedin_post.md
+google-workspace-offboarding/regen-dev-guide.sh
+google-workspace-offboarding/offboarding_test_setup_guide.dev.md
+google-workspace-offboarding/webinar_script.md
+google-workspace-offboarding/udemy_student_email.md
+google-workspace-offboarding/udemy_student_email_workspace_admin.md
+google-workspace-offboarding/linkedin_post.md
 
 # Repo-local memory (Claude worklog + knowledge). Backed up to Drive via /backup, never shipped to GitHub.
 memory/
 
 # Local test-session artifacts (dev tenant details; never on GitHub).
 # The durable, shippable test suite is test_offboard_user.py.
-OffBoarding Google Workspace Users/test_logs/
-OffBoarding Google Workspace Users/TEST_PLAN_v*.md
+google-workspace-offboarding/test_logs/
+google-workspace-offboarding/TEST_PLAN_v*.md
 
 # Research / inspiration notes for future scripts. Local-only, never on GitHub.
 research/
 
 # Per-client session recovery notes. Contain real client mailbox data and
 # addresses; this repo is public. Local-only, never on GitHub.
-OffBoarding Google Workspace Users/SESSION_RECOVERY_*.md
+google-workspace-offboarding/SESSION_RECOVERY_*.md
 
 # Tenant audit run data (real tenant CSVs; never on GitHub).
 google-workspace-security-audit/tenant_audit_runs/
 
 # Local-only docs-coverage guard, run by .git/hooks/pre-commit.
-OffBoarding Google Workspace Users/check-docs-coverage.py
+google-workspace-offboarding/check-docs-coverage.py
 
 # Node modules for the command-builder jsdom test (npm ci in CI only).
-OffBoarding Google Workspace Users/node_modules/
+google-workspace-offboarding/node_modules/
 
 # Local audit reports and working notes; never on GitHub.
-OffBoarding Google Workspace Users/docs/
+google-workspace-offboarding/docs/

@@ -41,8 +41,8 @@ YOU ASSUME ALL RISK ASSOCIATED WITH THE USE OF THIS SOFTWARE.
 
 Author:       Paul Ogier
 Created:      2023-06-22
-Updated:      2026-09-02
-Version:      5.7.0
+Updated:      2026-09-30
+Version:      5.7.1
 Status:       Production
 Python:       3.8+
 Dependencies: GAM ADV X (GAM7), GYB (optional), rclone (optional)
@@ -153,6 +153,11 @@ Changelog
   2026-05-07 - v4.4.0 - Added startup version check against remote VERSION file (CHECK_FOR_UPDATES toggle, fail-silent); restored author/contact header with Outsource House copyright and three Udemy course links; aligned in-script licence reference with the repo LICENSE (Apache 2.0) and added a plain-English summary emphasising attribution retention.
   2026-05-13 - v4.5.0 - BREAKING: renamed --transfer-to to --all-transfer-to. Added per-phase destination flags (--drive-to, --email-to, --alias-to, --calendar-to, --forward-to) that override the global default; precedence is phase-specific > --all-transfer-to > interactive prompt. Added upfront destination resolution and validation before any phase runs: under --force, any non-skipped phase without a resolvable destination aborts the run with a clear error instead of half-offboarding.
   2026-05-14 - v4.6.0 - Added end-of-run MANUAL ACTION block surfacing admin-console instructions for durable mail capture (alias / recipient address map / group) since GAM cannot configure recipient address map and Gmail-level forwarding stops on suspension/deletion; new --forward-alias-to flag explicitly nominates the successor printed in the block (falls back to --forward-to then --all-transfer-to), no automated change is made. Guide gains a "Mail capture after suspension" section and the order-of-operations list flags forwarding's suspension limitation.
+  2026-09-30 - v5.7.1 - Repository folder renamed from "OffBoarding Google
+                        Workspace Users" to google-workspace-offboarding; the
+                        startup update check now reads VERSION from the new
+                        path. A VERSION copy stays at the old path so earlier
+                        releases keep checking. No functional change.
   2026-09-02 - v5.7.0 - Top-to-bottom audit round (docs/2026-09-02-audit-offboard-user.md).
                         CTRL+C SAFETY: every gam call refused to run once Ctrl+C had
                         set the shutdown flag, so the atexit re-suspend guard could
@@ -489,7 +494,7 @@ import shutil
 
 # [IMPORTANT] Current local script version. Bumped on each release.
 # Compared against the remote VERSION file to detect updates.
-SCRIPT_VERSION = "5.7.0"
+SCRIPT_VERSION = "5.7.1"
 
 # [OPTIONAL] Check for a newer script version on startup.
 # When True (default), the script makes a single 3-second HTTP request to
@@ -503,7 +508,7 @@ CHECK_FOR_UPDATES = True
 # Points to the raw VERSION file on the main branch of the public repo.
 UPDATE_CHECK_URL = (
     "https://raw.githubusercontent.com/PaulOgier/GAMScripts/main/"
-    "OffBoarding%20Google%20Workspace%20Users/VERSION"
+    "google-workspace-offboarding/VERSION"
 )
 
 # [CRITICAL] The OU to move the user into during offboarding.
