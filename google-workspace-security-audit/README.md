@@ -81,12 +81,15 @@ the full module registry with keys and tiers.
 - Files shared with entire external domains [High]
 - Files shared to named external people [Medium]
 - Externally-owned files shared into the tenant [Info]
+- Drive for desktop allowed on any computer, and Takeout per service [Info]
 
 ### Shared Drives
 
 - Shared Drives with **no manager** (orphaned Shared Drives) [Critical]
 - Shared Drives open to external sharing, or holding external members [High]
 - New Shared Drives defaulting to external sharing [Medium]
+- Shared Drive creation and manager overrides left open, and per-drive copy
+  and download controls [Info]
 - Shared Drives the auditing admin could not scan are listed as **UNSCANNED**,
   never as clean
 
@@ -100,61 +103,118 @@ the full module registry with keys and tiers.
 - Admin roles still held by suspended accounts [High]
 - Organisational units where policy blocks 2SV enrolment [High]
 - 2SV enrolment percentage across the tenant [Medium]
-- Super admins with personal recovery addresses [Medium]
+- 2SV that accepts text or phone-call codes [Medium]
+- Super admins enrolled in 2SV but not held to it by policy [Medium]
+- Super admins with no backup codes [Medium]
+- Super admins who can reset their own password by phone or email [Medium]
+- Super admins with personal recovery addresses or phone numbers [Medium]
 - Admin role assignments pointing at deleted accounts [Medium]
 - Admin rights spread across a large share of the userbase [Medium]
-- The admin role map and the 2SV policy per organisational unit [Info]
+- The admin role map, the 2SV policy per organisational unit, the second
+  factors (security keys, passkeys) each super admin holds, and super admins
+  who also hold a paid licence [Info]
+
+### Sign-in risk, alerts and admin activity
+
+- Risky sign-in or account events Google recorded in the last 30 days
+  (suspicious logins, leaked-password or hijack disables, government-backed
+  attack warnings, forwarding out of the domain) [High]
+- Sensitive actions Google blocked because the session looked risky, with
+  the action named [Medium]
+- High-severity Alert Center alerts in the last 30 days [Medium]
+- Security alert rules switched off [Medium]
+- Settings and admin-role changes, admin activity counts and failed sign-ins
+  over the last 30 days [Info]
 
 ### Gmail: email forwarding, delegation, filters, POP and IMAP
 
 - Mailboxes **forwarding outside the organisation** [Critical]
 - Gmail filters forwarding externally [High]
+- Gmail phishing and malware protections switched off, listed per switch and
+  per organisational unit [Medium]
+- External forwarding addresses on file even where forwarding is off [Medium]
+- Mailboxes that can send as an outside address [Medium]
 - POP or IMAP enabled [Medium]
 - Mailbox delegation involving suspended or dormant accounts [Medium]
-- The full mailbox delegation map [Info]
+- The full mailbox delegation map, and whether users may delegate their
+  mailbox [Info]
+- Out-of-office replies that answer anyone (`--full`) [Info]
 
 ### Google Groups
 
 - Groups anyone can join, anyone can post to, or that allow external members
   [High]
+- Groups with external members actually present, or whose message archive
+  anyone can read [High]
+- Groups with no owner, or owned by a suspended account [Medium]
+- Groups anyone can find [Info]
 
 ### Accounts, licences and dormant users
 
 - Unmanaged (personal) Google accounts on company domains [High]
 - Accounts stacking multiple risk factors [High]
+- Accounts Google itself suspended for abuse or compromise [High]
+- Users whose password Google rates weak or shorter than the tenant's own
+  minimum [Medium]
 - Licensed accounts that were never signed into, or dormant for more than
   90 days [Medium]
 - Suspended accounts still holding paid licences [Medium]
 - Licences owned but not assigned to anyone (licence waste) [Medium]
 - Suspended accounts still holding data or Shared Drive roles [Info]
+- Accounts created in the last 30 days, and users left in the root
+  organisational unit [Info]
 
 ### Third-party OAuth apps
 
-- Third-party apps holding full Gmail or Drive access [Medium]
+- Third-party apps holding full or read-everything Gmail or Drive access
+  [Medium]
+- Every third-party app holding a token, with user counts and unidentified
+  apps called out, plus third-party app access as the API reports it [Info]
 
 ### Domain DNS: MX, SPF, DKIM and DMARC
 
-- Domains without a DMARC record [High]
+- Domains without DMARC or SPF [High]
+- Domains without DKIM signing or with MX problems [Medium]
 - MX, SPF, DKIM and DMARC checked per domain, including aliases
 
-### Calendar
+### Calendar, Chat and Meet
 
 - Public primary calendars [Medium]
+- Google Chat spaces open to every outside domain [Info]
+- Google Meet safety settings [Info]
 
 ### Tenant policies
 
-- Password policy below current practice [Medium]
+- Password policy below current practice (length, strength, reuse, not
+  enforced at next sign-in, forced expiry) [Medium]
 - Web sessions longer than Google's 14-day default [Medium]
+- Paid-for edition security features left unused [Medium]
+- The edition-only security features (DLP, Context-Aware Access, trust rules,
+  security center, advanced mobile management) the tenant's licences include,
+  shown only when they do [Info]
 - Which Google services are switched on or off [Info]
+- The security-checklist settings no API exposes, listed so they get checked
+  by hand in the Admin console, and other checklist settings (Advanced
+  Protection, passkeys, Chat file sharing, internal app trust, mail import
+  and more) shown raw [Info]
 
-### Tenant inventory
+### Google Classroom (Education tenants only)
+
+- Classroom open to anyone joining or creating classes [Medium]
+- Classroom settings and course counts [Info]
+
+### Tenant inventory and Vault
 
 - The tenant at a glance: users, licences, groups, Shared Drives, mobile and
   ChromeOS devices, Vault, SSO [Info]
+- Vault exports on record [Info]
 
 Anything that could not be checked (missing authorisation, module error,
-unscanned drives) is listed in the report. Absence of a finding never means
-"checked and clean" unless the module ran.
+unscanned drives) is listed in the report, and so is every check that ran
+over real data and found nothing ("Checked and clean"). Absence of a finding
+never means "checked and clean" unless the check appears in that list.
+`findings_evidence.csv` carries every evidence row of every finding, so two
+runs can be diffed by who was named, not just by counts.
 
 ## What you get
 
@@ -163,6 +223,7 @@ unscanned drives) is listed in the report. Absence of a finding never means
   "what this means" and "what to do" copy, and evidence samples. Print it for
   a clean PDF.
 - `findings.csv`: the findings list in machine-readable form.
+- `findings_evidence.csv`: every evidence row of every finding.
 - One CSV per collected module, so every finding can be traced back to raw
   data.
 - `tenant_scope.log` + `gam_stderr.log`: the full audit trail.
@@ -217,7 +278,7 @@ timestamped run directory, with the report opened at the end.
 |---|---|
 | `--admin <email>` | The auditing admin. Verifies the service account's DWD scopes in the preflight, and is the account the Shared Drive scans run as. Without it those scans are skipped and per-user modules run unverified. |
 | `--list` | Print the module registry (key, title, tier) and exit. |
-| `--full` | Add the tier-4 modules: Gmail filters, vacation responders, managed browsers, Alert Center, context-aware access. |
+| `--full` | Add the tier-4 modules: Gmail filters, vacation responders, managed browsers, context-aware access, Gmail profile sizes and Drive file counts. |
 | `--only <keys>` | Comma-separated module keys; everything else is skipped. |
 | `--skip <keys>` | Comma-separated module keys to skip. |
 | `--skip-tier <n>` | Skip a whole tier, e.g. `--skip-tier 3` to leave out the heavy Drive scans. |
@@ -228,7 +289,7 @@ timestamped run directory, with the report opened at the end.
 | `--output-dir <dir>` | Where run directories are created. Default `./tenant_audit_runs/`. |
 | `--run-dir <dir>` | Resume an existing run. Completed modules are skipped. |
 | `--render-only` | Re-run the checks and rebuild the report from a `--run-dir` (required), with no GAM calls at all. |
-| `--dry-run` | Print every GAM command without executing it. |
+| `--dry-run` | Print every GAM command without executing it. The preflight still runs `gam version` and `gam info domain`; only `--render-only` makes no GAM call at all. |
 | `--no-open` | Don't open the report in a browser when the run finishes. |
 | `--yes` | Skip the interactive tenant confirmation. The identity is still logged. |
 
@@ -436,7 +497,7 @@ the whole list before the first real run.
 python3 -m unittest test_tenant_scope -v
 ```
 
-148 tests, no GAM calls, no fixtures on disk beyond temp directories.
+215 tests, no GAM calls, no fixtures on disk beyond temp directories.
 
 ## Licence
 

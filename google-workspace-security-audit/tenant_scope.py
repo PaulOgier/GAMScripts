@@ -42,8 +42,8 @@ YOU ASSUME ALL RISK ASSOCIATED WITH THE USE OF THIS SOFTWARE.
 
 Author:       Paul Ogier
 Created:      2026-08-15
-Updated:      2026-09-30
-Version:      1.5.1
+Updated:      2026-10-01
+Version:      1.6.0
 Status:       Production
 Python:       3.9+
 Dependencies: GAM ADV X (GAM7) only. Stdlib only on the Python side.
@@ -76,14 +76,16 @@ default; without it those drives are reported as UNSCANNED.
 Module tiers
 ------------
   1  tenant-level, cheap (domains, users, groups, admins, shared drive
-     metadata, devices, policies, tokens, Vault, reports)
-  2  per-user Gmail/Drive/Calendar settings via domain-wide delegation
+     metadata, devices, policies, tokens, Vault, reports, the last
+     30 days of admin log, risky sign-ins and Alert Center alerts, and
+     Classroom courses on Education tenants)
+  2  per-user Gmail/Calendar settings via domain-wide delegation
      (send-as, delegates, forwarding, IMAP/POP, ASPs, backup-code counts,
-     mailbox profile, file counts, calendar ACLs)
+     calendar ACLs)
   3  heavy Drive scans, skippable (external sharing outbound and inbound,
      Shared Drive external exposure, Sites inventory)
   4  off by default, enabled with --full (filters, vacation, browsers,
-     contact delegates, alerts, context-aware access levels)
+     context-aware access levels, mailbox profiles, file counts)
   DNS  per-domain MX/SPF/DKIM/DMARC via the tamingdns.com MCP endpoint,
      with a dns.google fallback when it is unreachable
 
@@ -106,6 +108,44 @@ Notes that matter when reading results:
     in the report where they apply.
 
 Changelog
+  2026-10-01 - v1.6.0 - Four new checks from the collected policies: super
+                        admin self-recovery on, Gmail Safety protections off
+                        (per switch, per OU), Chat spaces open to every
+                        outside domain, and a list of checklist settings no
+                        API exposes so the report never implies they were
+                        checked. Also from policies: alert rules switched
+                        off, Takeout per service, Drive for desktop on any
+                        device, Meet safety, mail delegation, third-party
+                        app access (raw), and the security features the
+                        tenant's edition includes but does not use (DLP,
+                        Context-Aware Access, trust rules, security center,
+                        advanced mobile management), silent on editions
+                        without them. New default reads: 30 days of admin
+                        log, risky sign-in events and Alert Center alerts
+                        (alerts moved out of --full). Preflight waits 300s for `info domain` and
+                        accepts a non-zero exit that still printed the
+                        tenant identity (seen on a tenant created that day).
+                        Same day, from an audit of the audit: the report
+                        lists every check that ran and found nothing, and
+                        findings_evidence.csv carries every evidence row;
+                        data collected since 1.0.0 but read by nothing now
+                        has checks (send-as, forwarding addresses on file,
+                        group members and owners, vacation, Vault exports,
+                        Google-suspended accounts, new accounts, recovery
+                        phones, 2SV enforcement on admins, root-OU users,
+                        per-drive copy controls, app inventory, weak
+                        passwords and second factors from the usage
+                        report); SPF, DKIM and MX get findings beside
+                        DMARC; read-only Gmail and Drive scopes count as
+                        risky; five more hand-check rows (domain-wide
+                        delegation first); Classroom settings and courses
+                        on Education tenants. gmailprofile and filecounts
+                        moved to --full. After a live run on a
+                        Business Standard tenant: Google's blocked
+                        sensitive actions get their own MEDIUM finding
+                        (with the action named) instead of counting as
+                        HIGH risky sign-ins, and a missing recovery email
+                        no longer counts as an at-risk factor. 215 tests.
   2026-09-30 - v1.5.1 - Repository folder renamed from "Tenant Scoping
                         Audit" to google-workspace-security-audit; the
                         startup update check now reads VERSION from the new
@@ -177,7 +217,7 @@ csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
 # CONFIGURATION
 ###############################################################################
 
-SCRIPT_VERSION = "1.5.1"
+SCRIPT_VERSION = "1.6.0"
 
 # [OPTIONAL] Startup check against the remote VERSION file. Fail-silent.
 CHECK_FOR_UPDATES = True
@@ -211,6 +251,27 @@ DOH_URL = "https://dns.google/resolve"
 DORMANT_DAYS = 90            # licensed account with no login for this long
 ANYONE_LINK_SCALE = 20       # "anyone with the link" files before it's a finding
 EVIDENCE_ROWS = 10           # evidence rows shown per finding in the report
+ACTIVITY_DAYS = 30           # look-back for admin log, sign-ins and alerts
+
+# Login event names from Google's Reports API login activity appendix
+# (developers.google.com/workspace/admin/reports/v1/appendix/activity/login,
+# read 2026-09-14). Risk events are each worth a human look; failures are
+# only counted.
+LOGIN_RISK_EVENTS = [
+    "suspicious_login", "suspicious_login_less_secure_app",
+    "suspicious_programmatic_login",
+    "user_signed_out_due_to_suspicious_session_cookie",
+    "account_disabled_password_leak", "account_disabled_hijacked",
+    "account_disabled_spamming", "account_disabled_spamming_through_relay",
+    "account_disabled_generic", "gov_attack_warning",
+    "email_forwarding_out_of_domain",
+]
+# Google judged the session risky and refused the action, so nothing changed.
+# Kept out of LOGIN_RISK_EVENTS: on a live Business Standard tenant all 42
+# "risk" events were these (Google Ads periodic checks, app grants), which a
+# HIGH reading "suspicious logins, hijacks" misdescribed.
+LOGIN_BLOCKED_EVENTS = ["risky_sensitive_action_blocked"]
+LOGIN_FAILURE_EVENTS = ["login_failure"]
 PASSWORD_MIN_LENGTH = 12     # policy minimums below this are flagged
 SESSION_MAX_SECONDS = 14 * 86400   # Google's default web session length
 LICENCE_WASTE_MIN_GAP = 5    # unused seats before licence waste is flagged
@@ -674,6 +735,11 @@ MODULES: List[Dict] = [
          args=["print", "vaultholds"]),
     dict(key="vaultexports", title="Vault exports", tier=1,
          args=["print", "vaultexports"]),
+    # Education tenants only; the collector skips itself when licenses.csv
+    # holds no Education SKU. Syntax from the GAM7 wiki (Classroom -
+    # Courses), not yet run against a live school tenant.
+    dict(key="courses", title="Classroom courses (Education only)", tier=1,
+         args=["print", "courses"], collector="courses", timeout=1800),
     dict(key="report_customers", title="Customer usage report", tier=1,
          args=["report", "customers"]),
     dict(key="report_users", title="Per-user usage report (~2-day lag)",
@@ -682,6 +748,24 @@ MODULES: List[Dict] = [
          args=["print", "policies", "formatjson"]),
     dict(key="tokens", title="OAuth tokens (all users)", tier=1,
          args=["all", "users", "print", "tokens"], timeout=1800),
+    dict(key="report_admin", title="Admin audit log (last 30 days)", tier=1,
+         args=["report", "admin", "start", f"-{ACTIVITY_DAYS}d"],
+         timeout=1800),
+    # Only the risk events and failures: an unfiltered login report on a
+    # large tenant is one row per sign-in.
+    dict(key="report_login", title="Risky sign-in events (last 30 days)",
+         tier=1, args=["report", "login", "start", f"-{ACTIVITY_DAYS}d",
+                       "events", ",".join(LOGIN_RISK_EVENTS
+                                          + LOGIN_BLOCKED_EVENTS
+                                          + LOGIN_FAILURE_EVENTS)],
+         timeout=1800),
+    # createTime filter is mandatory in practice: one unfiltered "User
+    # reported spam spike" alert embeds every reported message body.
+    dict(key="alerts", title="Alert Center alerts (last 30 days)", tier=1,
+         args=["print", "alerts", "filter",
+               'createTime >= "' + (datetime.now(timezone.utc)
+                                    - timedelta(days=ACTIVITY_DAYS))
+               .strftime("%Y-%m-%dT%H:%M:%SZ") + '"']),
     # ---- Tier 2: per-user via DWD ----
     dict(key="sendas", title="Send-as addresses", tier=2,
          args=["all", "users", "print", "sendas", "compact"],
@@ -706,12 +790,6 @@ MODULES: List[Dict] = [
     dict(key="backupcodes", title="Backup verification codes (count only)",
          tier=2, args=["all", "users", "print", "backupcodes"],
          collector="backupcodes"),
-    dict(key="gmailprofile", title="Gmail profiles (mailbox sizing)", tier=2,
-         args=["all", "users", "print", "gmailprofile"],
-         scopes=[SCOPE_GMAIL_MODIFY]),
-    dict(key="filecounts", title="Drive file counts", tier=2,
-         args=["all", "users", "print", "filecounts"],
-         scopes=[SCOPE_DRIVE], timeout=3600),
     dict(key="calendaracls", title="Primary calendar ACLs", tier=2,
          args=["all", "users", "print", "calendaracls", "primary"],
          scopes=[SCOPE_CALENDAR]),
@@ -740,8 +818,15 @@ MODULES: List[Dict] = [
          scopes=[SCOPE_GMAIL_BASIC], timeout=3600),
     dict(key="browsers", title="Managed browsers", tier=4,
          args=["print", "browsers"]),
-    dict(key="alerts", title="Alert Center alerts", tier=4,
-         args=["print", "alerts"]),
+    # Tier 4 since round 9: both are full per-user sweeps (one needs the
+    # gmail.modify DWD scope) and no check reads them; the raw CSVs are for
+    # sizing a migration, not for the findings.
+    dict(key="gmailprofile", title="Gmail profiles (mailbox sizing)", tier=4,
+         args=["all", "users", "print", "gmailprofile"],
+         scopes=[SCOPE_GMAIL_MODIFY]),
+    dict(key="filecounts", title="Drive file counts", tier=4,
+         args=["all", "users", "print", "filecounts"],
+         scopes=[SCOPE_DRIVE], timeout=3600),
     dict(key="caalevels", title="Context-aware access levels", tier=4,
          args=["print", "caalevels"]),
     # ---- DNS ----
@@ -806,6 +891,10 @@ class RunContext:
         self._rows_cache: Dict[str, List[Dict[str, str]]] = {}
         self._policy_cache: Optional[List[Dict]] = None
         self._log_lock = threading.Lock()
+        # (module key, usable) pairs the running check asked about, and the
+        # checks that ran over real data and raised nothing (for the report).
+        self.consulted: List[Tuple[str, bool]] = []
+        self.clean_checks: List[Tuple[str, str]] = []
 
     def save(self):
         self.manifest["meta"]["internal_domains"] = self.internal_domains
@@ -985,8 +1074,17 @@ def preflight(ctx: RunContext, modules: List[Dict]) -> bool:
     # Gate 3: which tenant is this? Wrong-tenant audit is the worst silent
     # failure, and no per-tenant guard exists - so echo and confirm.
     if ok:
-        rc, out, err = run_gam(["info", "domain"], timeout=120)
-        if rc != 0:
+        # On a tenant created the same day, `info domain` walks back through
+        # usage reports that do not exist yet and returns after ~171s with
+        # "Start date can not be earlier than ...". 120s aborted that run.
+        rc, out, err = run_gam(["info", "domain"], timeout=300)
+        # That same run also EXITS NON-ZERO after printing a complete identity
+        # block, so a non-zero rc is only a failure when the identity is missing.
+        # A timeout never counts: the tenant must be positively identified.
+        parsed = parse_info_domain(out)
+        identified = bool(parsed.get("primary_domain")
+                          and parsed.get("customer_id"))
+        if rc != 0 and not (identified and rc > 0):
             table.append(("Tenant identity (gam info domain)", "FAILED",
                           "Run aborted"))
             ctx.stderr_log("preflight", err)
@@ -1641,6 +1739,15 @@ def collect_dns(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
     return "ok", len(results), ""
 
 
+def collect_courses(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
+    """`print courses`, only on a tenant holding an Education SKU. Runs
+    after the tenant-level pool (a non-simple collector lands in the heavy
+    pass), so licenses.csv is on disk by then."""
+    if not education_skus_held(ctx):
+        return "skipped", 0, "no Education licence held; Classroom not audited"
+    return collect_simple(ctx, mod)
+
+
 COLLECTORS = {
     "simple": collect_simple,
     "backupcodes": collect_backupcodes,
@@ -1649,6 +1756,7 @@ COLLECTORS = {
     "swm_external": collect_swm_external,
     "sites": collect_sites,
     "dns": collect_dns,
+    "courses": collect_courses,
 }
 
 
@@ -1798,12 +1906,19 @@ class Finding:
         self.meaning = meaning
         self.remediation = remediation
         self.evidence = evidence[:EVIDENCE_ROWS]
+        # The full list: the HTML shows a sample, findings_evidence.csv
+        # carries every row so two runs can be diffed by who was named.
+        self.all_evidence = evidence
         self.count = count if count is not None else len(evidence)
         self.source = source
 
 
 def _module_usable(ctx: RunContext, key: str) -> bool:
-    return ctx.module_status(key) in ("ok", "empty", "partial")
+    usable = ctx.module_status(key) in ("ok", "empty", "partial")
+    # Recorded so run_checks can tell "ran and found nothing" from "had no
+    # data to look at" when it builds the checked-and-clean list.
+    ctx.consulted.append((key, usable))
+    return usable
 
 
 def _super_admins(ctx: RunContext) -> List[Dict[str, str]]:
@@ -2143,6 +2258,7 @@ def check_group_exposure(ctx: RunContext) -> List[Finding]:
         return []
     findings = []
     open_join, ext_members, open_post = [], [], []
+    public_archive, discoverable = [], []
     for row in ctx.rows("groups"):
         entry = {"Group": col(row, "email"), "Name": col(row, "name")}
         if col(row, "whoCanJoin").upper() == "ANYONE_CAN_JOIN":
@@ -2151,6 +2267,30 @@ def check_group_exposure(ctx: RunContext) -> List[Finding]:
             ext_members.append(entry)
         if col(row, "whoCanPostMessage").upper() == "ANYONE_CAN_POST":
             open_post.append(entry)
+        if col(row, "whoCanViewGroup").upper() == "ANYONE_CAN_VIEW":
+            public_archive.append(entry)
+        if col(row, "whoCanDiscoverGroup").upper() == "ANYONE_CAN_DISCOVER":
+            discoverable.append(entry)
+    if public_archive:
+        findings.append(Finding(
+            "groups-public-archive", "HIGH",
+            "Groups whose message archive anyone on the internet can read",
+            "Every message ever posted to these groups is readable without "
+            "signing in. Internal discussion lists set this way publish "
+            "their whole history.",
+            "Set \"who can view conversations\" to group members or "
+            "organisation users on each of these groups.",
+            public_archive, "groups.csv"))
+    if discoverable:
+        findings.append(Finding(
+            "groups-discoverable", "INFO",
+            "Groups anyone on the internet can find",
+            "These groups are listed publicly, so their names and addresses "
+            "are visible outside the organisation. Not a leak in itself, "
+            "but an address list for spam and phishing.",
+            "Set \"who can see the group\" to organisation users unless the "
+            "group is a deliberate public contact point.",
+            discoverable, "groups.csv"))
     if open_join:
         findings.append(Finding(
             "groups-anyone-join", "HIGH",
@@ -2245,37 +2385,78 @@ def check_dns_findings(ctx: RunContext) -> List[Finding]:
         return []
     if not isinstance(results, dict):
         return []
-    missing = []
-    for domain, entry in results.items():
-        checks = entry.get("checks", {})
-        dmarc = checks.get("dmarc") or {}
-        if "present" in dmarc:                      # DoH fallback shape
-            if not dmarc["present"]:
-                missing.append({"Domain": domain, "Checked via": "dns.google"})
-        elif "error" not in dmarc:                  # tamingdns shape
-            # Trust the checker's own verdict: an overall "fail" status, or
-            # any finding it grades critical/high, means the domain has no
-            # working DMARC. Info/warn findings (deprecated tags, org-domain
-            # inheritance) are not "missing".
-            status = str(dmarc.get("status", "")).lower()
-            worst = {str(f.get("severity", "")).lower()
-                     for f in dmarc.get("findings", [])
-                     if isinstance(f, dict)}
-            if status in ("fail", "error") or worst & {"critical", "high"}:
-                missing.append({"Domain": domain, "Checked via": "tamingdns.com"})
-    if not missing:
-        return []
-    return [Finding(
-        "dmarc-missing", "HIGH",
-        "Domains without a working DMARC record",
-        "Without DMARC, anyone can send mail that claims to be from these "
-        "domains and receiving servers have no instruction to reject it. "
-        "That enables convincing invoice fraud and phishing in the "
-        "organisation's name.",
-        "Publish a DMARC record for each domain, starting at p=none to "
-        "observe, then move to quarantine/reject once legitimate senders "
-        "are aligned. Full per-domain detail is in the DNS section below.",
-        missing, "dns.json")]
+    findings = []
+    for check, fid, severity, title, meaning, remediation in DNS_FINDINGS:
+        hits = []
+        for domain, entry in results.items():
+            result = (entry.get("checks") or {}).get(check) or {}
+            if _dns_check_failed(result):
+                via = "dns.google" if "present" in result else "tamingdns.com"
+                hits.append({"Domain": domain, "Checked via": via})
+        if hits:
+            findings.append(Finding(fid, severity, title, meaning,
+                                    remediation, hits, "dns.json"))
+    return findings
+
+
+def _dns_check_failed(result: Dict) -> bool:
+    """One tamingdns or DoH check result: does it say the record is missing
+    or broken? Trusts the checker's own verdict: a fail status, a grade of
+    F, a not_configured verdict, or any finding it grades critical/high.
+    Info/warn findings (deprecated tags, org-domain inheritance) are not
+    failures. A missing SPF record on the dev tenant (2026-08-15) came back
+    as status info, grade F, verdict not_configured, with an info-severity
+    finding: status alone never fired."""
+    if "present" in result:                     # DoH fallback shape
+        return not result["present"]
+    if "error" in result:
+        return False
+    status = str(result.get("status", "")).lower()
+    grade = str(result.get("grade", "")).upper()
+    verdict = str(result.get("verdict", "")).lower()
+    worst = {str(f.get("severity", "")).lower()
+             for f in result.get("findings", []) if isinstance(f, dict)}
+    return (status in ("fail", "error") or grade == "F"
+            or verdict in ("not_configured", "missing", "invalid")
+            or bool(worst & {"critical", "high"}))
+
+
+# (dns.json check key, finding id, severity, title, meaning, remediation).
+DNS_FINDINGS = [
+    ("dmarc", "dmarc-missing", "HIGH",
+     "Domains without a working DMARC record",
+     "Without DMARC, anyone can send mail that claims to be from these "
+     "domains and receiving servers have no instruction to reject it. "
+     "That enables convincing invoice fraud and phishing in the "
+     "organisation's name.",
+     "Publish a DMARC record for each domain, starting at p=none to "
+     "observe, then move to quarantine/reject once legitimate senders "
+     "are aligned. Full per-domain detail is in the DNS section below."),
+    ("spf", "spf-missing", "HIGH",
+     "Domains without a working SPF record",
+     "SPF names the servers allowed to send mail for the domain. Without "
+     "it, or with a broken record, receiving servers cannot tell the "
+     "organisation's mail from a forgery, and DMARC has nothing to align "
+     "against.",
+     "Publish one SPF record per domain listing Google and every other "
+     "legitimate sender, ending in ~all or -all. Detail per domain is in "
+     "the DNS section below."),
+    ("dkim", "dkim-missing", "MEDIUM",
+     "Domains without DKIM signing for Google",
+     "Mail from these domains is not signed, so a receiving server cannot "
+     "verify it was not altered in transit, and DMARC alignment has to "
+     "rely on SPF alone, which breaks when mail is forwarded.",
+     "Generate and publish the Google DKIM key in Admin console > Apps > "
+     "Google Workspace > Gmail > Authenticate email, then start "
+     "authentication."),
+    ("mx", "mx-problem", "MEDIUM",
+     "Domains with mail delivery (MX) problems",
+     "The checker found the domain's MX records missing, broken or not "
+     "pointing where mail is actually handled. Mail for these domains may "
+     "bounce or land somewhere nobody is watching.",
+     "Compare the MX records against what Google Workspace expects and fix "
+     "the ones that differ. Detail per domain is in the DNS section below."),
+]
 
 
 def check_2sv_enrolment(ctx: RunContext) -> List[Finding]:
@@ -2520,20 +2701,20 @@ def check_at_risk_accounts(ctx: RunContext) -> List[Finding]:
         if not truthy(col(row, "isEnrolledIn2Sv")):
             reasons.append("no 2-step verification")
         recovery = col(row, "recoveryEmail")
-        if not recovery:
-            # Not a risk factor on an admin: check_admin_recovery tells them
-            # to remove recovery details and rely on a second super admin,
-            # and this check must not then score them for having done so.
-            if not admin:
-                reasons.append("no recovery email")
-        elif email_domain(recovery) not in internal:
+        # A missing recovery email is not a factor, for anyone. Scoring both
+        # "none" and "personal" left only an internal address as safe, so
+        # every account carried one factor and any company-wide app grant
+        # pushed nearly the whole tenant over the line (37 of 47 on a live
+        # tenant, 2026-10-01).
+        if recovery and email_domain(recovery) not in internal:
             reasons.append("personal recovery email")
         if email in asp_users:
             reasons.append("app-specific passwords")
         if email in risky_users:
             reasons.append("app with full mail/Drive access")
-        if admin:
-            reasons.append("admin role")
+        # Holding an admin role is not itself a factor: an admin without 2SV
+        # already has a CRITICAL finding of its own and appeared here a third
+        # time. It still raises the severity when an admin does qualify.
         if _dormant_login(col(row, "lastLoginTime")):
             reasons.append(f"no sign-in in {DORMANT_DAYS}+ days")
         if len(reasons) >= 2:
@@ -2620,9 +2801,16 @@ def check_suspended_holding_data(ctx: RunContext) -> List[Finding]:
     return findings
 
 
+# Read-only scopes are here on purpose: an app that can read every mail or
+# file can copy every mail or file, which is the exposure being scored.
 RISKY_SCOPES = {
     "https://mail.google.com/": "full Gmail access",
+    "https://www.googleapis.com/auth/gmail.modify": "read and change Gmail",
+    "https://www.googleapis.com/auth/gmail.readonly": "read all Gmail",
     "https://www.googleapis.com/auth/drive": "full Drive access",
+    "https://www.googleapis.com/auth/drive.readonly": "read all of Drive",
+    "https://www.googleapis.com/auth/admin.directory.user":
+        "manage user accounts",
 }
 
 
@@ -2665,22 +2853,89 @@ def check_admin_recovery(ctx: RunContext) -> List[Finding]:
     hits = []
     for row in _super_admins(ctx):
         recovery = col(row, "recoveryEmail")
+        phone = col(row, "recoveryPhone")
+        entry = {"Super admin": col(row, "primaryEmail"),
+                 "Recovery email": "", "Recovery phone": ""}
         if recovery and email_domain(recovery) not in internal:
-            hits.append({"Super admin": col(row, "primaryEmail"),
-                         "Recovery email": recovery})
+            entry["Recovery email"] = recovery
+        if phone:
+            # A phone number is always a personal channel and the SIM-swap
+            # path; shown masked, the client knows whose it is.
+            entry["Recovery phone"] = "..." + phone[-4:]
+        if entry["Recovery email"] or entry["Recovery phone"]:
+            hits.append(entry)
     if not hits:
         return []
     return [Finding(
         "admin-personal-recovery", "MEDIUM",
-        "Super admin accounts with personal recovery email addresses",
+        "Super admin accounts with personal recovery details",
         "Account recovery for these admin accounts routes through a "
-        "personal mailbox the organisation does not control. Whoever "
-        "controls or compromises that mailbox can reset the admin "
-        "password.",
+        "personal mailbox or phone number the organisation does not "
+        "control. Whoever controls or compromises that mailbox, or moves "
+        "that number to another SIM, can reset the admin password, and "
+        "with super admin self-recovery switched on needs nobody else.",
         "Point admin recovery details at organisation-controlled "
-        "addresses and phone numbers, or remove them and rely on a second "
-        "super admin for recovery.",
+        "addresses, or remove them and rely on a second super admin for "
+        "recovery.",
         hits, "users.csv")]
+
+
+def check_admin_backup_codes(ctx: RunContext) -> List[Finding]:
+    """Super admins holding no backup verification codes. A super admin
+    missing from backupcodes.csv was not read (partial module, or the
+    account was out of scan scope) and is left out rather than counted as
+    zero."""
+    if not (_module_usable(ctx, "users") and _module_usable(ctx, "backupcodes")):
+        return []
+    counts = {col(r, "User").lower(): col(r, "verificationCodesCount").strip()
+              for r in ctx.rows("backupcodes")}
+    hits = []
+    for row in _live_users(ctx):
+        email = col(row, "primaryEmail")
+        count = counts.get(email.lower())
+        if not truthy(col(row, "isAdmin")) or count is None:
+            continue
+        if count in ("", "0"):
+            hits.append({"Super admin": email, "Backup codes": count or "0"})
+    if not hits:
+        return []
+    return [Finding(
+        "admin-no-backup-codes", "MEDIUM",
+        "Super admins with no backup verification codes",
+        "These super admins have never generated backup codes. If their phone "
+        "or security key is lost, the only way back in is another super admin "
+        "or Google's recovery process, which asks for billing details and a "
+        "DNS change on the domain.",
+        "Have each super admin generate backup codes (myaccount.google.com > "
+        "Security > 2-Step Verification > Backup codes) and store them "
+        "offline, somewhere the account itself is not needed to reach.",
+        hits, "backupcodes.csv")]
+
+
+def check_licensed_super_admins(ctx: RunContext) -> List[Finding]:
+    """Super admins holding a paid licence. INFO, not a defect: a backup
+    tool may need a licensed super admin (Acronis needs Business Standard to
+    discover Shared drives), so this is a decision to record."""
+    if not _module_usable(ctx, "users"):
+        return []
+    hits = [{"Super admin": col(r, "primaryEmail"),
+             "Licence": _paid_licences(r)}
+            for r in _live_users(ctx)
+            if truthy(col(r, "isAdmin")) and _paid_licences(r)]
+    if not hits:
+        return []
+    return [Finding(
+        "licensed-super-admins", "INFO",
+        "Super admin accounts that also hold a paid licence",
+        "These super admins have a mailbox and a Drive, so they receive "
+        "phishing mail and open shared files with the most powerful account "
+        "in the tenant. An unlicensed super admin can only sign in, and costs "
+        "nothing.",
+        "Consider a separate unlicensed admin account for each person who "
+        "needs super admin, used only for admin work, and remove admin rights "
+        "from their everyday licensed account. Keep the licence where a tool "
+        "such as a backup service needs it.",
+        hits, "users.csv", count=len(hits))]
 
 
 def check_public_calendars(ctx: RunContext) -> List[Finding]:
@@ -2706,6 +2961,523 @@ def check_public_calendars(ctx: RunContext) -> List[Finding]:
         hits, "calendaracls.csv")]
 
 
+def check_sendas(ctx: RunContext) -> List[Finding]:
+    """Send-as addresses outside the organisation. A user sending as an
+    external address puts company mail under an identity the tenant does
+    not control; an unverified one is a setup someone abandoned or is
+    still trying to complete."""
+    if not _module_usable(ctx, "sendas"):
+        return []
+    internal = set(ctx.internal_domains)
+    hits = []
+    for row in ctx.rows("sendas"):
+        addr = col(row, "sendAsEmail")
+        if truthy(col(row, "isPrimary")) or not addr:
+            continue
+        if email_domain(addr) not in internal:
+            hits.append({"User": col(row, "User"), "Sends as": addr,
+                         "Verified": col(row, "verificationStatus") or "?",
+                         "Reply-to": col(row, "replyToAddress")})
+    if not hits:
+        return []
+    return [Finding(
+        "sendas-external", "MEDIUM",
+        "Mailboxes that can send as an address outside the organisation",
+        "These users can send mail that appears to come from an external "
+        "address. Replies then go to that address, outside the tenant's "
+        "logs, retention and offboarding. A pending verification is an "
+        "external mailbox someone tried to attach.",
+        "Confirm each send-as address with the user; remove any that are not "
+        "a known business arrangement, and the pending ones.",
+        hits, "sendas.csv")]
+
+
+def check_forwarding_addresses(ctx: RunContext) -> List[Finding]:
+    """External forwarding addresses on file, whether or not forwarding is
+    switched on. An accepted address stays valid after forwarding is turned
+    off, so it can be switched back on with one click and no confirmation."""
+    if not _module_usable(ctx, "forwardingaddresses"):
+        return []
+    internal = set(ctx.internal_domains)
+    hits = [{"User": col(r, "User"),
+             "Forwarding address": col(r, "forwardingEmail"),
+             "Status": col(r, "verificationStatus") or "?"}
+            for r in ctx.rows("forwardingaddresses")
+            if col(r, "forwardingEmail")
+            and email_domain(col(r, "forwardingEmail")) not in internal]
+    if not hits:
+        return []
+    return [Finding(
+        "forwarding-addresses-external", "MEDIUM",
+        "External forwarding addresses on file",
+        "These mailboxes have an outside address registered as a forwarding "
+        "destination. Forwarding may be off today, but an accepted address "
+        "needs no new confirmation to switch on, and a pending one shows "
+        "someone tried. The forwarding finding above lists what is active "
+        "now; this is the door left unlocked.",
+        "Remove forwarding addresses that are not a known business "
+        "arrangement (Gmail settings > Forwarding and POP/IMAP, or via GAM).",
+        hits, "forwardingaddresses.csv")]
+
+
+def check_group_members(ctx: RunContext) -> List[Finding]:
+    """Group membership hygiene from group_members.csv: external members
+    actually present (the groups check reports the setting that allows
+    them), groups with no owner, and owners who are suspended."""
+    if not _module_usable(ctx, "group_members"):
+        return []
+    internal = set(ctx.internal_domains)
+    users = {col(r, "primaryEmail").lower(): r for r in ctx.rows("users")}
+    external, suspended_owner = [], []
+    owners: Dict[str, int] = {}
+    for row in ctx.rows("group_members"):
+        group = col(row, "group")
+        member = col(row, "email")
+        role = col(row, "role").upper()
+        if role == "OWNER":
+            owners[group] = owners.get(group, 0) + 1
+            urow = users.get(member.lower())
+            if urow is not None and truthy(col(urow, "suspended")):
+                suspended_owner.append({"Group": group, "Owner": member})
+        if member and col(row, "type").upper() != "CUSTOMER" \
+                and email_domain(member) not in internal:
+            external.append({"Group": group, "External member": member,
+                             "Role": role.lower()})
+    findings = []
+    if external:
+        findings.append(Finding(
+            "groups-external-members-present", "HIGH",
+            "Groups with members from outside the organisation",
+            "These addresses belong to other organisations or personal "
+            "accounts and receive everything sent to the group, and can open "
+            "anything shared with it.",
+            "Review each external member: still needed, and is the group "
+            "used only for what they should see? Remove the rest.",
+            external, "group_members.csv"))
+    ownerless = []
+    if _module_usable(ctx, "groups"):
+        ownerless = [{"Group": col(g, "email"), "Name": col(g, "name")}
+                     for g in ctx.rows("groups")
+                     if col(g, "email") and not owners.get(col(g, "email"))]
+    if ownerless:
+        findings.append(Finding(
+            "groups-no-owner", "MEDIUM",
+            "Groups with no owner",
+            "Nobody but an admin can manage membership or settings on these "
+            "groups. Membership drifts, leavers stay on the list, and "
+            "nobody is accountable for what the group can access.",
+            "Assign an owner to each group, or delete groups nobody claims.",
+            ownerless, "group_members.csv"))
+    if suspended_owner:
+        findings.append(Finding(
+            "groups-suspended-owner", "MEDIUM",
+            "Groups owned by suspended accounts",
+            "The owner of these groups is suspended, typically a leaver. The "
+            "group keeps working but nobody active can manage it.",
+            "Transfer ownership to active staff as part of finishing the "
+            "offboarding.",
+            suspended_owner, "group_members.csv"))
+    return findings
+
+
+def check_vacation(ctx: RunContext) -> List[Finding]:
+    """Out-of-office responders that answer anyone, not just contacts or
+    the domain. Collected only with --full."""
+    if not _module_usable(ctx, "vacation"):
+        return []
+    hits = [{"User": col(r, "User"), "Subject": col(r, "subject"),
+             "Ends": col(r, "enddate") or "no end date"}
+            for r in ctx.rows("vacation")
+            if truthy(col(r, "enabled"))
+            and not truthy(col(r, "domainonly"))
+            and not truthy(col(r, "contactsonly"))]
+    if not hits:
+        return []
+    return [Finding(
+        "vacation-replies-to-anyone", "INFO",
+        "Out-of-office replies sent to anyone who writes in",
+        "These auto-replies answer every sender, including spammers and "
+        "attackers, confirming the address is live and often naming who is "
+        "covering and until when. A responder with no end date is usually "
+        "a leaver's.",
+        "Ask users to limit auto-replies to contacts or the organisation, and "
+        "clear responders on accounts that are being offboarded.",
+        hits, "vacation.csv")]
+
+
+def check_vault_exports(ctx: RunContext) -> List[Finding]:
+    """Vault exports on record. An export is a copy of mail or files that
+    left the tenant's controls; each one should be accounted for."""
+    if not _module_usable(ctx, "vaultexports"):
+        return []
+    rows = [{"Matter": col(r, "matterName"), "Export": col(r, "name"),
+             "Created": col(r, "createTime")}
+            for r in ctx.rows("vaultexports")]
+    if not rows:
+        return []
+    return [Finding(
+        "vault-exports", "INFO",
+        f"{len(rows)} Vault export(s) on record",
+        "Each Vault export is a downloadable copy of mailboxes, files or "
+        "chats. Exports are legitimate for legal holds and investigations, "
+        "and also the cleanest way to take a bulk copy of company data.",
+        "Confirm each export against a known matter, and delete exports "
+        "whose purpose has passed.",
+        rows, "vaultexports.csv")]
+
+
+def check_google_suspended(ctx: RunContext) -> List[Finding]:
+    """Accounts Google suspended, rather than an admin: abuse, compromise
+    or investigation. suspensionReason is ADMIN for the ordinary case."""
+    if not _module_usable(ctx, "users"):
+        return []
+    hits = [{"User": col(r, "primaryEmail"),
+             "Reason": col(r, "suspensionReason")}
+            for r in ctx.rows("users")
+            if truthy(col(r, "suspended"))
+            and col(r, "suspensionReason").upper() not in ("", "ADMIN")]
+    if not hits:
+        return []
+    return [Finding(
+        "google-suspended-accounts", "HIGH",
+        "Accounts suspended by Google, not by an admin",
+        "Google suspends an account itself when it sees abuse, a compromise "
+        "or a policy breach. Each of these is an incident someone should "
+        "have looked into, and the reason code says what Google saw.",
+        "Open each account in the Admin console, read the suspension notice, "
+        "and treat compromise reasons as an incident: reset, review "
+        "forwarding, filters, delegates and app tokens before restoring.",
+        hits, "users.csv")]
+
+
+def check_new_accounts(ctx: RunContext) -> List[Finding]:
+    """Accounts created in the last ACTIVITY_DAYS days. Context for an
+    inherited tenant and a compromise indicator: an attacker with admin
+    rights creates a mailbox of their own."""
+    if not _module_usable(ctx, "users"):
+        return []
+    cutoff = datetime.now(timezone.utc) - timedelta(days=ACTIVITY_DAYS)
+    hits = []
+    for row in ctx.rows("users"):
+        created = col(row, "creationTime")
+        try:
+            stamp = datetime.fromisoformat(created.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        if stamp >= cutoff:
+            hits.append({"User": col(row, "primaryEmail"), "Created": created,
+                         "Org unit": col(row, "orgUnitPath"),
+                         "Admin": _admin_role(row) or "-"})
+    if not hits:
+        return []
+    hits.sort(key=lambda h: h["Created"], reverse=True)
+    return [Finding(
+        "new-accounts", "INFO",
+        f"{len(hits)} account(s) created in the last {ACTIVITY_DAYS} days",
+        "Recently created accounts. On a tenant you have just taken over, "
+        "each one should match a known starter; an account nobody can "
+        "explain, especially one holding an admin role, is how a compromised "
+        "admin keeps access.",
+        "Match each account to a starter or a system that needs it.",
+        hits, "users.csv")]
+
+
+def check_admin_2sv_enforced(ctx: RunContext) -> List[Finding]:
+    """Super admins enrolled in 2SV but not under enforcement. Enrolment is
+    the user's own setting and can be switched off by the user or by an
+    attacker holding the password; enforcement is the admin's control."""
+    if not _module_usable(ctx, "users"):
+        return []
+    hits = [{"Super admin": col(r, "primaryEmail")}
+            for r in _super_admins(ctx)
+            if truthy(col(r, "isEnrolledIn2Sv"))
+            and not truthy(col(r, "isEnforcedIn2Sv"))]
+    if not hits:
+        return []
+    return [Finding(
+        "admin-2sv-not-enforced", "MEDIUM",
+        "Super admins whose 2-step verification is not enforced by policy",
+        "These super admins use 2-step verification today, but nothing "
+        "requires it. Anyone holding the password can switch it off in the "
+        "account's own settings, and Google's own guidance is to enforce it "
+        "for admins.",
+        "Put super admins in an organisational unit or group with 2-step "
+        "verification enforced (Admin console > Security > Authentication > "
+        "2-step verification), with a short enrolment period.",
+        hits, "users.csv")]
+
+
+def check_root_ou_users(ctx: RunContext) -> List[Finding]:
+    """Users left in the root OU on a tenant that has other OUs. Policy is
+    applied per OU, so accounts in the root get whatever the root says,
+    usually the loosest settings."""
+    if not (_module_usable(ctx, "users") and _module_usable(ctx, "orgs")):
+        return []
+    if not ctx.rows("orgs"):
+        return []
+    hits = [{"User": col(r, "primaryEmail"), "Admin": _admin_role(r) or "-"}
+            for r in _live_users(ctx) if col(r, "orgUnitPath") == "/"]
+    if not hits:
+        return []
+    return [Finding(
+        "users-in-root-ou", "INFO",
+        f"{len(hits)} account(s) in the root organisational unit",
+        "The tenant has organisational units, but these accounts sit at the "
+        "root, outside all of them. They get the root's settings, which are "
+        "usually the loosest, and are missed by any policy set on a "
+        "sub-unit. Dedicated admin accounts at the root are conventional.",
+        "Move everyday user accounts into the organisational unit that "
+        "matches their role.",
+        hits, "users.csv")]
+
+
+def check_shared_drive_download_controls(ctx: RunContext) -> List[Finding]:
+    """Per-drive copy and download controls left open. The tenant default
+    is in sd-controls-open; this is what each drive actually has."""
+    if not _module_usable(ctx, "shareddrives"):
+        return []
+    hits = []
+    for row in ctx.rows("shareddrives"):
+        copy_ok = col(row, "restrictions.copyRequiresWriterPermission")
+        dl_ok = col(row, "restrictions.downloadRestriction.restrictedForReaders")
+        open_bits = []
+        if copy_ok and not truthy(copy_ok):
+            open_bits.append("viewers can copy, print and download")
+        if dl_ok and not truthy(dl_ok):
+            open_bits.append("download not restricted for readers")
+        if open_bits:
+            hits.append({"Shared Drive": col(row, "name"),
+                         "Open controls": ", ".join(open_bits)})
+    if not hits:
+        return []
+    return [Finding(
+        "sd-download-copy-open", "INFO",
+        "Shared Drives where viewers can copy, print or download",
+        "Anyone with view access to these drives can take a copy of the "
+        "files. That is normal for working drives and worth closing on "
+        "drives holding contracts, HR or client data.",
+        "Tick \"viewers and commenters cannot download, print or copy\" on "
+        "the drives that hold sensitive material.",
+        hits, "shareddrives.csv")]
+
+
+def check_oauth_inventory(ctx: RunContext) -> List[Finding]:
+    """Every third-party app holding a token, with user counts. The risky
+    check judges scopes; this is the inventory a due-diligence reader wants,
+    and it names apps Google could not identify (anonymous)."""
+    if not _module_usable(ctx, "tokens"):
+        return []
+    apps: Dict[str, Dict] = {}
+    for row in ctx.rows("tokens"):
+        client = col(row, "displayText") or col(row, "clientId")
+        app = apps.setdefault(client, {"users": set(), "anonymous": False,
+                                       "scopes": 0})
+        app["users"].add(col(row, "user"))
+        app["anonymous"] = app["anonymous"] or truthy(col(row, "anonymous"))
+        app["scopes"] = max(app["scopes"], len(col(row, "scopes").split()))
+    if not apps:
+        return []
+    rows = [{"App": name, "Users": str(len(d["users"])),
+             "Scopes": str(d["scopes"]),
+             "Unidentified": "yes" if d["anonymous"] else ""}
+            for name, d in sorted(apps.items(),
+                                  key=lambda kv: (-kv[1]["anonymous"],
+                                                  -len(kv[1]["users"])))]
+    anon = sum(1 for d in apps.values() if d["anonymous"])
+    return [Finding(
+        "oauth-app-map", "INFO",
+        f"{len(apps)} third-party app(s) hold access to user accounts"
+        + (f", {anon} unidentified" if anon else ""),
+        "Every app users have authorised, with how many accounts each one "
+        "reaches. An unidentified app is one Google could not attribute to a "
+        "registered developer.",
+        "Review the list for apps nobody recognises, and revoke access to "
+        "those; the apps with the widest access are in the finding above.",
+        rows, "tokens.csv", count=len(apps))]
+
+
+def check_user_password_strength(ctx: RunContext) -> List[Finding]:
+    """Per-user password findings from the usage report: Google rates each
+    password as weak or non-compliant with the tenant's length policy. The
+    policy check says what the rule is; this says who is not meeting it."""
+    if not _module_usable(ctx, "report_users"):
+        return []
+    live = {col(r, "primaryEmail").lower() for r in _live_users(ctx)} \
+        if _module_usable(ctx, "users") else None
+    hits = []
+    for row in ctx.rows("report_users"):
+        email = col(row, "email", "userEmail").lower()
+        if live is not None and email not in live:
+            continue
+        strength = col(row, "accounts:password_strength").upper()
+        length = col(row, "accounts:password_length_compliance").upper()
+        problems = []
+        if strength == "WEAK":
+            problems.append("weak password")
+        if length == "NON_COMPLIANT":
+            problems.append("shorter than the policy minimum")
+        if problems:
+            hits.append({"User": email, "Problem": ", ".join(problems)})
+    if not hits:
+        return []
+    return [Finding(
+        "weak-user-passwords", "MEDIUM",
+        f"{len(hits)} account(s) with a weak or too-short password",
+        "Google rates these passwords weak, or shorter than the tenant's own "
+        "minimum (a policy raised after the password was set does not "
+        "change existing passwords unless enforced at next sign-in). These "
+        "are the accounts credential-stuffing finds first.",
+        "Tick enforce password policy at next sign-in, and have these users "
+        "change their password; 2-step verification limits the damage in "
+        "the meantime.",
+        hits, "report_users.csv")]
+
+
+def check_admin_second_factors(ctx: RunContext) -> List[Finding]:
+    """Security keys and passkeys held by each super admin, from the usage
+    report. Shows how strong the second step on the most powerful accounts
+    actually is; the 2SV checks only say whether one exists."""
+    if not (_module_usable(ctx, "report_users") and _module_usable(ctx, "users")):
+        return []
+    report = {col(r, "email", "userEmail").lower(): r
+              for r in ctx.rows("report_users")}
+    rows = []
+    for admin in _super_admins(ctx):
+        email = col(admin, "primaryEmail")
+        rep = report.get(email.lower())
+        if rep is None:
+            continue
+        rows.append({"Super admin": email,
+                     "Security keys": col(rep, "accounts:num_security_keys") or "0",
+                     "Passkeys": col(rep, "accounts:num_passkeys_enrolled") or "0",
+                     "2SV enrolled": col(admin, "isEnrolledIn2Sv")})
+    if not rows:
+        return []
+    return [Finding(
+        "admin-second-factors", "INFO",
+        "Second factors held by each super admin",
+        "Security keys and passkeys cannot be phished; codes from an app or "
+        "a text message can. A super admin with zero of either is relying "
+        "on the weaker methods. Usage-report figures lag about two days.",
+        "Issue at least two security keys or passkeys to every super admin "
+        "and enforce a phishing-resistant method for the admin "
+        "organisational unit.",
+        rows, "report_users.csv", count=len(rows))]
+
+
+def education_skus_held(ctx: RunContext) -> List[str]:
+    """Display names of the Education SKUs in licenses.csv, empty on a
+    business tenant. Gates everything Classroom so a company is never shown
+    school settings.
+
+    Reads the module status directly rather than through _module_usable:
+    a business tenant passing this gate must not put the Classroom checks
+    on the checked-and-clean list, they did not apply."""
+    if ctx.module_status("licenses") not in ("ok", "empty", "partial"):
+        return []
+    edu = {_SKU_EDU_FUND} | _SKU_EDU_STD | _SKU_EDU_PLUS
+    names = {}
+    for row in ctx.rows("licenses"):
+        sku = col(row, "skuId")
+        if sku in edu:
+            names[sku] = col(row, "skuDisplay") or sku
+    return sorted(names.values())
+
+
+# Classroom policy types (all seven seen in the 2026-08-15 dev export) and
+# the one field per type that matters to a school's security posture.
+CLASSROOM_SETTINGS = {
+    "classroom.class_membership": "whoCanJoinClasses",
+    "classroom.teacher_permissions": "whoCanCreateClasses",
+    "classroom.guardian_access": "allowAccess",
+    "classroom.api_data_access": "enableApiAccess",
+    "classroom.roster_import": "rosterImportOption",
+    "classroom.student_unenrollment": "whoCanUnenrollStudents",
+    "classroom.originality_reports": "enableOriginalityReportsSchoolMatches",
+}
+
+
+def check_classroom_settings(ctx: RunContext) -> List[Finding]:
+    """Classroom settings, education tenants only. Two values are judged:
+    anyone (not just the domain) able to join classes, and anyone in the
+    domain able to create them. Every other value is shown raw, because
+    the console option behind each enum has only been read back for the
+    dev tenant's defaults."""
+    editions = education_skus_held(ctx)
+    if not editions:
+        return []
+    rows, open_bits = [], []
+    for pol in _policy_settings(ctx):
+        field = CLASSROOM_SETTINGS.get(pol["type"])
+        if not field:
+            continue
+        value = str(pol["value"].get(field, "?"))
+        ou = pol["ou"] or "/"
+        rows.append({"Setting": pol["type"].split(".", 1)[1],
+                     "Org unit": ou, field: value,
+                     "Value (raw)": json.dumps(pol["value"], sort_keys=True)})
+        if field == "whoCanJoinClasses" and value.upper() == "ANYONE":
+            open_bits.append({"Org unit": ou,
+                              "Setting": "Anyone with a Google Account can "
+                                         "join classes"})
+        if field == "whoCanCreateClasses" and value.upper() in (
+                "ANYONE", "ANYONE_IN_DOMAIN"):
+            open_bits.append({"Org unit": ou,
+                              "Setting": "Anyone in the domain can create "
+                                         "classes, students included"})
+    findings = []
+    if open_bits:
+        findings.append(Finding(
+            "classroom-open", "MEDIUM",
+            "Classroom lets anyone join or create classes",
+            "Classes can be joined from outside the school, or created by any "
+            "account in the domain including students. Either one lets "
+            "someone outside the teaching staff see or run a class roster.",
+            "In Admin console > Apps > Google Workspace > Classroom, limit "
+            "class membership to the domain (or allowlisted domains) and "
+            "class creation to verified teachers.",
+            open_bits, "policies.csv"))
+    if rows:
+        findings.append(Finding(
+            "classroom-settings", "INFO",
+            f"Google Classroom settings ({', '.join(editions)})",
+            "Classroom settings as the API reports them, shown because the "
+            "tenant holds an Education licence. Guardian access, API data "
+            "access and roster import each decide who outside the classroom "
+            "sees student data.",
+            "Review each against school policy; guardian access and API "
+            "access are the two that expose student data outside Classroom.",
+            rows, "policies.csv", count=len(rows)))
+    return findings
+
+
+def check_courses(ctx: RunContext) -> List[Finding]:
+    """Course counts by state. The owner join (courses whose teacher is
+    suspended or gone) waits for a live read of the column names."""
+    if not _module_usable(ctx, "courses"):
+        return []
+    rows = ctx.rows("courses")
+    if not rows:
+        return []
+    states: Dict[str, int] = {}
+    for row in rows:
+        state = col(row, "courseState") or "unknown"
+        states[state] = states.get(state, 0) + 1
+    evidence = [{"State": s, "Courses": str(n)}
+                for s, n in sorted(states.items(), key=lambda kv: -kv[1])]
+    return [Finding(
+        "classroom-courses", "INFO",
+        f"{len(rows)} Classroom course(s)",
+        "Every course in the tenant, counted by state. Active courses are "
+        "live rosters of students; archived ones keep their data and their "
+        "members until deleted.",
+        "Archive courses that have ended, and delete archived ones once the "
+        "retention period has passed.",
+        evidence, "courses.csv", count=len(rows))]
+
+
 def check_tenant_shape(ctx: RunContext) -> List[Finding]:
     """The INFO scorecard: tenant shape at a glance."""
     facts = []
@@ -2717,6 +3489,9 @@ def check_tenant_shape(ctx: RunContext) -> List[Finding]:
                                f"{len(rows) - len(active)} suspended"})
         facts.append({"Fact": "Super admins",
                       "Value": str(len(_super_admins(ctx)))})
+    if _module_usable(ctx, "orgs"):
+        facts.append({"Fact": "Organisational units (below root)",
+                      "Value": str(len(ctx.rows("orgs")))})
     if _module_usable(ctx, "licenses"):
         facts.append({"Fact": "Licence assignments",
                       "Value": str(len(ctx.rows("licenses")))})
@@ -2731,6 +3506,9 @@ def check_tenant_shape(ctx: RunContext) -> List[Finding]:
     if _module_usable(ctx, "cros"):
         facts.append({"Fact": "ChromeOS devices",
                       "Value": str(len(ctx.rows("cros")))})
+    if _module_usable(ctx, "sites"):
+        facts.append({"Fact": "Google Sites",
+                      "Value": str(len(ctx.rows("sites")))})
     if _module_usable(ctx, "vaultmatters"):
         facts.append({"Fact": "Vault matters",
                       "Value": str(len(ctx.rows("vaultmatters")))})
@@ -2757,6 +3535,9 @@ def check_tenant_shape(ctx: RunContext) -> List[Finding]:
 
 def _policy_settings(ctx: RunContext) -> List[Dict]:
     if ctx._policy_cache is not None:
+        # Cache hit still counts as consulting the module, or a policy check
+        # that found nothing would be missing from the checked-and-clean list.
+        _module_usable(ctx, "policies")
         return ctx._policy_cache
     return _parse_policy_settings(ctx)
 
@@ -2857,6 +3638,12 @@ def check_password_policy(ctx: RunContext) -> List[Finding]:
             problems.append("weak passwords are allowed")
         if value.get("allowReuse") is True:
             problems.append("password reuse is allowed")
+        if value.get("enforceRequirementsAtLogin") is False:
+            problems.append("existing passwords are not checked against the "
+                            "policy at next sign-in")
+        expiry = _duration_seconds(value.get("expirationDuration", ""))
+        if expiry:
+            problems.append(f"passwords expire every {expiry // 86400} days")
         if problems:
             hits.append({"Org unit": pol["ou"] or "/",
                          "Problem": ", ".join(problems)})
@@ -2867,12 +3654,14 @@ def check_password_policy(ctx: RunContext) -> List[Finding]:
         "Password policy permits weak passwords",
         f"The tenant's password rules fall short of current practice (a "
         f"minimum of {PASSWORD_MIN_LENGTH} characters, strong passwords "
-        "only, no reuse). Short or reused passwords are the ones that fall "
-        "to guessing and to credential lists from other sites' breaches.",
-        "Raise the minimum length and disallow reuse in Admin console > "
-        "Security > Authentication > Password management. Existing "
-        "passwords are unaffected until changed, so pair this with 2-step "
-        "verification rather than a forced reset.",
+        "only, no reuse, checked at next sign-in, no forced expiry). Short or "
+        "reused passwords are the ones that fall to guessing and to "
+        "credential lists from other sites' breaches, and forced expiry "
+        "pushes people towards predictable ones.",
+        "Raise the minimum length, disallow reuse, tick enforce password "
+        "policy at next sign-in and set passwords to never expire in Admin "
+        "console > Security > Authentication > Password management. Pair "
+        "this with 2-step verification rather than a forced reset.",
         hits, "policies.csv")]
 
 
@@ -3003,6 +3792,719 @@ def check_service_status(ctx: RunContext) -> List[Finding]:
         "are attack surface and data-export paths (Takeout in particular) "
         "that cost nothing to turn off.",
         disabled, "policies.csv", count=len(disabled))]
+
+
+def check_super_admin_self_recovery(ctx: RunContext) -> List[Finding]:
+    """Super admin self-recovery ON. Google's admin best-practices page says
+    it is off for most new customers but on by default for existing ones
+    with fewer than 3 super admins or 500 users, so older small tenants
+    usually carry it without anyone choosing it."""
+    hits = [{"Org unit": pol["ou"] or "/"}
+            for pol in _policy_settings(ctx)
+            if pol["type"] == "security.super_admin_account_recovery"
+            and pol["value"].get("enableAccountRecovery") is True]
+    if not hits:
+        return []
+    return [Finding(
+        "super-admin-self-recovery", "MEDIUM",
+        "Super admins can reset their own password by phone or email",
+        "Super admin accounts can recover themselves through their recovery "
+        "phone or email. Whoever controls that phone number or mailbox can "
+        "take over the account with the most power in the tenant, without "
+        "another admin being involved.",
+        "Turn off super admin account recovery in Admin console > Security > "
+        "Authentication > Account recovery, and make sure a second super "
+        "admin exists to reset a locked-out one.",
+        hits, "policies.csv")]
+
+
+# Gmail Safety switches that Google's 100+ user security checklist says to
+# turn on. Each maps a policy field to the console label it appears under.
+# A switch counts as off only when the field is present and False, so a
+# setting the API did not return is never reported as off.
+GMAIL_PROTECTION_FIELDS = {
+    "gmail.enhanced_pre_delivery_message_scanning": {
+        "enableImprovedSuspiciousContentDetection":
+            "Enhanced pre-delivery message scanning",
+    },
+    "gmail.email_attachment_safety": {
+        "enableEncryptedAttachmentProtection":
+            "Protect against encrypted attachments from untrusted senders",
+        "enableAttachmentWithScriptsProtection":
+            "Protect against attachment with scripts from untrusted senders",
+        "enableAnomalousAttachmentProtection":
+            "Protect against anomalous attachment types in emails",
+        "applyFutureRecommendedSettingsAutomatically":
+            "Attachments: apply future recommended settings automatically",
+    },
+    "gmail.links_and_external_images": {
+        "enableShortenerScanning":
+            "Identify links behind shortened URLs",
+        "enableExternalImageScanning":
+            "Scan linked images",
+        "enableAggressiveWarningsOnUntrustedLinks":
+            "Show warning prompt for any click on links to untrusted domains",
+        "applyFutureSettingsAutomatically":
+            "Links: apply future recommended settings automatically",
+    },
+    "gmail.spoofing_and_authentication": {
+        "detectDomainNameSpoofing":
+            "Protect against domain spoofing based on similar domain names",
+        "detectEmployeeNameSpoofing":
+            "Protect against spoofing of employee names",
+        "detectDomainSpoofingFromUnauthenticatedSenders":
+            "Protect against inbound emails spoofing your domain",
+        "detectUnauthenticatedEmails":
+            "Protect against any unauthenticated emails",
+        "detectGroupsSpoofing":
+            "Protect Groups from inbound emails spoofing your domain",
+        "applyFutureSettingsAutomatically":
+            "Spoofing: apply future recommended settings automatically",
+    },
+}
+
+
+def check_gmail_protections(ctx: RunContext) -> List[Finding]:
+    """Gmail Safety protections switched off, per OU. Google's own defaults
+    leave several of these off, so a tenant nobody has hardened shows them
+    here - that is the point of the check, not noise."""
+    hits = []
+    for pol in _policy_settings(ctx):
+        labels = GMAIL_PROTECTION_FIELDS.get(pol["type"])
+        if not labels:
+            continue
+        for field, label in labels.items():
+            if pol["value"].get(field) is False:
+                hits.append({"Org unit": pol["ou"] or "/", "Protection": label})
+    if not hits:
+        return []
+    return [Finding(
+        "gmail-protections-off", "MEDIUM",
+        "Gmail phishing and malware protections switched off",
+        "Gmail scans every message anyway, but these extra checks - for "
+        "look-alike domains, spoofed staff names, unauthenticated mail, risky "
+        "attachments and disguised links - are off. Several are off in "
+        "Google's own defaults, so a tenant nobody has hardened lands here.",
+        "Turn each one on in the Admin console under Gmail (the Safety "
+        "settings, and the enhanced pre-delivery message scanning setting). "
+        "The warning-banner action is a reasonable start on a domain with no "
+        "mail history; tick apply future recommended settings too.",
+        hits, "policies.csv")]
+
+
+def check_external_chat(ctx: RunContext) -> List[Finding]:
+    """External Chat on for every domain. INFO, not MEDIUM: most small
+    businesses chat with clients, so this is a decision to make on purpose
+    rather than a defect."""
+    hits = [{"Org unit": pol["ou"] or "/"}
+            for pol in _policy_settings(ctx)
+            if pol["type"] == "chat.chat_external_spaces"
+            and pol["value"].get("enabled") is True
+            and pol["value"].get("domainAllowlistMode") == "ALL_DOMAINS"]
+    if not hits:
+        return []
+    return [Finding(
+        "chat-external-open", "INFO",
+        "Google Chat spaces open to people at any outside domain",
+        "Users can create or join Chat spaces with people outside the "
+        "organisation, from any domain. An outsider added to a space sees "
+        "its earlier conversation.",
+        "Decide deliberately. Google's security checklist suggests allowing "
+        "external Chat only for the people who need it, or only with "
+        "allowlisted domains, in Admin console > Apps > Google Workspace > "
+        "Google Chat > External Chat settings.",
+        hits, "policies.csv", count=len(hits))]
+
+
+# Checklist settings with no policy type in `gam print policies` (checked
+# against a full dev-tenant export, 2026-09-14), so no read can judge them.
+CONSOLE_ONLY_SETTINGS = [
+    ("Gmail", "Automatic forwarding",
+     "Off. The forwards section above shows who forwards today, not whether "
+     "the door is open."),
+    ("Gmail", "POP and IMAP access",
+     "Off unless a named user or a migration needs it."),
+    ("Gmail", "Bypass spam filters for internal "
+     "senders", "Off."),
+    ("Gmail", "Approved senders",
+     "Require sender authentication; no whole domains."),
+    ("Gmail", "External recipient warning", "On."),
+    ("Drive and Docs", "Invitations to non-Google "
+     "accounts", "Off: external collaborators sign in with a Google Account."),
+    ("Groups for Business", "Group creation and outside "
+     "access", "Admins create groups; groups private to the organisation."),
+    ("Sites", "Sharing outside the organisation",
+     "Off, or warn."),
+    ("Drive and Docs", "Sharing outside the organisation",
+     "On if needed, with \"visible to anyone with the link\" off and a "
+     "warning when sharing outside the domain."),
+    ("Drive and Docs", "General access default for new items",
+     "Private to the owner."),
+    ("Drive and Docs", "Access Checker", "Recipients only."),
+    ("Calendar", "External sharing of primary calendars",
+     "Free/busy only, with a warning when inviting outside guests."),
+    ("Security > Alerts", "Who receives alert emails",
+     "An address someone reads; the rule states above do not show this."),
+    ("Account settings", "Super admin recovery details",
+     "Account creation date, sign-up email, order number and user count "
+     "recorded offline, and the registrar login to hand."),
+    # No API lists any of the five below, and each one is a tenant-wide
+    # access path that never shows in a per-user check.
+    ("Security > API controls", "Domain-wide delegation clients",
+     "Only service accounts the organisation knows, each with the narrowest "
+     "scopes that work. A client here can read every mailbox and Drive "
+     "without any user signing in."),
+    ("Apps > Web and mobile apps", "SAML apps",
+     "Only apps in use; each one is a sign-in path that inherits the "
+     "Google session."),
+    ("Apps > Google Workspace Marketplace apps", "Domain-installed apps",
+     "Only apps someone can name; a domain install grants every user's "
+     "data to the app."),
+    ("Apps > LDAP", "Secure LDAP clients",
+     "None unless a named system uses it; each client holds a certificate "
+     "that authenticates users."),
+    ("Gmail > Routing", "Routing, outbound gateway and content compliance "
+     "rules",
+     "No rule that copies or redirects mail to an outside host without a "
+     "written reason; an outbound gateway means all mail leaves through "
+     "someone else's server."),
+]
+
+
+def check_console_only_settings(ctx: RunContext) -> List[Finding]:
+    """Lists the security-checklist settings this audit cannot read, so the
+    report does not imply they were checked. Static, so it is not gated on
+    any module: the list is true of every run."""
+    rows = [{"Admin console app": page, "Setting": setting,
+             "Recommended": advice}
+            for page, setting, advice in CONSOLE_ONLY_SETTINGS]
+    return [Finding(
+        "console-only-settings", "INFO",
+        "Security settings to check by hand in the Admin console",
+        "Google's security checklist recommends these settings, but the API "
+        "this audit reads does not expose them. Nothing in this report "
+        "should be taken as a verdict on them.",
+        "Open each page in the Admin console and compare against the "
+        "recommendation.",
+        rows, "policies.csv", count=len(rows))]
+
+
+def check_alert_rules_off(ctx: RunContext) -> List[Finding]:
+    """System-defined alert rules switched off. Google ships several off
+    (on dev: User granted Admin privilege, Suspended user made active, User's
+    password changed), so an untouched tenant hears about none of them."""
+    hits = []
+    for pol in _policy_settings(ctx):
+        if pol["type"] != "rule.system_defined_alerts":
+            continue
+        value = pol["value"]
+        if str(value.get("state", "")).upper() == "INACTIVE":
+            hits.append({"Alert": str(value.get("displayName", "?")),
+                         "Description": str(value.get("description", ""))})
+    if not hits:
+        return []
+    hits.sort(key=lambda h: h["Alert"])
+    return [Finding(
+        "alert-rules-off", "MEDIUM",
+        "Security alert rules switched off",
+        "Google's built-in alerts for these events are off, so they never "
+        "reach Alert Center or an admin's inbox. Several ship off by default, "
+        "including an account being granted admin rights and a suspended "
+        "account being reactivated - both things you want to hear about the "
+        "day they happen.",
+        "Switch on the ones that matter on the Admin console's Rules page, "
+        "at minimum admin privilege changes and suspended accounts made "
+        "active, and set who receives the email.",
+        hits, "policies.csv")]
+
+
+def check_takeout_services(ctx: RunContext) -> List[Finding]:
+    """Google Takeout per service. Google's checklist names Takeout as the
+    path to switch off for a leaver or a compromised account."""
+    rows = []
+    for pol in _policy_settings(ctx):
+        if pol["type"] == "takeout.service_status" and \
+                str(pol["value"].get("serviceState", "")).upper() == "ENABLED":
+            rows.append({"Service": "takeout (master switch)",
+                         "Org unit": pol["ou"] or "/"})
+        elif pol["type"].endswith(".user_takeout") and \
+                str(pol["value"].get("takeoutStatus", "")).upper() == "ENABLED":
+            rows.append({"Service": pol["type"].rsplit(".", 1)[0],
+                         "Org unit": pol["ou"] or "/"})
+    if not rows:
+        return []
+    return [Finding(
+        "takeout-enabled", "INFO",
+        f"Google Takeout is available for {len(rows)} service(s)",
+        "Users can download a full copy of their data from these services "
+        "with Google Takeout. That is normal for most staff, and it is also "
+        "the quickest way for a departing or compromised account to walk off "
+        "with everything.",
+        "Keep a Takeout-off organisational unit and move leavers and "
+        "suspected-compromised accounts into it, using the Admin console's "
+        "Google Takeout settings.",
+        rows, "policies.csv", count=len(rows))]
+
+
+def check_drive_for_desktop(ctx: RunContext) -> List[Finding]:
+    """Drive for desktop allowed on any computer. Google's device checklist
+    recommends restricting it to company-owned devices; its help page lists
+    Business Starter and up as supported, so no edition gate is needed."""
+    hits = [{"Org unit": pol["ou"] or "/"}
+            for pol in _policy_settings(ctx)
+            if pol["type"] == "drive_and_docs.drive_for_desktop"
+            and pol["value"].get("allowDriveForDesktop") is True
+            and pol["value"].get("restrictToAuthorizedDevices") is False]
+    if not hits:
+        return []
+    return [Finding(
+        "drive-desktop-any-device", "INFO",
+        "Drive for desktop can sync to any computer",
+        "Staff can install Drive for desktop on any Mac or PC, including a "
+        "personal one, and keep a synced copy of company files there.",
+        "Decide deliberately. If company files should stay on company "
+        "machines, restrict Drive for desktop to authorised devices in the "
+        "Admin console's Drive and Docs settings; the devices have to be in "
+        "the device inventory first.",
+        hits, "policies.csv", count=len(hits))]
+
+
+def check_meet_safety(ctx: RunContext) -> List[Finding]:
+    """Meet safety defaults. Not on Google's checklist: an OSH recommendation
+    approved 2026-09-14, so it is INFO and says so."""
+    rows = []
+    for pol in _policy_settings(ctx):
+        value, ou = pol["value"], pol["ou"] or "/"
+        if pol["type"] == "meet.safety_domain" and \
+                value.get("usersAllowedToJoin") == "ALL":
+            rows.append({"Org unit": ou,
+                         "Setting": "Who can join meetings: ALL"})
+        elif pol["type"] == "meet.safety_access" and \
+                value.get("meetingsAllowedToJoin") == "ALL":
+            rows.append({"Org unit": ou,
+                         "Setting": "Meetings users can join: ALL"})
+        elif pol["type"] == "meet.safety_host_management" and \
+                value.get("enableHostManagement") is False:
+            rows.append({"Org unit": ou,
+                         "Setting": "Host management is off by default"})
+        elif pol["type"] == "meet.safety_external_participants" and \
+                value.get("enableExternalLabel") is False:
+            rows.append({"Org unit": ou,
+                         "Setting": "External participants are not labelled"})
+    if not rows:
+        return []
+    return [Finding(
+        "meet-safety-open", "INFO",
+        "Google Meet safety settings left at their most open",
+        "Meet's join restrictions are at their widest value and host "
+        "management is off by default, so hosts start a meeting without "
+        "their moderation controls switched on. Values are shown as the API "
+        "reports them.",
+        "Our recommendation, not Google's checklist: turn host management on "
+        "by default and review who can join, in the Admin console's Google "
+        "Meet safety settings.",
+        rows, "policies.csv", count=len(rows))]
+
+
+def check_mail_delegation_policy(ctx: RunContext) -> List[Finding]:
+    """Whether users may grant mailbox delegation at all: context for the
+    per-mailbox delegation findings."""
+    hits = [{"Org unit": pol["ou"] or "/"}
+            for pol in _policy_settings(ctx)
+            if pol["type"] == "gmail.mail_delegation"
+            and pol["value"].get("enableMailDelegation") is True]
+    if not hits:
+        return []
+    return [Finding(
+        "mail-delegation-allowed", "INFO",
+        "Users can give other people access to their mailbox",
+        "Mail delegation is switched on, so any user can grant a colleague "
+        "full read and send access to their mailbox without an admin. The "
+        "delegation findings above show who has done so.",
+        "No action needed if delegation is used deliberately; otherwise turn "
+        "it off in the Admin console's Gmail settings.",
+        hits, "policies.csv", count=len(hits))]
+
+
+def check_api_controls(ctx: RunContext) -> List[Finding]:
+    """Unconfigured third-party app access, reported raw. The meaning of
+    ACCESS_LEVEL_UNSPECIFIED (Google's default on dev) is not yet confirmed
+    against a console change, so this states the value and does not judge."""
+    rows = [{"Org unit": pol["ou"] or "/",
+             "Access level (raw)": str(pol["value"].get("accessLevel", "?"))}
+            for pol in _policy_settings(ctx)
+            if pol["type"] == "api_controls.unconfigured_third_party_apps"]
+    if not rows:
+        return []
+    return [Finding(
+        "api-controls-unconfigured", "INFO",
+        "Access for third-party apps nobody has reviewed",
+        "How the tenant treats apps an admin has not explicitly trusted or "
+        "blocked, as the API reports it. This value is shown, not judged: "
+        "the mapping from these codes to the Admin console options has not "
+        "been verified yet.",
+        "Check the Admin console's API controls (third-party app access) and "
+        "trust only the apps the organisation uses.",
+        rows, "policies.csv", count=len(rows))]
+
+
+def check_2sv_methods(ctx: RunContext) -> List[Finding]:
+    """2SV methods that include text and phone codes. Only the value "ALL"
+    is judged: it is what an unhardened dev tenant returns, and the value
+    the console's "Any except verification codes via text, phone call"
+    option writes has not been read back yet."""
+    hits = [{"Org unit": pol["ou"] or "/",
+             "Allowed methods (raw)": "ALL"}
+            for pol in _policy_settings(ctx)
+            if pol["type"] == "security.two_step_verification_enforcement_factor"
+            and pol["value"].get("allowedSignInFactorSet") == "ALL"]
+    if not hits:
+        return []
+    return [Finding(
+        "2sv-sms-allowed", "MEDIUM",
+        "2-step verification accepts codes by text message or phone call",
+        "Users can use a code sent by SMS or read out in a phone call as their "
+        "second step. Those codes can be phished in real time and stolen by "
+        "moving the phone number to another SIM, which is how most 2-step "
+        "verification bypasses happen.",
+        "In Admin console > Security > Authentication > 2-step verification, "
+        "set Methods to \"Any except verification codes via text, phone call\" "
+        "once staff have an authenticator app, passkey or security key. Have "
+        "them record backup codes at the same time.",
+        hits, "policies.csv", count=len(hits))]
+
+
+def check_shared_drive_controls(ctx: RunContext) -> List[Finding]:
+    """Shared drive settings beyond external access (check_sharing_policy
+    owns that). Only the values seen on dev are judged; other enum values
+    for allowedPartiesForDownloadPrintCopy are not yet mapped."""
+    rows = []
+    for pol in _policy_settings(ctx):
+        if pol["type"] != "drive_and_docs.shared_drive_creation":
+            continue
+        value, ou = pol["value"], pol["ou"] or "/"
+        if value.get("allowSharedDriveCreation") is True:
+            rows.append({"Org unit": ou,
+                         "Setting": "Anyone can create shared drives"})
+        if value.get("allowManagersToOverrideSettings") is True:
+            rows.append({"Org unit": ou, "Setting": "Drive managers can "
+                         "change a drive's sharing settings"})
+        if value.get("allowedPartiesForDownloadPrintCopy") == "ALL":
+            rows.append({"Org unit": ou, "Setting": "Viewers and commenters "
+                         "can download, print and copy"})
+    if not rows:
+        return []
+    return [Finding(
+        "sd-controls-open", "INFO",
+        "Shared drive creation and settings left open",
+        "Any user in these organisational units can create a shared drive, "
+        "and its managers can loosen the organisation's defaults on it. "
+        "Every new drive is somewhere files can be shared from that nobody "
+        "set up on purpose.",
+        "Decide deliberately. The usual build prevents creation at the "
+        "organisational unit and allows it for one named group, and stops "
+        "managers overriding the defaults, in Admin console > Apps > Google "
+        "Workspace > Drive and Docs > Sharing settings > Shared drive "
+        "creation.",
+        rows, "policies.csv", count=len(rows))]
+
+
+# Readable settings from Google's checklists whose values are shown, not
+# judged: either the right answer depends on the client, or the mapping from
+# API value to console option has not been read back on a test tenant.
+RAW_POLICY_SETTINGS = {
+    "security.advanced_protection_program": "Advanced Protection Program",
+    "security.passkeys_restriction": "Passkeys allowed",
+    "security.login_challenges": "Login challenge (employee ID)",
+    "drive_and_docs.external_file_warning": "Warning on files from outside",
+    "drive_and_docs.file_security_update": "Link-sharing security update",
+    "sites.sites_creation_and_modification": "Sites creation and editing",
+    "chat.chat_file_sharing": "Chat file sharing",
+    "chat.chat_apps_access": "Chat apps and webhooks",
+    "api_controls.internal_apps": "Trust internal apps",
+    "api_controls.app_approval_requests": "Users may request app approval",
+    "gmail.user_email_uploads": "Users may import mail and contacts",
+    "gmail.confidential_mode": "Gmail confidential mode",
+    "multi_party_approval.require_approvals":
+        "Multi-party approval for sensitive admin actions",
+    "data_regions.data_at_rest_region": "Data region (at rest)",
+    "data_regions.data_processing_region": "Data region (processing)",
+    "chat.space_history": "Chat history default",
+}
+
+
+def check_policy_settings_raw(ctx: RunContext) -> List[Finding]:
+    """One INFO table of the RAW_POLICY_SETTINGS values, so a reviewer sees
+    them beside the judged findings instead of digging in policies.csv."""
+    rows = [{"Setting": RAW_POLICY_SETTINGS[pol["type"]],
+             "Org unit": pol["ou"] or "/",
+             "Value (raw)": json.dumps(pol["value"], sort_keys=True)}
+            for pol in _policy_settings(ctx)
+            if pol["type"] in RAW_POLICY_SETTINGS]
+    if not rows:
+        return []
+    rows.sort(key=lambda r: (r["Setting"], r["Org unit"]))
+    return [Finding(
+        "policy-settings-raw", "INFO",
+        "Other security settings, as the API reports them",
+        "Settings from Google's security checklists that this audit reads but "
+        "does not score, either because the right value depends on how the "
+        "organisation works or because the raw value has not yet been matched "
+        "to its Admin console option.",
+        "Review each against the Admin console and record the decision.",
+        rows, "policies.csv", count=len(rows))]
+
+
+# Edition gating from each feature's "Supported editions" line on Google's
+# admin help (read 2026-09-14), mapped to SKU ids from GAM7 7.48.01
+# GamCommands.txt. Archived-user SKUs are deliberately absent: an archived
+# account cannot use any of these.
+_SKU_ENT_PLUS, _SKU_ENT_STD = "1010020020", "1010020026"
+_SKU_FL_STARTER, _SKU_FL_STD, _SKU_FL_PLUS = \
+    "1010020030", "1010020031", "1010020034"
+_SKU_BIZ_PLUS = "1010020025"
+_SKU_ENT_ESS, _SKU_ENT_ESS_PLUS = "1010060003", "1010060005"
+_SKU_EDU_FUND = "1010070001"
+_SKU_EDU_STD = {"1010310005", "1010310006", "1010310007"}
+_SKU_EDU_PLUS = {"1010310008", "1010310009", "1010310010",
+                 "1010310002", "1010310003"}
+_SKU_CI_PREMIUM = "1010050001"
+EDITION_FEATURES = [
+    ("Data loss prevention (DLP)",
+     {_SKU_FL_STD, _SKU_FL_PLUS, _SKU_ENT_STD, _SKU_ENT_PLUS, _SKU_EDU_FUND,
+      _SKU_ENT_ESS_PLUS} | _SKU_EDU_STD | _SKU_EDU_PLUS),
+    ("Context-Aware Access",
+     {_SKU_FL_STD, _SKU_FL_PLUS, _SKU_ENT_STD, _SKU_ENT_PLUS,
+      _SKU_ENT_ESS_PLUS, _SKU_CI_PREMIUM} | _SKU_EDU_STD | _SKU_EDU_PLUS),
+    ("Drive trust rules",
+     {_SKU_FL_PLUS, _SKU_ENT_STD, _SKU_ENT_PLUS, _SKU_ENT_ESS_PLUS}
+     | _SKU_EDU_STD | _SKU_EDU_PLUS),
+    ("Security center",
+     {_SKU_FL_STD, _SKU_FL_PLUS, _SKU_ENT_STD, _SKU_ENT_PLUS,
+      _SKU_ENT_ESS_PLUS} | _SKU_EDU_STD | _SKU_EDU_PLUS),
+    ("Advanced mobile management",
+     {_SKU_FL_STARTER, _SKU_FL_STD, _SKU_FL_PLUS, _SKU_BIZ_PLUS, _SKU_ENT_STD,
+      _SKU_ENT_PLUS, _SKU_ENT_ESS, _SKU_ENT_ESS_PLUS, _SKU_CI_PREMIUM,
+      "1010490001"} | _SKU_EDU_STD | _SKU_EDU_PLUS),
+]
+
+
+def _feature_usage(ctx: RunContext, feature: str) -> Tuple[str, Optional[bool]]:
+    """What the collected data says about a gated feature: (text, in_use).
+    in_use is None where no API read can tell."""
+    if feature.startswith("Data loss"):
+        rules = [p for p in _policy_settings(ctx) if p["type"] == "rule.dlp"]
+        active = [p for p in rules
+                  if str(p["value"].get("state", "")).upper() == "ACTIVE"]
+        custom = [p for p in active if not str(
+            p["value"].get("displayName", "")).startswith("[Default]")]
+        if not _module_usable(ctx, "policies"):
+            return "not read (policies module did not run)", None
+        return (f"{len(active)} active rule(s), {len(custom)} of them written "
+                "for this tenant", bool(active))
+    if feature.startswith("Context-Aware"):
+        if not _module_usable(ctx, "caalevels"):
+            return "not read (run with --full to list access levels)", None
+        count = len(ctx.rows("caalevels"))
+        return f"{count} access level(s) defined", bool(count)
+    return "no API read covers this; check in the Admin console", None
+
+
+def check_edition_features(ctx: RunContext) -> List[Finding]:
+    """Security features the tenant's licences include, and whether the
+    collected data shows them in use. Silent on editions that include none,
+    so a Business Standard tenant is never told it lacks DLP."""
+    if not _module_usable(ctx, "licenses"):
+        return []
+    held: Dict[str, int] = {}
+    names: Dict[str, str] = {}
+    for row in ctx.rows("licenses"):
+        sku = col(row, "skuId")
+        held[sku] = held.get(sku, 0) + 1
+        names[sku] = col(row, "skuDisplay") or sku
+    rows, unused = [], []
+    for feature, skus in EDITION_FEATURES:
+        covering = sorted(s for s in skus if s in held)
+        if not covering:
+            continue
+        seats = sum(held[s] for s in covering)
+        editions = ", ".join(names[s] for s in covering)
+        usage, in_use = _feature_usage(ctx, feature)
+        rows.append({"Feature": feature,
+                     "Included with": f"{editions} ({seats} user(s))",
+                     "What the audit sees": usage})
+        if in_use is False:
+            unused.append({"Feature": feature, "Included with": editions,
+                           "What the audit sees": usage})
+    findings = []
+    if unused:
+        findings.append(Finding(
+            "edition-security-unused", "MEDIUM",
+            "Paid-for security features that are not switched on",
+            "The tenant's licences include these protections, but the "
+            "collected data shows them unused. The organisation is paying "
+            "for controls that are doing nothing.",
+            "Start with a small, specific rule set - for DLP, warn on "
+            "external sharing of ID and card numbers; for Context-Aware "
+            "Access, an access level for company devices - rather than "
+            "trying to cover everything at once.",
+            unused, "licenses.csv"))
+    if rows:
+        findings.append(Finding(
+            "edition-security-features", "INFO",
+            "Security features included in this tenant's edition",
+            "Features Google only offers in some editions, listed because "
+            "this tenant's licences include them. Where no API exposes the "
+            "configuration, the row says to check the console.",
+            "Review each against how the organisation works; the ones marked "
+            "check in the Admin console need a look by hand.",
+            rows, "licenses.csv", count=len(rows)))
+    return findings
+
+
+# Admin log events worth a line each: settings, roles, security. Other
+# events (licence churn, group membership) are counted only.
+ADMIN_EVENT_PATTERN = re.compile(
+    r"APPLICATION_SETTING|ROLE|TWO_STEP|2SV|SSO|RULE|SECURITY|DOMAIN|"
+    r"ALLOWLIST|TRUST|PASSWORD_POLICY|RECOVERY", re.IGNORECASE)
+
+
+def check_admin_activity(ctx: RunContext) -> List[Finding]:
+    """What admins changed in the last ACTIVITY_DAYS days: the settings and
+    role events in full, everything else as counts."""
+    if not _module_usable(ctx, "report_admin"):
+        return []
+    rows = ctx.rows("report_admin")
+    if not rows:
+        return []
+    counts: Dict[str, int] = {}
+    detail = []
+    for row in rows:
+        event = col(row, "name")
+        counts[event] = counts.get(event, 0) + 1
+        if ADMIN_EVENT_PATTERN.search(event):
+            change = col(row, "SETTING_NAME") or col(row, "ROLE_NAME") \
+                or col(row, "RULE_NAME")
+            old, new = col(row, "OLD_VALUE"), col(row, "NEW_VALUE")
+            if old or new:
+                change = f"{change}: {old or '-'} -> {new or '-'}"
+            detail.append({"Time": col(row, "id.time"),
+                           "Admin": col(row, "actor.email") or "system",
+                           "Event": event, "Change": change})
+    findings = []
+    if detail:
+        findings.append(Finding(
+            "admin-setting-changes", "INFO",
+            f"Settings and admin-role changes in the last {ACTIVITY_DAYS} "
+            "days",
+            "Who changed tenant settings, admin roles or security rules "
+            "recently, newest first. On a tenant you have just inherited, "
+            "this is how you learn what someone switched off.",
+            "Read the list for anything nobody can account for; the full log "
+            "is in report_admin.csv and in the Admin console's admin log "
+            "events.",
+            detail, "report_admin.csv", count=len(detail)))
+    summary = [{"Event": e, "Count": str(n)}
+               for e, n in sorted(counts.items(), key=lambda kv: -kv[1])]
+    findings.append(Finding(
+        "admin-activity-summary", "INFO",
+        f"Admin activity in the last {ACTIVITY_DAYS} days: {len(rows)} "
+        "event(s)",
+        "Every admin audit log event in the window, counted by type.",
+        "No action needed; context for the settings changes above.",
+        summary, "report_admin.csv", count=len(summary)))
+    return findings
+
+
+def check_login_risk(ctx: RunContext) -> List[Finding]:
+    """Risky sign-in events, sensitive actions Google blocked, and failed
+    sign-ins in the last ACTIVITY_DAYS days."""
+    if not _module_usable(ctx, "report_login"):
+        return []
+    risky, blocked, failures = [], [], {}
+    for row in ctx.rows("report_login"):
+        event = col(row, "name")
+        user = col(row, "actor.email")
+        if event in LOGIN_RISK_EVENTS:
+            risky.append({"Time": col(row, "id.time"), "User": user,
+                          "Event": event, "IP": col(row, "ipAddress"),
+                          "Country": col(row, "networkInfo.regionCode")})
+        elif event in LOGIN_BLOCKED_EVENTS:
+            blocked.append({"Time": col(row, "id.time"), "User": user,
+                            "Action": col(row, "sensitive_action_name") or "?",
+                            "Challenge": col(row, "login_challenge_method") or "?",
+                            "IP": col(row, "ipAddress"),
+                            "Country": col(row, "networkInfo.regionCode")})
+        elif event in LOGIN_FAILURE_EVENTS:
+            failures[user] = failures.get(user, 0) + 1
+    findings = []
+    if risky:
+        findings.append(Finding(
+            "login-risk-events", "HIGH",
+            f"Google flagged {len(risky)} risky sign-in or account event(s) "
+            f"in the last {ACTIVITY_DAYS} days",
+            "Google's sign-in log recorded suspicious logins, leaked-password "
+            "or hijack account disables, government-backed attack warnings or "
+            "mail forwarding to outside addresses. Each one is either "
+            "explained by the user or is an incident.",
+            "Ask each user about their event; for anything unexplained, reset "
+            "the password, sign the user out of all sessions, and review "
+            "their forwarding, filters, delegates and app tokens.",
+            risky, "report_login.csv"))
+    if blocked:
+        findings.append(Finding(
+            "login-blocked-actions", "MEDIUM",
+            f"Google blocked {len(blocked)} sensitive action(s) it judged "
+            f"risky in the last {ACTIVITY_DAYS} days",
+            "Google refused these actions because the session looked risky "
+            "and the user did not pass a re-verification, so none of them "
+            "happened. The Action column names what was attempted.",
+            "Ask each user whether they tried the named action at that time. "
+            "If they did not, treat the account as compromised: reset the "
+            "password, sign the user out of all sessions, and review their "
+            "app tokens.",
+            blocked, "report_login.csv"))
+    if failures:
+        rows = [{"User": u, "Failed sign-ins": str(n)}
+                for u, n in sorted(failures.items(), key=lambda kv: -kv[1])]
+        findings.append(Finding(
+            "login-failures", "INFO",
+            f"Failed sign-ins in the last {ACTIVITY_DAYS} days "
+            f"({sum(failures.values())})",
+            "Failed sign-ins by account. A handful is forgotten passwords; "
+            "hundreds on one account is someone guessing.",
+            "Look at the top of the list; an account with many failures and "
+            "no 2-step verification is the one to fix first.",
+            rows, "report_login.csv", count=len(rows)))
+    return findings
+
+
+def check_security_alerts(ctx: RunContext) -> List[Finding]:
+    """Alert Center alerts raised in the last ACTIVITY_DAYS days. Status is
+    not trusted: alerts sit at NOT_STARTED forever unless someone triages."""
+    if not _module_usable(ctx, "alerts"):
+        return []
+    rows = ctx.rows("alerts")
+    if not rows:
+        return []
+    evidence = [{"Created": col(row, "createTime"), "Type": col(row, "type"),
+                 "Source": col(row, "source"),
+                 "Severity": col(row, "metadata.severity") or "?",
+                 "Status": col(row, "metadata.status") or "?"}
+                for row in rows]
+    evidence.sort(key=lambda e: e["Created"], reverse=True)
+    high = [e for e in evidence if e["Severity"].upper() == "HIGH"]
+    return [Finding(
+        "security-alerts", "MEDIUM" if high else "INFO",
+        f"{len(rows)} Alert Center alert(s) in the last {ACTIVITY_DAYS} days"
+        + (f", {len(high)} high severity" if high else ""),
+        "Google's own security alerts for the tenant. Nobody is notified "
+        "unless the matching alert rule emails someone, so these are often "
+        "read here for the first time.",
+        "Open each in the Admin console's Alert center, decide whether it "
+        "was expected, and close it.",
+        high + [e for e in evidence if e not in high], "alerts.csv",
+        count=len(rows))]
 
 
 def _norm_sku(name: str) -> str:
@@ -3179,24 +4681,139 @@ CHECKS = [
     check_suspended_holding_data,
     check_risky_oauth,
     check_admin_recovery,
+    check_admin_backup_codes,
+    check_licensed_super_admins,
     check_public_calendars,
     check_password_policy,
     check_session_policy,
     check_2sv_policy,
     check_sharing_policy,
     check_service_status,
+    check_super_admin_self_recovery,
+    check_gmail_protections,
+    check_external_chat,
+    check_console_only_settings,
+    check_alert_rules_off,
+    check_takeout_services,
+    check_drive_for_desktop,
+    check_meet_safety,
+    check_mail_delegation_policy,
+    check_api_controls,
+    check_2sv_methods,
+    check_shared_drive_controls,
+    check_policy_settings_raw,
+    check_edition_features,
+    check_admin_activity,
+    check_login_risk,
+    check_security_alerts,
     check_licence_waste,
     check_admin_roles,
+    check_sendas,
+    check_forwarding_addresses,
+    check_group_members,
+    check_vacation,
+    check_vault_exports,
+    check_google_suspended,
+    check_new_accounts,
+    check_admin_2sv_enforced,
+    check_root_ou_users,
+    check_shared_drive_download_controls,
+    check_oauth_inventory,
+    check_user_password_strength,
+    check_admin_second_factors,
+    check_classroom_settings,
+    check_courses,
     check_tenant_shape,
 ]
+
+
+# Client-readable name per check, for the "checked and clean" table. A check
+# missing from here fails TestCheckTitles, so a new check cannot ship without
+# a name a reader can understand.
+CHECK_TITLES = {
+    "check_public_files": "Files public on the web or open to anyone with the link",
+    "check_external_file_shares": "Files shared to external people, domains, or shared in",
+    "check_super_admin_count": "At least two super admins",
+    "check_admin_2sv": "Super admins enrolled in 2-step verification",
+    "check_admin_asps": "App passwords on admin accounts",
+    "check_external_forwarding": "Mailboxes forwarding outside the organisation",
+    "check_orphaned_shared_drives": "Shared Drives with no manager",
+    "check_shared_drive_external": "Shared Drive external members and open settings",
+    "check_group_exposure": "Groups open to joining, posting or external members",
+    "check_filter_forwarding": "Gmail filters forwarding externally",
+    "check_unmanaged_accounts": "Personal Google accounts on company domains",
+    "check_dns_findings": "Mail DNS (MX, SPF, DKIM, DMARC)",
+    "check_2sv_enrolment": "2-step verification enrolment across users",
+    "check_pop_imap": "POP and IMAP enabled on mailboxes",
+    "check_dormant_accounts": "Dormant admins and unused licensed accounts",
+    "check_mailbox_delegation": "Mailbox delegation",
+    "check_at_risk_accounts": "Accounts stacking several risk factors",
+    "check_suspended_holding_data": "Suspended accounts holding licences or data",
+    "check_risky_oauth": "Third-party apps with wide mailbox or Drive access",
+    "check_admin_recovery": "Super admin recovery details",
+    "check_admin_backup_codes": "Super admin backup codes",
+    "check_licensed_super_admins": "Super admins holding paid licences",
+    "check_public_calendars": "Public primary calendars",
+    "check_password_policy": "Password policy",
+    "check_session_policy": "Web session length",
+    "check_2sv_policy": "2-step verification policy per org unit",
+    "check_sharing_policy": "New Shared Drive external-sharing defaults",
+    "check_service_status": "Google services switched on or off",
+    "check_super_admin_self_recovery": "Super admin self-recovery",
+    "check_gmail_protections": "Gmail phishing and malware protections",
+    "check_external_chat": "External Google Chat",
+    "check_console_only_settings": "Settings only the Admin console shows",
+    "check_alert_rules_off": "Security alert rules",
+    "check_takeout_services": "Google Takeout per service",
+    "check_drive_for_desktop": "Drive for desktop device restriction",
+    "check_meet_safety": "Google Meet safety settings",
+    "check_mail_delegation_policy": "Mail delegation allowed",
+    "check_api_controls": "Third-party app access controls",
+    "check_2sv_methods": "2-step verification methods allowed",
+    "check_shared_drive_controls": "Shared drive creation and manager overrides",
+    "check_policy_settings_raw": "Other checklist settings (raw)",
+    "check_edition_features": "Edition security features in use",
+    "check_admin_activity": "Admin log: settings and role changes",
+    "check_login_risk": "Risky sign-in events and failed sign-ins",
+    "check_security_alerts": "Alert Center alerts",
+    "check_licence_waste": "Licences owned but unassigned",
+    "check_admin_roles": "Admin role hygiene",
+    "check_sendas": "Send-as addresses outside the organisation",
+    "check_forwarding_addresses": "External forwarding addresses on file",
+    "check_group_members": "Group membership: external members, owners",
+    "check_vacation": "Out-of-office replies to anyone",
+    "check_vault_exports": "Vault exports on record",
+    "check_google_suspended": "Accounts suspended by Google",
+    "check_new_accounts": "Accounts created recently",
+    "check_admin_2sv_enforced": "Super admin 2-step verification enforced",
+    "check_root_ou_users": "Users left in the root org unit",
+    "check_shared_drive_download_controls":
+        "Shared Drive copy and download controls",
+    "check_oauth_inventory": "Third-party app inventory",
+    "check_user_password_strength": "Weak or too-short user passwords",
+    "check_admin_second_factors": "Super admin second factors",
+    "check_classroom_settings": "Google Classroom settings (Education)",
+    "check_courses": "Classroom courses (Education)",
+    "check_tenant_shape": "Tenant at a glance",
+}
 
 
 def run_checks(ctx: RunContext) -> List[Finding]:
     print_header("STAGE 2 - CHECK")
     findings: List[Finding] = []
+    ctx.clean_checks = []
     for check in CHECKS:
+        ctx.consulted = []
         try:
-            findings.extend(check(ctx))
+            raised = check(ctx)
+            findings.extend(raised)
+            # Clean means the check looked at real data and found nothing.
+            # A check whose every module was missing is a coverage gap,
+            # listed as such elsewhere, not a clean result.
+            if not raised and any(usable for _, usable in ctx.consulted):
+                modules = sorted({k for k, usable in ctx.consulted if usable})
+                ctx.clean_checks.append((CHECK_TITLES[check.__name__],
+                                         ", ".join(modules)))
         except Exception as exc:
             # One broken check must not sink the report; surface it instead.
             print_error(f"Check {check.__name__} failed: "
@@ -3267,7 +4884,8 @@ def render_html(ctx: RunContext, findings: List[Finding]) -> Path:
         sections += f"""
 <section class='finding'>
   <h3><span class='sev' style='background:{SEVERITY_COLOURS[finding.severity]}'>
-  {finding.severity}</span> {escape(finding.title)}</h3>
+  {finding.severity}</span> {escape(finding.title)}
+  <code class='fid'>{escape(finding.fid)}</code></h3>
   <p><strong>What this means:</strong> {escape(finding.meaning)}</p>
   <p><strong>What to do:</strong> {escape(finding.remediation)}</p>
   {_evidence_table(finding)}
@@ -3296,6 +4914,21 @@ def render_html(ctx: RunContext, findings: List[Finding]) -> Path:
             not_checked += (f"<tr><td>{escape(title)}</td>"
                             f"<td>{escape(entry['status'])}</td>"
                             f"<td>{escape(note)}</td></tr>")
+    clean_block = ""
+    if ctx.clean_checks:
+        clean_rows = "".join(
+            f"<tr><td>{escape(title)}</td><td>{escape(mods)}</td></tr>"
+            for title, mods in ctx.clean_checks)
+        clean_block = f"""
+<section class='finding'>
+  <h3>Checked and clean</h3>
+  <p>These checks ran over collected data and raised nothing. A check
+  absent from both this list and the findings above had no data to look at;
+  the coverage gaps below say why.</p>
+  <div class='scroll'><table><thead><tr><th>Check</th><th>Data read</th>
+  </tr></thead><tbody>{clean_rows}</tbody></table></div>
+</section>"""
+
     unscanned = meta.get("unscanned_shared_drives", [])
     if unscanned:
         not_checked += (
@@ -3405,6 +5038,7 @@ def render_html(ctx: RunContext, findings: List[Finding]) -> Path:
   th {{ background: #f0f2f4; }}
   .scroll {{ overflow-x: auto; }}
   .more {{ color: #667; font-size: 13px; }}
+  .fid {{ color: #889; font-size: 12px; font-weight: normal; }}
   footer {{ color: #667; font-size: 13px; padding: 24px; text-align: center; }}
   @media print {{
     body {{ background: #fff; }}
@@ -3433,6 +5067,7 @@ def render_html(ctx: RunContext, findings: List[Finding]) -> Path:
   </section>
   {sections}
   {dns_block}
+  {clean_block}
   {not_checked_block}
   <section class='finding'>
     <h3>Preflight checks</h3>
@@ -3457,6 +5092,14 @@ Paul Ogier, Outsource House (osh.co.za) - print this page for a PDF copy.
             writer.writerow([finding.severity, finding.fid, finding.title,
                              finding.count, finding.source])
     print_success(f"Findings CSV written: {findings_csv}")
+    evidence_csv = ctx.run_dir / "findings_evidence.csv"
+    evidence_rows = []
+    for finding in findings:
+        for row in finding.all_evidence:
+            evidence_rows.append(dict({"id": finding.fid,
+                                       "severity": finding.severity}, **row))
+    write_rows(evidence_csv, evidence_rows)
+    print_success(f"Evidence CSV written: {evidence_csv}")
     return out_path
 
 
@@ -3495,7 +5138,8 @@ def parse_args(argv=None):
                         help="Comma-separated tiers to skip, e.g. --skip-tier 3")
     parser.add_argument("--full", action="store_true",
                         help="Include the tier-4 modules (filters, vacation, "
-                        "browsers, alerts, context-aware access)")
+                        "browsers, context-aware access, Gmail profile "
+                        "sizes, Drive file counts)")
     parser.add_argument("--no-dns", action="store_true",
                         help="Skip the DNS module")
     parser.add_argument("--include-suspended", action="store_true",

@@ -138,6 +138,32 @@ user@example.com,0""")
         self.assertEqual([], ts.check_admin_asps(self.ctx))
         self.assertEqual([], ts._asp_rows(self.ctx))
 
+    def test_admin_backup_codes_zero_flagged_unread_skipped(self):
+        # Dev shape: counts of 0 and 10. other@ is a super admin with no
+        # backupcodes row, so it was not read and must not count as zero.
+        self.write_csv("users", f"""{USERS_HEADER}
+boss@example.com,False,False,2026-08-01T10:00:00Z,True,True,,True,False,Business
+boss2@example.com,False,False,2026-08-01T10:00:00Z,True,True,,True,False,Business
+other@example.com,False,False,2026-08-01T10:00:00Z,True,True,,True,False,Business
+user@example.com,False,False,2026-08-01T10:00:00Z,True,True,,False,False,Business""")
+        self.write_csv("backupcodes", """User,verificationCodesCount
+boss@example.com,0
+boss2@example.com,10
+user@example.com,0""")
+        findings = ts.check_admin_backup_codes(self.ctx)
+        self.assertEqual(["admin-no-backup-codes"], self.finding_ids(findings))
+        self.assertEqual(["boss@example.com"],
+                         [e["Super admin"] for e in findings[0].evidence])
+
+    def test_licensed_super_admin_info_cloud_identity_ignored(self):
+        self.write_csv("users", f"""{USERS_HEADER}
+boss@example.com,False,False,2026-08-01T10:00:00Z,True,True,,True,False,Business Standard
+break@example.com,False,False,2026-08-01T10:00:00Z,True,True,,True,False,Cloud Identity Free""")
+        findings = ts.check_licensed_super_admins(self.ctx)
+        self.assertEqual(["licensed-super-admins"], self.finding_ids(findings))
+        self.assertEqual(["boss@example.com"],
+                         [e["Super admin"] for e in findings[0].evidence])
+
     def test_nonzero_count_row_counts_as_asp(self):
         self.write_csv("users", f"""{USERS_HEADER}
 boss@example.com,False,False,2026-08-01T10:00:00Z,True,True,,True,False,Business""")
@@ -312,6 +338,182 @@ ext@example.com,Ext,3,INVITED_CAN_JOIN,true,ANYONE_CAN_POST""")
 safe@example.com,Safe,3,INVITED_CAN_JOIN,false,ALL_MEMBERS_CAN_POST""")
         self.assertEqual([], ts.check_group_exposure(self.ctx))
 
+    def test_public_archive_high_and_discoverable_info(self):
+        self.write_csv("groups", f"""{self.GROUPS_HEADER},whoCanViewGroup,whoCanDiscoverGroup
+pub@example.com,Pub,3,INVITED_CAN_JOIN,false,ALL_MEMBERS_CAN_POST,ANYONE_CAN_VIEW,ANYONE_CAN_DISCOVER
+safe@example.com,Safe,3,INVITED_CAN_JOIN,false,ALL_MEMBERS_CAN_POST,ALL_MEMBERS_CAN_VIEW,ALL_IN_DOMAIN_CAN_DISCOVER""")
+        findings = {f.fid: f for f in ts.check_group_exposure(self.ctx)}
+        self.assertEqual({"groups-public-archive", "groups-discoverable"},
+                         set(findings))
+        self.assertEqual("HIGH", findings["groups-public-archive"].severity)
+        self.assertEqual(1, findings["groups-discoverable"].count)
+
+    def test_members_external_ownerless_and_suspended_owner(self):
+        self.write_csv("users", f"""{USERS_HEADER}
+gone@example.com,True,False,2026-01-01T10:00:00Z,True,True,,False,False,Business
+here@example.com,False,False,2026-08-01T10:00:00Z,True,True,,False,False,Business""")
+        self.write_csv("groups", f"""{self.GROUPS_HEADER}
+a@example.com,A,3,INVITED_CAN_JOIN,true,ALL_MEMBERS_CAN_POST
+b@example.com,B,1,INVITED_CAN_JOIN,false,ALL_MEMBERS_CAN_POST
+c@example.com,C,1,INVITED_CAN_JOIN,false,ALL_MEMBERS_CAN_POST""")
+        self.write_csv("group_members", """group,type,role,status,email
+a@example.com,USER,OWNER,ACTIVE,gone@example.com
+a@example.com,USER,MEMBER,,outsider@gmail.com
+b@example.com,USER,MEMBER,ACTIVE,here@example.com
+c@example.com,USER,OWNER,ACTIVE,here@example.com
+c@example.com,CUSTOMER,MEMBER,,""")
+        findings = {f.fid: f for f in ts.check_group_members(self.ctx)}
+        self.assertEqual({"groups-external-members-present",
+                          "groups-no-owner", "groups-suspended-owner"},
+                         set(findings))
+        self.assertEqual("outsider@gmail.com",
+                         findings["groups-external-members-present"]
+                         .evidence[0]["External member"])
+        self.assertEqual(["b@example.com"],
+                         [r["Group"] for r in findings["groups-no-owner"].evidence])
+        self.assertEqual("gone@example.com",
+                         findings["groups-suspended-owner"].evidence[0]["Owner"])
+
+
+class TestMailboxSettingsChecks(CtxTestCase):
+    """Round 9: sendas, forwarding addresses and vacation, collected since
+    v1.0.0 and read by nothing."""
+
+    def test_external_sendas_flagged_primary_and_internal_not(self):
+        self.write_csv("sendas", """User,displayName,sendAsEmail,replyToAddress,isPrimary,isDefault,treatAsAlias,verificationStatus
+a@example.com,,a@example.com,,True,True,,
+a@example.com,,a.alias@alias.example.com,,False,False,True,accepted
+b@example.com,,b@gmail.com,,False,False,False,pending""")
+        findings = ts.check_sendas(self.ctx)
+        self.assertEqual(["sendas-external"], self.finding_ids(findings))
+        self.assertEqual([{"User": "b@example.com", "Sends as": "b@gmail.com",
+                           "Verified": "pending", "Reply-to": ""}],
+                         findings[0].evidence)
+
+    def test_external_forwarding_address_on_file(self):
+        self.write_csv("forwardingaddresses", """User,forwardingEmail,verificationStatus
+a@example.com,a.home@gmail.com,accepted
+b@example.com,b@alias.example.com,accepted""")
+        findings = ts.check_forwarding_addresses(self.ctx)
+        self.assertEqual(["forwarding-addresses-external"],
+                         self.finding_ids(findings))
+        self.assertEqual("a.home@gmail.com",
+                         findings[0].evidence[0]["Forwarding address"])
+
+    def test_vacation_to_anyone_only(self):
+        self.write_csv("vacation", """User,enabled,contactsonly,domainonly,startdate,enddate,subject
+a@example.com,True,False,False,,,Away
+b@example.com,True,True,False,,,Away
+c@example.com,False,False,False,,,Away""")
+        findings = ts.check_vacation(self.ctx)
+        self.assertEqual(["vacation-replies-to-anyone"], self.finding_ids(findings))
+        self.assertEqual([{"User": "a@example.com", "Subject": "Away",
+                           "Ends": "no end date"}], findings[0].evidence)
+
+
+class TestRound9UserChecks(CtxTestCase):
+    HEADER = USERS_HEADER + ",suspensionReason,creationTime,orgUnitPath,recoveryPhone"
+
+    def test_google_suspended_not_admin_suspended(self):
+        self.write_csv("users", f"""{self.HEADER}
+leaver@example.com,True,False,2026-01-01T10:00:00Z,True,True,,False,False,Business,ADMIN,2025-01-01T00:00:00Z,/,
+hacked@example.com,True,False,2026-01-01T10:00:00Z,True,True,,False,False,Business,ABUSE,2025-01-01T00:00:00Z,/,""")
+        findings = ts.check_google_suspended(self.ctx)
+        self.assertEqual(["google-suspended-accounts"], self.finding_ids(findings))
+        self.assertEqual([{"User": "hacked@example.com", "Reason": "ABUSE"}],
+                         findings[0].evidence)
+
+    def test_new_accounts_within_window(self):
+        recent = (ts.datetime.now(ts.timezone.utc)
+                  - ts.timedelta(days=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.write_csv("users", f"""{self.HEADER}
+old@example.com,False,False,2026-01-01T10:00:00Z,True,True,,False,False,Business,,2020-01-01T00:00:00Z,/Staff,
+new@example.com,False,False,,False,False,,True,False,Business,,{recent},/,""")
+        findings = ts.check_new_accounts(self.ctx)
+        self.assertEqual(["new-accounts"], self.finding_ids(findings))
+        self.assertEqual("new@example.com", findings[0].evidence[0]["User"])
+        self.assertEqual("super admin", findings[0].evidence[0]["Admin"])
+
+    def test_admin_enrolled_but_not_enforced(self):
+        self.write_csv("users", f"""{USERS_HEADER}
+boss@example.com,False,False,2026-08-01T10:00:00Z,True,False,,True,False,Business
+boss2@example.com,False,False,2026-08-01T10:00:00Z,True,True,,True,False,Business
+boss3@example.com,False,False,2026-08-01T10:00:00Z,False,False,,True,False,Business""")
+        findings = ts.check_admin_2sv_enforced(self.ctx)
+        self.assertEqual([{"Super admin": "boss@example.com"}],
+                         findings[0].evidence)
+
+    def test_admin_recovery_phone_masked(self):
+        self.write_csv("users", f"""{self.HEADER}
+boss@example.com,False,False,2026-08-01T10:00:00Z,True,True,,True,False,Business,,2020-01-01T00:00:00Z,/,+27821234567""")
+        findings = ts.check_admin_recovery(self.ctx)
+        self.assertEqual(["admin-personal-recovery"], self.finding_ids(findings))
+        self.assertEqual("...4567", findings[0].evidence[0]["Recovery phone"])
+        self.assertNotIn("27821234567", json.dumps(findings[0].evidence))
+
+    def test_root_ou_users_only_when_other_ous_exist(self):
+        self.write_csv("users", f"""{self.HEADER}
+root@example.com,False,False,2026-08-01T10:00:00Z,True,True,,False,False,Business,,2020-01-01T00:00:00Z,/,
+staff@example.com,False,False,2026-08-01T10:00:00Z,True,True,,False,False,Business,,2020-01-01T00:00:00Z,/Staff,""")
+        self.write_csv("orgs", "orgUnitPath,orgUnitId,name,parentOrgUnitId")
+        self.assertEqual([], ts.check_root_ou_users(self.ctx))
+        self.write_csv("orgs", """orgUnitPath,orgUnitId,name,parentOrgUnitId
+/Staff,id:1,Staff,id:0""")
+        findings = ts.check_root_ou_users(self.ctx)
+        self.assertEqual(["root@example.com"],
+                         [r["User"] for r in findings[0].evidence])
+
+    def test_weak_passwords_from_usage_report_live_users_only(self):
+        self.write_csv("users", f"""{USERS_HEADER}
+weak@example.com,False,False,2026-08-01T10:00:00Z,True,True,,False,False,Business
+short@example.com,False,False,2026-08-01T10:00:00Z,True,True,,False,False,Business
+gone@example.com,True,False,2026-08-01T10:00:00Z,True,True,,False,False,Business
+boss@example.com,False,False,2026-08-01T10:00:00Z,True,True,,True,False,Business""")
+        self.write_csv("report_users", """email,date,accounts:password_strength,accounts:password_length_compliance,accounts:num_security_keys,accounts:num_passkeys_enrolled
+weak@example.com,2026-08-13,WEAK,COMPLIANT,0,0
+short@example.com,2026-08-13,STRONG,NON_COMPLIANT,0,0
+gone@example.com,2026-08-13,WEAK,NON_COMPLIANT,0,0
+boss@example.com,2026-08-13,STRONG,COMPLIANT,2,1
+never@example.com,2026-08-13,UNKNOWN,UNKNOWN,0,0""")
+        findings = ts.check_user_password_strength(self.ctx)
+        self.assertEqual(["weak-user-passwords"], self.finding_ids(findings))
+        self.assertEqual({"weak@example.com": "weak password",
+                          "short@example.com": "shorter than the policy minimum"},
+                         {r["User"]: r["Problem"] for r in findings[0].evidence})
+        second = ts.check_admin_second_factors(self.ctx)
+        self.assertEqual([{"Super admin": "boss@example.com",
+                           "Security keys": "2", "Passkeys": "1",
+                           "2SV enrolled": "True"}], second[0].evidence)
+
+
+class TestRound9DriveAndVault(CtxTestCase):
+    def test_vault_exports_listed(self):
+        self.write_csv("vaultexports", """matterId,matterName,id,name,createTime
+m1,Litigation 2026,e1,All mail 2026,2026-08-01T00:00:00Z""")
+        findings = ts.check_vault_exports(self.ctx)
+        self.assertEqual(["vault-exports"], self.finding_ids(findings))
+        self.assertEqual("Litigation 2026", findings[0].evidence[0]["Matter"])
+
+    def test_shared_drive_copy_download_open(self):
+        self.write_csv("shareddrives", """id,name,restrictions.copyRequiresWriterPermission,restrictions.downloadRestriction.restrictedForReaders
+d1,Open,False,False
+d2,Locked,True,True
+d3,Unknown,,""")
+        findings = ts.check_shared_drive_download_controls(self.ctx)
+        self.assertEqual(["sd-download-copy-open"], self.finding_ids(findings))
+        self.assertEqual(["Open"],
+                         [r["Shared Drive"] for r in findings[0].evidence])
+
+    def test_tenant_shape_counts_orgs_and_sites(self):
+        self.write_csv("orgs", """orgUnitPath,orgUnitId,name,parentOrgUnitId
+/Staff,id:1,Staff,id:0""")
+        self.write_csv("sites", """Owner,id,name
+a@example.com,s1,Intranet""")
+        facts = {r["Fact"]: r["Value"]
+                 for r in ts.check_tenant_shape(self.ctx)[0].evidence}
+        self.assertEqual("1", facts["Organisational units (below root)"])
+        self.assertEqual("1", facts["Google Sites"])
+
 
 class TestAccountHygieneChecks(CtxTestCase):
     def test_2sv_enrolment_percentage(self):
@@ -430,11 +632,17 @@ clean@example.com,False,False,2026-08-14T10:00:00Z,True,True,it@example.com,Fals
                          [r["User"] for r in findings[0].evidence])
 
     def test_admin_in_list_raises_to_high(self):
+        # No 2SV + personal recovery on an admin: HIGH. The admin role is
+        # not itself a factor (the admin-no-2sv CRITICAL already names them),
+        # so an admin with one weakness is not listed.
         self.write_csv("users", f"""{USERS_HEADER}
-boss@example.com,False,False,2026-08-14T10:00:00Z,False,False,it@example.com,True,False,Business""")
+boss@example.com,False,False,2026-08-14T10:00:00Z,False,False,boss@gmail.com,True,False,Business
+boss2@example.com,False,False,2026-08-14T10:00:00Z,False,False,it@example.com,True,False,Business""")
         findings = ts.check_at_risk_accounts(self.ctx)
         self.assertEqual("HIGH", findings[0].severity)
-        self.assertIn("admin role", findings[0].evidence[0]["Risk factors"])
+        self.assertEqual(["boss@example.com"],
+                         [r["User"] for r in findings[0].evidence])
+        self.assertNotIn("admin role", findings[0].evidence[0]["Risk factors"])
 
     def test_asps_and_risky_token_count_as_factors(self):
         self.write_csv("users", f"""{USERS_HEADER}
@@ -513,12 +721,28 @@ c@example.com,c2,Nice App,https://www.googleapis.com/auth/drive.readonly""")
         self.assertEqual("Got Your Back", findings[0].evidence[0]["App"])
         self.assertEqual("2", findings[0].evidence[0]["Users"])
 
-    def test_readonly_drive_scope_not_flagged(self):
+    def test_scopes_match_whole_tokens_and_readonly_is_risky(self):
         # .../auth/drive must be matched as a whole token, not a prefix of
-        # .../auth/drive.readonly.
+        # .../auth/drive.file (not risky). drive.readonly IS risky since
+        # round 9: reading everything is the exposure.
         self.write_csv("tokens", """user,clientId,displayText,scopes
-a@example.com,c2,Nice App,https://www.googleapis.com/auth/drive.readonly""")
-        self.assertEqual([], ts.check_risky_oauth(self.ctx))
+a@example.com,c2,Nice App,https://www.googleapis.com/auth/drive.file
+b@example.com,c4,Reader,https://www.googleapis.com/auth/drive.readonly""")
+        findings = ts.check_risky_oauth(self.ctx)
+        self.assertEqual(["Reader"], [r["App"] for r in findings[0].evidence])
+        self.assertEqual("read all of Drive", findings[0].evidence[0]["Access"])
+
+    def test_app_inventory_puts_unidentified_first(self):
+        self.write_csv("tokens", """user,clientId,displayText,anonymous,scopes
+a@example.com,c1,Popular,False,openid email
+b@example.com,c1,Popular,False,openid email
+c@example.com,c9,,True,openid""")
+        findings = ts.check_oauth_inventory(self.ctx)
+        self.assertEqual(["oauth-app-map"], self.finding_ids(findings))
+        self.assertEqual(2, findings[0].count)
+        self.assertEqual("c9", findings[0].evidence[0]["App"])
+        self.assertEqual("yes", findings[0].evidence[0]["Unidentified"])
+        self.assertIn("1 unidentified", findings[0].title)
 
     def test_full_drive_scope_flagged(self):
         self.write_csv("tokens", """user,clientId,displayText,scopes
@@ -583,6 +807,43 @@ class TestDnsCheck(CtxTestCase):
         findings = ts.check_dns_findings(self.ctx)
         self.assertEqual(["dmarc-missing"],
                          [f.fid for f in findings])
+
+    def test_missing_spf_as_dev_reported_it(self):
+        # Exact shape from dev.osh.co.za on 2026-08-15: nothing above info.
+        (self.run_dir / "dns.json").write_text(json.dumps({
+            "example.com": {"path": "tamingdns", "checks": {
+                "spf": {"status": "info", "grade": "F",
+                        "verdict": "not_configured", "findings": [
+                            {"severity": "info",
+                             "title": "No SPF record published"}]}}},
+        }), encoding="utf-8")
+        self.assertEqual(["spf-missing"],
+                         self.finding_ids(ts.check_dns_findings(self.ctx)))
+
+    def test_spf_dkim_mx_each_get_their_own_finding(self):
+        # Dev on 2026-08-15: SPF graded F with a critical finding, DKIM
+        # pass, DMARC warn/info. Before this only DMARC could ever fire.
+        (self.run_dir / "dns.json").write_text(json.dumps({
+            "example.com": {"path": "tamingdns", "checks": {
+                "mx": {"status": "fail", "findings": [
+                    {"severity": "high", "title": "No MX records"}]},
+                "spf": {"status": "info", "grade": "F", "findings": [
+                    {"severity": "critical", "title": "No SPF record"}]},
+                "dkim": {"status": "pass", "findings": []},
+                "dmarc": {"status": "warn", "findings": [
+                    {"severity": "info", "title": "inherited"}]}}},
+            "alias.example.com": {"path": "doh", "checks": {
+                "mx": {"present": True}, "spf": {"present": True},
+                "dkim": {"present": False}, "dmarc": {"present": True}}},
+        }), encoding="utf-8")
+        findings = {f.fid: f for f in ts.check_dns_findings(self.ctx)}
+        self.assertEqual({"spf-missing", "dkim-missing", "mx-problem"},
+                         set(findings))
+        self.assertEqual("HIGH", findings["spf-missing"].severity)
+        self.assertEqual("alias.example.com",
+                         findings["dkim-missing"].evidence[0]["Domain"])
+        self.assertEqual("dns.google",
+                         findings["dkim-missing"].evidence[0]["Checked via"])
 
 
 import csv as _csv
@@ -763,8 +1024,212 @@ class TestPolicyChecks(PolicyTestCase):
     def test_no_policies_module_no_findings(self):
         for check in (ts.check_password_policy, ts.check_session_policy,
                       ts.check_2sv_policy, ts.check_sharing_policy,
-                      ts.check_service_status):
+                      ts.check_service_status,
+                      ts.check_super_admin_self_recovery,
+                      ts.check_gmail_protections, ts.check_external_chat,
+                      ts.check_2sv_methods,
+                      ts.check_shared_drive_controls,
+                      ts.check_policy_settings_raw):
             self.assertEqual([], check(self.ctx))
+
+    def test_super_admin_self_recovery_on_flagged(self):
+        # Dev tenant shape: three SYSTEM rows, all true.
+        self.write_policies([("security.super_admin_account_recovery", "/",
+                              {"enableAccountRecovery": True})] * 3)
+        findings = ts.check_super_admin_self_recovery(self.ctx)
+        self.assertEqual(["super-admin-self-recovery"],
+                         self.finding_ids(findings))
+        self.assertEqual(1, len(findings[0].evidence))
+
+    def test_super_admin_self_recovery_admin_off_wins(self):
+        self.write_policies([
+            ("security.super_admin_account_recovery", "/",
+             {"enableAccountRecovery": True}, 101.0),
+            ("security.super_admin_account_recovery", "/",
+             {"enableAccountRecovery": False}, 201.0)])
+        self.assertEqual([], ts.check_super_admin_self_recovery(self.ctx))
+
+    def test_gmail_defaults_flag_only_the_off_switches(self):
+        # Values copied from the dev tenant's SYSTEM rows.
+        self.write_policies([
+            ("gmail.email_attachment_safety", "/",
+             {"enableAnomalousAttachmentProtection": False,
+              "enableAttachmentWithScriptsProtection": True,
+              "enableEncryptedAttachmentProtection": True,
+              "applyFutureRecommendedSettingsAutomatically": True}),
+            ("gmail.spoofing_and_authentication", "/",
+             {"detectDomainNameSpoofing": True, "detectGroupsSpoofing": False,
+              "detectUnauthenticatedEmails": False}),
+            ("gmail.enhanced_pre_delivery_message_scanning", "/",
+             {"enableImprovedSuspiciousContentDetection": True})])
+        findings = ts.check_gmail_protections(self.ctx)
+        self.assertEqual(["gmail-protections-off"], self.finding_ids(findings))
+        labels = {e["Protection"] for e in findings[0].evidence}
+        self.assertEqual({
+            "Protect against anomalous attachment types in emails",
+            "Protect Groups from inbound emails spoofing your domain",
+            "Protect against any unauthenticated emails"}, labels)
+
+    def test_gmail_missing_field_is_not_off(self):
+        self.write_policies([
+            ("gmail.enhanced_pre_delivery_message_scanning", "/", {})])
+        self.assertEqual([], ts.check_gmail_protections(self.ctx))
+
+    def test_gmail_admin_override_clears_default(self):
+        self.write_policies([
+            ("gmail.enhanced_pre_delivery_message_scanning", "/",
+             {"enableImprovedSuspiciousContentDetection": False}, 101.0),
+            ("gmail.enhanced_pre_delivery_message_scanning", "/",
+             {"enableImprovedSuspiciousContentDetection": True}, 201.0)])
+        self.assertEqual([], ts.check_gmail_protections(self.ctx))
+
+    def test_external_chat_all_domains_info(self):
+        self.write_policies([("chat.chat_external_spaces", "/",
+                              {"domainAllowlistMode": "ALL_DOMAINS",
+                               "enabled": True})])
+        findings = ts.check_external_chat(self.ctx)
+        self.assertEqual(["chat-external-open"], self.finding_ids(findings))
+        self.assertEqual("INFO", findings[0].severity)
+
+    def test_external_chat_allowlisted_clean(self):
+        self.write_policies([("chat.chat_external_spaces", "/",
+                              {"domainAllowlistMode": "TRUSTED_DOMAINS",
+                               "enabled": True})])
+        self.assertEqual([], ts.check_external_chat(self.ctx))
+
+    def test_alert_rules_inactive_flagged_active_ignored(self):
+        self.write_policies([
+            ("rule.system_defined_alerts", "/",
+             {"displayName": "User granted Admin privilege",
+              "state": "INACTIVE", "action": {"alertCenterAction": {}}}),
+            ("rule.system_defined_alerts", "/",
+             {"displayName": "Suspicious login", "state": "ACTIVE"})])
+        findings = ts.check_alert_rules_off(self.ctx)
+        self.assertEqual(["alert-rules-off"], self.finding_ids(findings))
+        self.assertEqual(["User granted Admin privilege"],
+                         [e["Alert"] for e in findings[0].evidence])
+
+    def test_alert_rules_all_active_clean(self):
+        self.write_policies([("rule.system_defined_alerts", "/",
+                              {"displayName": "x", "state": "ACTIVE"})])
+        self.assertEqual([], ts.check_alert_rules_off(self.ctx))
+
+    def test_takeout_lists_enabled_services_only(self):
+        self.write_policies([
+            ("photos.user_takeout", "/", {"takeoutStatus": "ENABLED"}),
+            ("maps.user_takeout", "/", {"takeoutStatus": "DISABLED"}),
+            ("takeout.service_status", "/", {"serviceState": "ENABLED"})])
+        findings = ts.check_takeout_services(self.ctx)
+        self.assertEqual(["takeout-enabled"], self.finding_ids(findings))
+        self.assertEqual({"photos", "takeout (master switch)"},
+                         {e["Service"] for e in findings[0].evidence})
+
+    def test_drive_for_desktop_unrestricted_vs_restricted(self):
+        self.write_policies([("drive_and_docs.drive_for_desktop", "/",
+                              {"allowDriveForDesktop": True,
+                               "restrictToAuthorizedDevices": False})])
+        self.assertEqual(["drive-desktop-any-device"], self.finding_ids(
+            ts.check_drive_for_desktop(self.ctx)))
+        self.write_policies([("drive_and_docs.drive_for_desktop", "/",
+                              {"allowDriveForDesktop": True,
+                               "restrictToAuthorizedDevices": True})])
+        self.ctx._policy_cache = None
+        self.assertEqual([], ts.check_drive_for_desktop(self.ctx))
+
+    def test_meet_safety_dev_defaults_three_rows(self):
+        self.write_policies([
+            ("meet.safety_access", "/", {"meetingsAllowedToJoin": "ALL"}),
+            ("meet.safety_domain", "/", {"usersAllowedToJoin": "ALL"}),
+            ("meet.safety_host_management", "/",
+             {"enableHostManagement": False})])
+        findings = ts.check_meet_safety(self.ctx)
+        self.assertEqual(["meet-safety-open"], self.finding_ids(findings))
+        self.assertEqual(3, findings[0].count)
+
+    def test_mail_delegation_policy_on(self):
+        self.write_policies([("gmail.mail_delegation", "/",
+                              {"enableMailDelegation": True})])
+        self.assertEqual(["mail-delegation-allowed"], self.finding_ids(
+            ts.check_mail_delegation_policy(self.ctx)))
+
+    def test_api_controls_reported_raw_not_judged(self):
+        self.write_policies([("api_controls.unconfigured_third_party_apps",
+                              "/", {"accessLevel": "ACCESS_LEVEL_UNSPECIFIED"})])
+        findings = ts.check_api_controls(self.ctx)
+        self.assertEqual("INFO", findings[0].severity)
+        self.assertEqual("ACCESS_LEVEL_UNSPECIFIED",
+                         findings[0].evidence[0]["Access level (raw)"])
+
+    def test_password_login_enforcement_and_expiry_flagged(self):
+        # Dev tenant's resolved root values, apart from the 90-day expiry.
+        self.write_policies([("security.password", "/",
+                              {"minimumLength": 14, "allowedStrength": "STRONG",
+                               "allowReuse": False,
+                               "enforceRequirementsAtLogin": False,
+                               "expirationDuration": "7776000s"})])
+        problem = ts.check_password_policy(self.ctx)[0].evidence[0]["Problem"]
+        self.assertIn("not checked against the policy at next sign-in", problem)
+        self.assertIn("expire every 90 days", problem)
+
+    def test_password_never_expires_is_clean(self):
+        self.write_policies([("security.password", "/",
+                              {"minimumLength": 14, "allowedStrength": "STRONG",
+                               "allowReuse": False,
+                               "enforceRequirementsAtLogin": True,
+                               "expirationDuration": "0s"})])
+        self.assertEqual([], ts.check_password_policy(self.ctx))
+
+    def test_2sv_methods_all_flagged_other_values_not(self):
+        self.write_policies([
+            ("security.two_step_verification_enforcement_factor", "/",
+             {"allowedSignInFactorSet": "ALL"}),
+            ("security.two_step_verification_enforcement_factor", "/Admins",
+             {"allowedSignInFactorSet": "PASSKEY_ONLY"})])
+        findings = ts.check_2sv_methods(self.ctx)
+        self.assertEqual(["2sv-sms-allowed"], self.finding_ids(findings))
+        self.assertEqual(["/"], [e["Org unit"] for e in findings[0].evidence])
+
+    def test_shared_drive_controls_dev_defaults(self):
+        self.write_policies([("drive_and_docs.shared_drive_creation", "/",
+                              {"allowSharedDriveCreation": True,
+                               "allowManagersToOverrideSettings": True,
+                               "allowedPartiesForDownloadPrintCopy": "ALL"})])
+        findings = ts.check_shared_drive_controls(self.ctx)
+        self.assertEqual(["sd-controls-open"], self.finding_ids(findings))
+        self.assertEqual(3, findings[0].count)
+
+    def test_shared_drive_controls_locked_clean(self):
+        self.write_policies([("drive_and_docs.shared_drive_creation", "/",
+                              {"allowSharedDriveCreation": False,
+                               "allowManagersToOverrideSettings": False,
+                               "allowedPartiesForDownloadPrintCopy":
+                                   "EDITORS_ONLY"})])
+        self.assertEqual([], ts.check_shared_drive_controls(self.ctx))
+
+    def test_meet_external_label_off_flagged(self):
+        self.write_policies([("meet.safety_external_participants", "/",
+                              {"enableExternalLabel": False})])
+        findings = ts.check_meet_safety(self.ctx)
+        self.assertEqual("External participants are not labelled",
+                         findings[0].evidence[0]["Setting"])
+
+    def test_raw_settings_table_lists_known_types_only(self):
+        self.write_policies([
+            ("security.passkeys_restriction", "/",
+             {"allowedPasskeysType": "ANY_DEVICE_OR_PLATFORM"}),
+            ("chat.chat_file_sharing", "/",
+             {"externalFileSharing": "ALL_FILES"}),
+            ("security.password", "/", {"minimumLength": 14})])
+        findings = ts.check_policy_settings_raw(self.ctx)
+        self.assertEqual(["policy-settings-raw"], self.finding_ids(findings))
+        self.assertEqual({"Passkeys allowed", "Chat file sharing"},
+                         {e["Setting"] for e in findings[0].evidence})
+
+    def test_console_only_list_emitted_with_policies(self):
+        self.write_policies([("security.password", "/", {"minimumLength": 14})])
+        findings = ts.check_console_only_settings(self.ctx)
+        self.assertEqual(["console-only-settings"], self.finding_ids(findings))
+        self.assertEqual(len(ts.CONSOLE_ONLY_SETTINGS), findings[0].count)
 
 
 class TestLicenceWaste(CtxTestCase):
@@ -883,8 +1348,14 @@ class TestMissingModules(CtxTestCase):
         # No CSVs at all: every check must return [] rather than raise, and
         # the missing modules land on the report's "not checked" list.
         for check in ts.CHECKS:
+            if check is ts.check_console_only_settings:
+                continue   # static hand-check list, true of every run
             self.assertEqual([], check(self.ctx),
                              f"{check.__name__} produced findings with no data")
+
+    def test_console_only_list_needs_no_data(self):
+        self.assertEqual(["console-only-settings"],
+                         [f.fid for f in ts.check_console_only_settings(self.ctx)])
 
     def test_errored_module_not_usable(self):
         self.write_csv("forwards", """User,forwardEnabled,forwardTo
@@ -970,6 +1441,9 @@ class TestModuleSelection(unittest.TestCase):
         self.assertIn("users", keys)
         self.assertIn("dns", keys)
         self.assertNotIn("filters", keys)
+        # Round 9: two full sweeps nothing reads moved out of the default.
+        self.assertNotIn("gmailprofile", keys)
+        self.assertNotIn("filecounts", keys)
 
     def test_full_includes_tier4(self):
         keys = {m["key"] for m in ts.selected_modules(make_args(full=True))}
@@ -1165,6 +1639,40 @@ class TestRender(CtxTestCase):
         self.assertNotIn("<link", html)
         self.assertNotIn("<img", html)
         self.assertTrue((self.run_dir / "findings.csv").is_file())
+        # The finding id is in the heading so a client can cite it.
+        self.assertIn("<code class='fid'>test</code>", html)
+
+    def test_evidence_csv_is_uncapped(self):
+        rows = [{"User": f"u{i}@example.com"} for i in range(25)]
+        findings = [ts.Finding("many", "MEDIUM", "t", "m", "r", rows,
+                               "users.csv")]
+        ts.render_html(self.ctx, findings)
+        with open(self.run_dir / "findings_evidence.csv", newline="",
+                  encoding="utf-8") as fh:
+            out = list(_csv.DictReader(fh))
+        self.assertEqual(25, len(out))
+        self.assertEqual({"id": "many", "severity": "MEDIUM",
+                          "User": "u24@example.com"}, out[-1])
+        self.assertEqual(ts.EVIDENCE_ROWS, len(findings[0].evidence))
+
+    def test_checked_and_clean_lists_only_checks_that_saw_data(self):
+        # Forwards collected and internal-only: clean. Users absent: the
+        # super-admin check had nothing to read and must not claim clean.
+        self.write_csv("forwards", """User,forwardEnabled,forwardTo
+u@example.com,True,x@example.com""")
+        ts.run_checks(self.ctx)
+        titles = dict(self.ctx.clean_checks)
+        self.assertIn(ts.CHECK_TITLES["check_external_forwarding"], titles)
+        self.assertEqual("forwards",
+                         titles[ts.CHECK_TITLES["check_external_forwarding"]])
+        self.assertNotIn(ts.CHECK_TITLES["check_super_admin_count"], titles)
+        html = ts.render_html(self.ctx, []).read_text(encoding="utf-8")
+        self.assertIn("Checked and clean", html)
+        self.assertIn(ts.CHECK_TITLES["check_external_forwarding"], html)
+
+    def test_every_check_has_a_title(self):
+        for check in ts.CHECKS:
+            self.assertIn(check.__name__, ts.CHECK_TITLES)
 
     def test_findings_sorted_by_severity_in_run_checks(self):
         self.write_csv("users", f"""{USERS_HEADER}
@@ -1403,6 +1911,202 @@ class TestOpenReport(unittest.TestCase):
         rel = Path("tenant_audit_runs") / "run" / "audit_report.html"
         self.assertTrue(ts.open_report(rel, args))
         self.assertEqual([rel.resolve().as_uri()], self.opened)
+
+
+LIC_HEADER = "userId,productId,productDisplay,skuId,skuDisplay"
+
+
+class TestClassroom(PolicyTestCase):
+    """Round 9: Classroom, gated on an Education SKU so a company never
+    sees school settings."""
+    CLASSROOM = [
+        ("classroom.class_membership", "/",
+         {"whichClassesCanUsersJoin": "CLASSES_IN_DOMAIN",
+          "whoCanJoinClasses": "ANYONE_IN_DOMAIN"}),
+        ("classroom.teacher_permissions", "/",
+         {"whoCanCreateClasses": "ALL_PENDING_AND_VERIFIED_TEACHERS"}),
+        ("classroom.guardian_access", "/", {"allowAccess": False}),
+    ]
+
+    def test_business_tenant_sees_nothing(self):
+        self.write_csv("licenses", f"""{LIC_HEADER}
+a@example.com,Google-Apps,Google Workspace,1010020028,Google Workspace Business Standard""")
+        self.write_policies(self.CLASSROOM)
+        self.assertEqual([], ts.check_classroom_settings(self.ctx))
+        self.assertEqual([], ts.education_skus_held(self.ctx))
+        # Not applicable is not clean: the gate must not consult a module.
+        self.ctx.consulted = []
+        ts.check_classroom_settings(self.ctx)
+        self.assertEqual([], self.ctx.consulted)
+        status, _, note = ts.collect_courses(self.ctx, ts.MODULE_BY_KEY["courses"])
+        self.assertEqual("skipped", status)
+        self.assertIn("no Education licence", note)
+
+    def test_education_tenant_dev_defaults_are_info_only(self):
+        self.write_csv("licenses", f"""{LIC_HEADER}
+a@example.com,101031,Google Workspace for Education,1010310008,Google Workspace for Education Plus""")
+        self.write_policies(self.CLASSROOM)
+        findings = ts.check_classroom_settings(self.ctx)
+        self.assertEqual(["classroom-settings"], self.finding_ids(findings))
+        self.assertEqual(3, findings[0].count)
+        self.assertIn("Education Plus", findings[0].title)
+
+    def test_anyone_can_join_or_create_is_medium(self):
+        self.write_csv("licenses", f"""{LIC_HEADER}
+a@example.com,101031,Google Workspace for Education,1010070001,Google Workspace for Education Fundamentals""")
+        self.write_policies([
+            ("classroom.class_membership", "/",
+             {"whoCanJoinClasses": "ANYONE"}),
+            ("classroom.teacher_permissions", "/Students",
+             {"whoCanCreateClasses": "ANYONE_IN_DOMAIN"})])
+        by_id = {f.fid: f for f in ts.check_classroom_settings(self.ctx)}
+        self.assertEqual({"classroom-open", "classroom-settings"}, set(by_id))
+        self.assertEqual(["/", "/Students"],
+                         [r["Org unit"] for r in by_id["classroom-open"].evidence])
+
+    def test_courses_counted_by_state(self):
+        self.write_csv("courses", """id,name,ownerId,courseState
+1,Maths,100,ACTIVE
+2,History,100,ACTIVE
+3,Old,101,ARCHIVED""")
+        findings = ts.check_courses(self.ctx)
+        self.assertEqual(["classroom-courses"], self.finding_ids(findings))
+        self.assertEqual(3, findings[0].count)
+        self.assertEqual({"ACTIVE": "2", "ARCHIVED": "1"},
+                         {r["State"]: r["Courses"] for r in findings[0].evidence})
+
+    def test_courses_collector_runs_after_the_tenant_pool(self):
+        # A non-simple collector is a heavy module, so licenses.csv exists
+        # when the gate reads it.
+        mod = ts.MODULE_BY_KEY["courses"]
+        self.assertNotIn(mod.get("collector"), ("simple", "dns"))
+
+
+class TestEditionFeatures(PolicyTestCase):
+    def test_business_standard_is_silent(self):
+        self.write_csv("licenses", f"""{LIC_HEADER}
+a@example.com,Google-Apps,Google Workspace,1010020028,Google Workspace Business Standard""")
+        self.assertEqual([], ts.check_edition_features(self.ctx))
+
+    def test_archived_user_sku_grants_nothing(self):
+        self.write_csv("licenses", f"""{LIC_HEADER}
+a@example.com,101034,Archived,1010340001,Google Workspace Enterprise Plus - Archived User""")
+        self.assertEqual([], ts.check_edition_features(self.ctx))
+
+    def test_enterprise_plus_without_dlp_rules_flags_unused(self):
+        self.write_csv("licenses", f"""{LIC_HEADER}
+a@example.com,Google-Apps,Google Workspace,1010020020,Google Workspace Enterprise Plus""")
+        self.write_policies([("security.password", "/", {"minimumLength": 14})])
+        by_id = {f.fid: f for f in ts.check_edition_features(self.ctx)}
+        self.assertEqual({"edition-security-unused",
+                          "edition-security-features"}, set(by_id))
+        self.assertEqual(["Data loss prevention (DLP)"],
+                         [e["Feature"] for e in
+                          by_id["edition-security-unused"].evidence])
+        # All five gated features are included in Enterprise Plus.
+        self.assertEqual(5, by_id["edition-security-features"].count)
+
+    def test_active_dlp_rule_counts_as_in_use(self):
+        self.write_csv("licenses", f"""{LIC_HEADER}
+a@example.com,Google-Apps,Google Workspace,1010020020,Google Workspace Enterprise Plus""")
+        self.write_policies([("rule.dlp", "/",
+                              {"displayName": "[Default] Card", "state": "ACTIVE"})])
+        ids = self.finding_ids(ts.check_edition_features(self.ctx))
+        self.assertEqual(["edition-security-features"], ids)
+
+    def test_business_plus_gets_only_mobile_management(self):
+        self.write_csv("licenses", f"""{LIC_HEADER}
+a@example.com,Google-Apps,Google Workspace,1010020025,Google Workspace Business Plus""")
+        findings = ts.check_edition_features(self.ctx)
+        self.assertEqual(["Advanced mobile management"],
+                         [e["Feature"] for e in findings[0].evidence])
+
+
+ADMIN_HEADER = ("name,NEW_VALUE,OLD_VALUE,ROLE_NAME,RULE_NAME,SETTING_NAME,"
+                "USER_EMAIL,actor.email,id.time")
+LOGIN_HEADER = "name,actor.email,id.time,ipAddress,networkInfo.regionCode"
+ALERTS_HEADER = "alertId,createTime,type,source,metadata.severity,metadata.status"
+
+
+class TestActivityChecks(CtxTestCase):
+    def test_admin_settings_detailed_licence_churn_counted(self):
+        self.write_csv("report_admin", f"""{ADMIN_HEADER}
+CHANGE_APPLICATION_SETTING,false,true,,,Enforce 2SV,,boss@example.com,2026-09-10T10:00:00Z
+USER_LICENSE_ASSIGNMENT,x,,,,,a@example.com,,2026-09-10T09:00:00Z
+USER_LICENSE_ASSIGNMENT,x,,,,,b@example.com,,2026-09-10T09:00:00Z""")
+        by_id = {f.fid: f for f in ts.check_admin_activity(self.ctx)}
+        self.assertEqual({"admin-setting-changes", "admin-activity-summary"},
+                         set(by_id))
+        change = by_id["admin-setting-changes"].evidence[0]
+        self.assertEqual("Enforce 2SV: true -> false", change["Change"])
+        self.assertEqual(1, by_id["admin-setting-changes"].count)
+        self.assertEqual("USER_LICENSE_ASSIGNMENT",
+                         by_id["admin-activity-summary"].evidence[0]["Event"])
+
+    def test_admin_log_empty_no_findings(self):
+        self.write_csv("report_admin", ADMIN_HEADER)
+        self.assertEqual([], ts.check_admin_activity(self.ctx))
+
+    def test_login_risk_high_and_failures_counted(self):
+        self.write_csv("report_login", f"""{LOGIN_HEADER}
+account_disabled_password_leak,a@example.com,2026-09-01T00:00:00Z,1.2.3.4,ZA
+login_failure,b@example.com,2026-09-01T00:00:00Z,1.2.3.4,ZA
+login_failure,b@example.com,2026-09-02T00:00:00Z,1.2.3.4,ZA
+login_success,c@example.com,2026-09-02T00:00:00Z,1.2.3.4,ZA""")
+        by_id = {f.fid: f for f in ts.check_login_risk(self.ctx)}
+        self.assertEqual("HIGH", by_id["login-risk-events"].severity)
+        self.assertEqual(1, by_id["login-risk-events"].count)
+        self.assertEqual("2", by_id["login-failures"].evidence[0]["Failed sign-ins"])
+
+    def test_blocked_sensitive_action_is_its_own_medium(self):
+        self.write_csv("report_login", (
+            "name,actor.email,id.time,ipAddress,networkInfo.regionCode,"
+            "sensitive_action_name,login_challenge_method\n"
+            "risky_sensitive_action_blocked,a@example.com,"
+            "2026-09-30T12:00:00Z,1.2.3.4,ZA,Periodic check in Google Ads,none"))
+        by_id = {f.fid: f for f in ts.check_login_risk(self.ctx)}
+        # Google refused the action: not a HIGH "suspicious login".
+        self.assertNotIn("login-risk-events", by_id)
+        blocked = by_id["login-blocked-actions"]
+        self.assertEqual("MEDIUM", blocked.severity)
+        self.assertEqual("Periodic check in Google Ads",
+                         blocked.evidence[0]["Action"])
+        self.assertEqual("none", blocked.evidence[0]["Challenge"])
+
+    def test_login_success_only_is_clean(self):
+        self.write_csv("report_login", f"""{LOGIN_HEADER}
+login_success,c@example.com,2026-09-02T00:00:00Z,1.2.3.4,ZA""")
+        self.assertEqual([], ts.check_login_risk(self.ctx))
+
+    def test_high_alert_raises_to_medium_and_sorts_first(self):
+        self.write_csv("alerts", f"""{ALERTS_HEADER}
+1,2026-09-01T00:00:00Z,Suspicious login,Google identity,LOW,NOT_STARTED
+2,2026-08-20T00:00:00Z,Admin password reset,Sensitive Admin Action,HIGH,NOT_STARTED""")
+        findings = ts.check_security_alerts(self.ctx)
+        self.assertEqual("MEDIUM", findings[0].severity)
+        self.assertEqual("HIGH", findings[0].evidence[0]["Severity"])
+
+    def test_low_alerts_only_info(self):
+        self.write_csv("alerts", f"""{ALERTS_HEADER}
+1,2026-09-01T00:00:00Z,Suspicious login,Google identity,LOW,NOT_STARTED""")
+        self.assertEqual("INFO", ts.check_security_alerts(self.ctx)[0].severity)
+
+    def test_modules_not_run_no_findings(self):
+        for check in (ts.check_admin_activity, ts.check_login_risk,
+                      ts.check_security_alerts, ts.check_edition_features):
+            self.assertEqual([], check(self.ctx))
+
+    def test_alerts_module_is_default_tier_with_time_filter(self):
+        mod = next(m for m in ts.MODULES if m["key"] == "alerts")
+        self.assertEqual(1, mod["tier"])
+        self.assertIn("createTime >=", mod["args"][-1])
+
+    def test_login_module_requests_every_event_the_check_reads(self):
+        mod = next(m for m in ts.MODULES if m["key"] == "report_login")
+        requested = set(mod["args"][mod["args"].index("events") + 1].split(","))
+        self.assertEqual(set(ts.LOGIN_RISK_EVENTS + ts.LOGIN_BLOCKED_EVENTS
+                             + ts.LOGIN_FAILURE_EVENTS),
+                         requested)
 
 
 class TestVersionsInStep(unittest.TestCase):
@@ -1659,6 +2363,30 @@ class TestAtRiskAdminRecovery(CtxTestCase):
         # Admin role alone is one factor; "no recovery email" must not be
         # the second, or following check_admin_recovery's advice flags you.
         self.assertEqual([], ts.check_at_risk_accounts(self.ctx))
+
+
+class TestAtRiskRecoveryFactor(CtxTestCase):
+    TOKENS = ("user,clientId,displayText,scopes\n"
+              "u@example.com,1,App,https://mail.google.com/\n")
+
+    def test_missing_recovery_email_is_not_a_factor(self):
+        self.write_csv("users", USERS_HEADER + "\n"
+                       "u@example.com,False,False,2026-09-30T10:00:00Z,"
+                       "True,True,,False,False,Business")
+        self.write_csv("tokens", self.TOKENS)
+        # Risky app alone is one factor; no recovery email must not be the
+        # second, or a company-wide app grant flags the whole tenant.
+        self.assertEqual([], ts.check_at_risk_accounts(self.ctx))
+
+    def test_personal_recovery_email_still_counts(self):
+        self.write_csv("users", USERS_HEADER + "\n"
+                       "u@example.com,False,False,2026-09-30T10:00:00Z,"
+                       "True,True,me@gmail.com,False,False,Business")
+        self.write_csv("tokens", self.TOKENS)
+        findings = ts.check_at_risk_accounts(self.ctx)
+        self.assertEqual(1, len(findings))
+        self.assertEqual("personal recovery email, app with full mail/Drive "
+                         "access", findings[0].evidence[0]["Risk factors"])
 
 
 class TestParseArgsGuards(unittest.TestCase):
