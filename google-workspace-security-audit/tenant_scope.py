@@ -43,7 +43,7 @@ YOU ASSUME ALL RISK ASSOCIATED WITH THE USE OF THIS SOFTWARE.
 Author:       Paul Ogier
 Created:      2026-08-15
 Updated:      2026-10-01
-Version:      1.6.0
+Version:      1.6.1
 Status:       Production
 Python:       3.9+
 Dependencies: GAM ADV X (GAM7) only. Stdlib only on the Python side.
@@ -108,6 +108,18 @@ Notes that matter when reading results:
     in the report where they apply.
 
 Changelog
+  2026-10-01 - v1.6.1 - Classroom, after the first run on an Education
+                        tenant: rosters, class invitations and guardians
+                        are collected; classes with outside members or
+                        invitations are HIGH, classes owned by a deleted
+                        or suspended account MEDIUM, and letting
+                        self-declared (pending) teachers create classes
+                        MEDIUM; guardians and pending guardian invitations
+                        are listed with their age. Course owners are read.
+                        GAM's progress lines ahead of the invitations CSV
+                        are stripped so the file parses. Classroom's own
+                        classroom_teachers group is no longer reported as
+                        ownerless. 225 tests.
   2026-10-01 - v1.6.0 - Four new checks from the collected policies: super
                         admin self-recovery on, Gmail Safety protections off
                         (per switch, per OU), Chat spaces open to every
@@ -217,7 +229,7 @@ csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
 # CONFIGURATION
 ###############################################################################
 
-SCRIPT_VERSION = "1.6.0"
+SCRIPT_VERSION = "1.6.1"
 
 # [OPTIONAL] Startup check against the remote VERSION file. Fail-silent.
 CHECK_FOR_UPDATES = True
@@ -736,10 +748,21 @@ MODULES: List[Dict] = [
     dict(key="vaultexports", title="Vault exports", tier=1,
          args=["print", "vaultexports"]),
     # Education tenants only; the collector skips itself when licenses.csv
-    # holds no Education SKU. Syntax from the GAM7 wiki (Classroom -
-    # Courses), not yet run against a live school tenant.
+    # holds no Education SKU. All four run live on an Education Fundamentals
+    # tenant (2026-10-01); column names in the checks come from that run.
     dict(key="courses", title="Classroom courses (Education only)", tier=1,
-         args=["print", "courses"], collector="courses", timeout=1800),
+         args=["print", "courses", "owneremail"], collector="classroom",
+         csv_header="id,", timeout=1800),
+    dict(key="course_participants", title="Classroom rosters (Education only)",
+         tier=1, args=["print", "course-participants", "show", "all"],
+         collector="classroom", csv_header="courseId,", timeout=1800),
+    dict(key="classroominvitations",
+         title="Classroom pending invitations (Education only)", tier=1,
+         args=["print", "classroominvitations"], collector="classroom",
+         csv_header="courseId,", timeout=1800),
+    dict(key="guardians", title="Classroom guardians (Education only)",
+         tier=1, args=["print", "guardians", "all", "showstudentemails"],
+         collector="classroom", csv_header="studentEmail,", timeout=1800),
     dict(key="report_customers", title="Customer usage report", tier=1,
          args=["report", "customers"]),
     dict(key="report_users", title="Per-user usage report (~2-day lag)",
@@ -1739,13 +1762,40 @@ def collect_dns(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
     return "ok", len(results), ""
 
 
-def collect_courses(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
-    """`print courses`, only on a tenant holding an Education SKU. Runs
+def collect_classroom(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
+    """A Classroom print, only on a tenant holding an Education SKU. Runs
     after the tenant-level pool (a non-simple collector lands in the heavy
     pass), so licenses.csv is on disk by then."""
     if not education_skus_held(ctx):
         return "skipped", 0, "no Education licence held; Classroom not audited"
-    return collect_simple(ctx, mod)
+    status, rows, note = collect_simple(ctx, mod)
+    if status not in ("ok", "empty") or ctx.args.dry_run:
+        return status, rows, note
+    return _strip_to_header(ctx.csv_path(mod["key"]), mod["csv_header"],
+                            status, rows, note)
+
+
+def _strip_to_header(path: Path, header: str, status: str, rows: int,
+                     note: str) -> Tuple[str, int, str]:
+    """Drop anything GAM printed to stdout ahead of the CSV header.
+
+    `print classroominvitations` writes one "Course: X, Print N Classroom
+    Invitations" line per course to stdout before the header (seen live
+    2026-10-01). Left in, the csv reader takes the first of them as the
+    header, no real column matches, and every invitation reads as having no
+    email, so an outside invitation is never flagged. A file with no header
+    at all is an error, never a zero."""
+    if not path.exists():
+        return status, rows, note
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    start = next((i for i, ln in enumerate(lines) if ln.startswith(header)),
+                 None)
+    if start is None:
+        return "error", 0, f"no CSV header starting {header!r} in GAM output"
+    if start:
+        path.write_text("".join(lines[start:]), encoding="utf-8")
+    rows = csv_data_rows(path)
+    return ("empty" if rows == 0 else "ok"), rows, note
 
 
 COLLECTORS = {
@@ -1756,7 +1806,7 @@ COLLECTORS = {
     "swm_external": collect_swm_external,
     "sites": collect_sites,
     "dns": collect_dns,
-    "courses": collect_courses,
+    "classroom": collect_classroom,
 }
 
 
@@ -3056,9 +3106,13 @@ def check_group_members(ctx: RunContext) -> List[Finding]:
             external, "group_members.csv"))
     ownerless = []
     if _module_usable(ctx, "groups"):
+        # Classroom creates classroom_teachers@ itself and manages it
+        # without an owner; flagging it is noise on every school tenant.
         ownerless = [{"Group": col(g, "email"), "Name": col(g, "name")}
                      for g in ctx.rows("groups")
-                     if col(g, "email") and not owners.get(col(g, "email"))]
+                     if col(g, "email") and not owners.get(col(g, "email"))
+                     and not col(g, "email").lower().startswith(
+                         CLASSROOM_TEACHERS_LOCAL + "@")]
     if ownerless:
         findings.append(Finding(
             "groups-no-owner", "MEDIUM",
@@ -3399,6 +3453,21 @@ CLASSROOM_SETTINGS = {
 }
 
 
+CLASSROOM_TEACHERS_LOCAL = "classroom_teachers"
+
+
+def _classroom_teachers_count(ctx: RunContext) -> str:
+    """Member count of the group Classroom keeps its teachers in, or
+    "not read" when groups.csv is missing or has no such group, so a gap
+    never prints as 0."""
+    if ctx.module_status("groups") not in ("ok", "empty", "partial"):
+        return "not read"
+    for g in ctx.rows("groups"):
+        if col(g, "email").lower().startswith(CLASSROOM_TEACHERS_LOCAL + "@"):
+            return col(g, "directMembersCount") or "not read"
+    return "no such group"
+
+
 def check_classroom_settings(ctx: RunContext) -> List[Finding]:
     """Classroom settings, education tenants only. Two values are judged:
     anyone (not just the domain) able to join classes, and anyone in the
@@ -3427,6 +3496,18 @@ def check_classroom_settings(ctx: RunContext) -> List[Finding]:
             open_bits.append({"Org unit": ou,
                               "Setting": "Anyone in the domain can create "
                                          "classes, students included"})
+        # Google: users pick teacher or student at their first Classroom
+        # sign-in, and a self-declared teacher is a PENDING member of the
+        # Classroom Teachers group (support.google.com/edu/classroom/answer/
+        # 6071551, read 2026-10-01). This option lets them create classes
+        # before an admin has verified anyone.
+        if field == "whoCanCreateClasses" and \
+                value.upper() == "ALL_PENDING_AND_VERIFIED_TEACHERS":
+            open_bits.append({"Org unit": ou,
+                              "Setting": "Anyone who says they are a teacher "
+                                         "can create classes before an admin "
+                                         "verifies them (Classroom Teachers "
+                                         f"group members: {_classroom_teachers_count(ctx)})"})
     findings = []
     if open_bits:
         findings.append(Finding(
@@ -3454,8 +3535,9 @@ def check_classroom_settings(ctx: RunContext) -> List[Finding]:
 
 
 def check_courses(ctx: RunContext) -> List[Finding]:
-    """Course counts by state. The owner join (courses whose teacher is
-    suspended or gone) waits for a live read of the column names."""
+    """Course counts by state, and courses whose owner is deleted or
+    suspended: a leaver's classes, Classroom folder and student work with
+    nobody accountable for them."""
     if not _module_usable(ctx, "courses"):
         return []
     rows = ctx.rows("courses")
@@ -3467,7 +3549,7 @@ def check_courses(ctx: RunContext) -> List[Finding]:
         states[state] = states.get(state, 0) + 1
     evidence = [{"State": s, "Courses": str(n)}
                 for s, n in sorted(states.items(), key=lambda kv: -kv[1])]
-    return [Finding(
+    findings = [Finding(
         "classroom-courses", "INFO",
         f"{len(rows)} Classroom course(s)",
         "Every course in the tenant, counted by state. Active courses are "
@@ -3476,6 +3558,146 @@ def check_courses(ctx: RunContext) -> List[Finding]:
         "Archive courses that have ended, and delete archived ones once the "
         "retention period has passed.",
         evidence, "courses.csv", count=len(rows))]
+    # A courses.csv collected without `owneremail` has no such column, and
+    # reading its absence as "owner deleted" would flag every course.
+    if not any(k.lower() == "owneremail" for k in rows[0]):
+        return findings
+    users = ({col(u, "primaryEmail").lower(): u for u in ctx.rows("users")}
+             if _module_usable(ctx, "users") else {})
+    orphaned = []
+    for row in rows:
+        owner = col(row, "ownerEmail")
+        # GAM writes "Unknown user" when the owner account no longer exists
+        # (Classroom-Courses wiki, owneremailmatchpattern); not yet seen live.
+        if not owner or owner.lower() == "unknown user":
+            problem = "Owner account deleted"
+        elif truthy(col(users.get(owner.lower(), {}), "suspended")):
+            problem = "Owner suspended"
+        else:
+            continue
+        orphaned.append({"Course": col(row, "name"),
+                         "State": col(row, "courseState"),
+                         "Owner": owner or "-", "Problem": problem})
+    if orphaned:
+        findings.append(Finding(
+            "classroom-orphaned-courses", "MEDIUM",
+            "Classes owned by deleted or suspended accounts",
+            "The owner of these classes has left or been suspended. Their "
+            "students, coursework and the class Drive folder stay in place "
+            "with no active teacher accountable for them.",
+            "Transfer each class to a current teacher (the new owner must be "
+            "a co-teacher first), or archive it. Make Classroom ownership "
+            "part of the leaver process.",
+            orphaned, "courses.csv"))
+    return findings
+
+
+def check_classroom_outsiders(ctx: RunContext) -> List[Finding]:
+    """Teachers or students from outside the organisation on a class roster,
+    or invited to one. Either can see the class's students and their work."""
+    internal = {d.lower() for d in ctx.internal_domains}
+    if not internal:
+        return []
+    hits, unnamed = [], 0
+    if _module_usable(ctx, "course_participants"):
+        for row in ctx.rows("course_participants"):
+            email = col(row, "profile.emailAddress", "emailAddress")
+            if not email:
+                unnamed += 1
+            elif email_domain(email) not in internal:
+                hits.append({"Course": col(row, "courseName"),
+                             "Role": col(row, "userRole").lower(),
+                             "Member": email, "Status": "on the roster"})
+    if _module_usable(ctx, "classroominvitations"):
+        for row in ctx.rows("classroominvitations"):
+            email = col(row, "userEmail")
+            if not email:
+                unnamed += 1
+            elif email_domain(email) not in internal:
+                hits.append({"Course": col(row, "courseName"),
+                             "Role": col(row, "role").lower(),
+                             "Member": email, "Status": "invited"})
+    if not hits:
+        return []
+    meaning = ("These people are outside the organisation but are teachers "
+               "or students in a class, or have been invited to be. A class "
+               "member sees the roster and, as a teacher, every student's "
+               "work and grades.")
+    if unnamed:
+        # The API returned no address for these, so they were not judged.
+        meaning += (f" {unnamed} roster or invitation row(s) carried no email "
+                    "address and could not be checked.")
+    return [Finding(
+        "classroom-external-members", "HIGH",
+        "Classes with members from outside the organisation",
+        meaning,
+        "Confirm each one is meant to be there; remove the rest. Then set "
+        "Admin console > Apps > Google Workspace > Classroom > Class settings "
+        "so users can only join classes in the domain (or allowlisted "
+        "domains).",
+        hits, "course_participants.csv")]
+
+
+GUARDIAN_INVITE_STALE_DAYS = 30
+
+
+def check_classroom_guardians(ctx: RunContext) -> List[Finding]:
+    """Guardians who receive student summaries, and pending guardian
+    invitations. The audit cannot tell a real parent from anyone else, so
+    this is a list for the school to review. A pending invitation is a link
+    Google's own email says anyone holding it may be able to accept, so the
+    old ones are called out."""
+    if not _module_usable(ctx, "guardians"):
+        return []
+    rows = ctx.rows("guardians")
+    if not rows:
+        return []
+    now = datetime.now(timezone.utc)
+    evidence, accepted, pending, stale = [], 0, 0, 0
+    for row in rows:
+        # col() stops at the first column present even when it is empty, and
+        # both columns are present on every row, so fall back explicitly.
+        guardian = (col(row, "guardianProfile.emailAddress")
+                    or col(row, "invitedEmailAddress"))
+        # Accepted rows carry a guardianId and no invitation state; pending
+        # rows the reverse (seen live 2026-10-01).
+        if col(row, "guardianId"):
+            accepted += 1
+            evidence.append({"Student": col(row, "studentEmail"),
+                             "Guardian": guardian, "Status": "accepted",
+                             "Age (days)": "-"})
+            continue
+        pending += 1
+        age = "-"
+        try:
+            stamp = datetime.fromisoformat(
+                col(row, "creationTime").replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            days = (now - stamp).days
+            age = str(days)
+            if days >= GUARDIAN_INVITE_STALE_DAYS:
+                stale += 1
+        except ValueError:
+            pass
+        evidence.append({"Student": col(row, "studentEmail"),
+                         "Guardian": guardian,
+                         "Status": col(row, "state").lower() or "pending",
+                         "Age (days)": age})
+    title = (f"{accepted} guardian(s) receive student summaries, "
+             f"{pending} invitation(s) pending")
+    if stale:
+        title += f" ({stale} older than {GUARDIAN_INVITE_STALE_DAYS} days)"
+    return [Finding(
+        "classroom-guardians", "INFO", title,
+        "Guardians are outside the organisation and get email summaries of a "
+        "student's upcoming and missing work. The audit cannot tell whether "
+        "each address belongs to the right parent. A pending invitation can "
+        "be accepted by anyone the email is forwarded to.",
+        "Check each guardian against the school's records. Cancel pending "
+        f"invitations older than {GUARDIAN_INVITE_STALE_DAYS} days and "
+        "re-invite if still wanted.",
+        evidence, "guardians.csv")]
 
 
 def check_tenant_shape(ctx: RunContext) -> List[Finding]:
@@ -4723,6 +4945,8 @@ CHECKS = [
     check_admin_second_factors,
     check_classroom_settings,
     check_courses,
+    check_classroom_outsiders,
+    check_classroom_guardians,
     check_tenant_shape,
 ]
 
@@ -4794,6 +5018,8 @@ CHECK_TITLES = {
     "check_admin_second_factors": "Super admin second factors",
     "check_classroom_settings": "Google Classroom settings (Education)",
     "check_courses": "Classroom courses (Education)",
+    "check_classroom_outsiders": "Classroom members and invitations from outside the organisation",
+    "check_classroom_guardians": "Classroom guardians and guardian invitations",
     "check_tenant_shape": "Tenant at a glance",
 }
 

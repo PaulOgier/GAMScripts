@@ -355,7 +355,9 @@ here@example.com,False,False,2026-08-01T10:00:00Z,True,True,,False,False,Busines
         self.write_csv("groups", f"""{self.GROUPS_HEADER}
 a@example.com,A,3,INVITED_CAN_JOIN,true,ALL_MEMBERS_CAN_POST
 b@example.com,B,1,INVITED_CAN_JOIN,false,ALL_MEMBERS_CAN_POST
-c@example.com,C,1,INVITED_CAN_JOIN,false,ALL_MEMBERS_CAN_POST""")
+c@example.com,C,1,INVITED_CAN_JOIN,false,ALL_MEMBERS_CAN_POST
+classroom_teachers@example.com,Classroom Teachers,0,INVITED_CAN_JOIN,false,ALL_MEMBERS_CAN_POST""")
+        # classroom_teachers@ is Classroom's own ownerless group: never flagged.
         self.write_csv("group_members", """group,type,role,status,email
 a@example.com,USER,OWNER,ACTIVE,gone@example.com
 a@example.com,USER,MEMBER,,outsider@gmail.com
@@ -1938,18 +1940,36 @@ a@example.com,Google-Apps,Google Workspace,1010020028,Google Workspace Business 
         self.ctx.consulted = []
         ts.check_classroom_settings(self.ctx)
         self.assertEqual([], self.ctx.consulted)
-        status, _, note = ts.collect_courses(self.ctx, ts.MODULE_BY_KEY["courses"])
+        status, _, note = ts.collect_classroom(self.ctx, ts.MODULE_BY_KEY["courses"])
         self.assertEqual("skipped", status)
         self.assertIn("no Education licence", note)
 
-    def test_education_tenant_dev_defaults_are_info_only(self):
+    def test_pending_teachers_can_create_classes_is_medium(self):
+        # Google's default: a user who says "I'm a teacher" at first sign-in
+        # is a pending teacher and can create classes unverified.
         self.write_csv("licenses", f"""{LIC_HEADER}
 a@example.com,101031,Google Workspace for Education,1010310008,Google Workspace for Education Plus""")
         self.write_policies(self.CLASSROOM)
-        findings = ts.check_classroom_settings(self.ctx)
-        self.assertEqual(["classroom-settings"], self.finding_ids(findings))
-        self.assertEqual(3, findings[0].count)
-        self.assertIn("Education Plus", findings[0].title)
+        by_id = {f.fid: f for f in ts.check_classroom_settings(self.ctx)}
+        self.assertEqual({"classroom-open", "classroom-settings"}, set(by_id))
+        self.assertEqual(3, by_id["classroom-settings"].count)
+        self.assertIn("Education Plus", by_id["classroom-settings"].title)
+        # No groups.csv: the teacher count says so rather than printing 0.
+        self.assertIn("not read", by_id["classroom-open"].evidence[0]["Setting"])
+
+    def test_verified_teachers_only_is_info_only(self):
+        self.write_csv("licenses", f"""{LIC_HEADER}
+a@example.com,101031,Google Workspace for Education,1010070001,Google Workspace for Education Fundamentals""")
+        self.write_policies([
+            ("classroom.teacher_permissions", "/",
+             {"whoCanCreateClasses": "VERIFIED_TEACHERS_ONLY"})])
+        self.assertEqual(["classroom-settings"],
+                         self.finding_ids(ts.check_classroom_settings(self.ctx)))
+
+    def test_teacher_group_count_read_from_groups(self):
+        self.write_csv("groups", """email,name,directMembersCount
+classroom_teachers@example.com,Classroom Teachers,4""")
+        self.assertEqual("4", ts._classroom_teachers_count(self.ctx))
 
     def test_anyone_can_join_or_create_is_medium(self):
         self.write_csv("licenses", f"""{LIC_HEADER}
@@ -1975,11 +1995,118 @@ a@example.com,101031,Google Workspace for Education,1010070001,Google Workspace 
         self.assertEqual({"ACTIVE": "2", "ARCHIVED": "1"},
                          {r["State"]: r["Courses"] for r in findings[0].evidence})
 
-    def test_courses_collector_runs_after_the_tenant_pool(self):
+    def test_classroom_collectors_run_after_the_tenant_pool(self):
         # A non-simple collector is a heavy module, so licenses.csv exists
         # when the gate reads it.
-        mod = ts.MODULE_BY_KEY["courses"]
-        self.assertNotIn(mod.get("collector"), ("simple", "dns"))
+        for key in ("courses", "course_participants", "classroominvitations",
+                    "guardians"):
+            self.assertEqual("classroom",
+                             ts.MODULE_BY_KEY[key].get("collector"), key)
+
+    def test_progress_lines_before_header_are_stripped(self):
+        # print classroominvitations writes per-course progress to stdout
+        # ahead of the header (live, 2026-10-01).
+        path = self.run_dir / "classroominvitations.csv"
+        path.write_text(
+            "Course: A (1), Print 0 Classroom Invitations (1/2)\n"
+            "Course: B (2), Print 1 Classroom Invitation (2/2)\n"
+            f"{self.INVITES}\n2,B,inv,TEACHER,9,guest@otherschool.org\n",
+            encoding="utf-8")
+        status, rows, _ = ts._strip_to_header(path, "courseId,", "ok", 3, "")
+        self.assertEqual(("ok", 1), (status, rows))
+        self.write_csv("classroominvitations", path.read_text(encoding="utf-8"))
+        findings = ts.check_classroom_outsiders(self.ctx)
+        self.assertEqual("guest@otherschool.org", findings[0].evidence[0]["Member"])
+
+    def test_output_without_header_is_an_error_not_zero(self):
+        path = self.run_dir / "classroominvitations.csv"
+        path.write_text("Course: A (1), Print 0 Classroom Invitations\n",
+                        encoding="utf-8")
+        status, rows, note = ts._strip_to_header(path, "courseId,", "ok", 1, "")
+        self.assertEqual(("error", 0), (status, rows))
+        self.assertIn("no CSV header", note)
+
+    def test_every_classroom_module_declares_its_header(self):
+        for mod in ts.MODULES:
+            if mod.get("collector") == "classroom":
+                self.assertTrue(mod.get("csv_header"), mod["key"])
+
+    # Headers below are copied from a live Education tenant run, 2026-10-01.
+    COURSES = "id,name,courseState,ownerEmail,ownerId"
+
+    def test_orphaned_courses_deleted_and_suspended_owner(self):
+        self.write_csv("users", f"""{USERS_HEADER}
+gone@example.com,True,False,2026-01-01T10:00:00Z,True,True,,False,False,Edu
+here@example.com,False,False,2026-08-01T10:00:00Z,True,True,,False,False,Edu""")
+        self.write_csv("courses", f"""{self.COURSES}
+1,Maths,ACTIVE,here@example.com,1
+2,Leaver,ACTIVE,gone@example.com,2
+3,Ghost,ARCHIVED,Unknown user,3""")
+        by_id = {f.fid: f for f in ts.check_courses(self.ctx)}
+        self.assertEqual("MEDIUM", by_id["classroom-orphaned-courses"].severity)
+        self.assertEqual({"Leaver": "Owner suspended",
+                          "Ghost": "Owner account deleted"},
+                         {r["Course"]: r["Problem"] for r in
+                          by_id["classroom-orphaned-courses"].evidence})
+
+    def test_courses_without_owner_column_are_not_orphaned(self):
+        # A courses.csv collected before owneremail was added has no owner
+        # column; that must not read as every owner deleted.
+        self.write_csv("courses", """id,name,ownerId,courseState
+1,Maths,100,ACTIVE""")
+        self.assertEqual(["classroom-courses"],
+                         self.finding_ids(ts.check_courses(self.ctx)))
+
+    PARTICIPANTS = ("courseId,courseName,userRole,userId,profile.emailAddress,"
+                    "profile.id,profile.name.fullName")
+    INVITES = "courseId,courseName,id,role,userId,userEmail"
+
+    def test_outsiders_on_roster_and_invited(self):
+        self.write_csv("course_participants", f"""{self.PARTICIPANTS}
+1,Maths,TEACHER,10,t@example.com,10,Teacher
+1,Maths,STUDENT,11,s@alias.example.com,11,Student
+1,Maths,TEACHER,12,helper@gmail.com,12,Helper
+1,Maths,STUDENT,13,,13,Hidden""")
+        self.write_csv("classroominvitations", f"""{self.INVITES}
+1,Maths,inv1,STUDENT,14,new@example.com
+2,Science,inv2,TEACHER,15,guest@otherschool.org""")
+        findings = ts.check_classroom_outsiders(self.ctx)
+        self.assertEqual(["classroom-external-members"], self.finding_ids(findings))
+        self.assertEqual("HIGH", findings[0].severity)
+        self.assertEqual([("helper@gmail.com", "on the roster"),
+                          ("guest@otherschool.org", "invited")],
+                         [(r["Member"], r["Status"]) for r in findings[0].evidence])
+        self.assertIn("1 roster or invitation row(s) carried no email",
+                      findings[0].meaning)
+
+    def test_all_internal_members_is_clean(self):
+        self.write_csv("course_participants", f"""{self.PARTICIPANTS}
+1,Maths,TEACHER,10,t@example.com,10,Teacher""")
+        self.write_csv("classroominvitations", self.INVITES)
+        self.assertEqual([], ts.check_classroom_outsiders(self.ctx))
+
+    GUARDIANS = ("studentEmail,studentId,invitedEmailAddress,invitationId,"
+                 "creationTime,state,guardianId,guardianProfile.emailAddress")
+
+    def test_guardians_accepted_pending_and_stale(self):
+        old = (ts.datetime.now(ts.timezone.utc) - ts.timedelta(days=45)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ")
+        new = (ts.datetime.now(ts.timezone.utc) - ts.timedelta(days=2)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ")
+        self.write_csv("guardians", f"""{self.GUARDIANS}
+a@example.com,1,p1@home.net,i1,{old},PENDING,,
+b@example.com,2,p1@home.net,i2,{new},PENDING,,
+c@example.com,3,p2@home.net,,,,g1,p2@home.net""")
+        findings = ts.check_classroom_guardians(self.ctx)
+        self.assertEqual(["classroom-guardians"], self.finding_ids(findings))
+        self.assertEqual("1 guardian(s) receive student summaries, "
+                         "2 invitation(s) pending (1 older than 30 days)",
+                         findings[0].title)
+        self.assertEqual({"a@example.com": ("pending", "p1@home.net"),
+                          "b@example.com": ("pending", "p1@home.net"),
+                          "c@example.com": ("accepted", "p2@home.net")},
+                         {r["Student"]: (r["Status"], r["Guardian"])
+                          for r in findings[0].evidence})
 
 
 class TestEditionFeatures(PolicyTestCase):

@@ -200,7 +200,10 @@ the full module registry with keys and tiers.
 
 ### Google Classroom (Education tenants only)
 
-- Classroom open to anyone joining or creating classes [Medium]
+- Classes with members or invitations from outside the organisation [High]
+- Classes owned by deleted or suspended accounts [Medium]
+- Classroom open to anyone joining, or to unverified teachers creating classes [Medium]
+- Guardians and pending guardian invitations, with their age [Info]
 - Classroom settings and course counts [Info]
 
 ### Tenant inventory and Vault
