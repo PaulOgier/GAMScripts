@@ -7,6 +7,7 @@ Usage: python3 ttypaste.py COMMAND...
 """
 import os
 import pty
+import re
 import select
 import sys
 import time
@@ -42,9 +43,11 @@ for name, text in CASES.items():
     t = out.decode(errors='replace')
     rep = t[t.find('VERDICT'):] if 'VERDICT' in t else ''
     last = text.split('\n')[-1].split(',')[-1][:20]
-    good = 'VERDICT: DESTRUCTIVE' in rep and last in rep.replace('\r\n', '').replace('\n', '')
+    # Since 0.3.1 a UTF-8 terminal prints a coloured dot before the level.
+    verdict = bool(re.search(r'VERDICT: (?:\S+ )?DESTRUCTIVE', rep))
+    good = verdict and last in rep.replace('\r\n', '').replace('\n', '')
     ok &= good
-    print(f'{name!s:>6} len={len(text):5} prompt={sent==1} verdict={"VERDICT: DESTRUCTIVE" in rep} tail_seen={last in rep} -> {"PASS" if good else "FAIL"}')
+    print(f'{name!s:>6} len={len(text):5} prompt={sent==1} verdict={verdict} tail_seen={last in rep} -> {"PASS" if good else "FAIL"}')
     if not good:
         print('   last output:', repr(t[-300:]))
     try:

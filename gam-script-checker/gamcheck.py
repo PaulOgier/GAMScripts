@@ -38,8 +38,8 @@ YOU ASSUME ALL RISK ASSOCIATED WITH THE USE OF THIS SOFTWARE.
 
 Author:       Paul Ogier
 Created:      2026-09-13
-Updated:      2026-09-13
-Version:      0.3.0
+Updated:      2026-10-01
+Version:      0.4.0
 Status:       Pre-release
 Python:       3.9+
 Dependencies: None. Stdlib only; never runs gam or the script it checks.
@@ -72,7 +72,7 @@ import sys
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
-__version__ = '0.3.1'
+__version__ = '0.4.0'
 
 HERE = Path(__file__).resolve().parent
 VERBS_DIR = HERE / 'verbs'
@@ -242,6 +242,10 @@ ECHO_WORDS = {'echo', 'printf', 'write-host', 'write-output', 'rem', 'print', 'c
 PREFIX_WORDS = {'sudo', 'time', 'exec', 'nohup', 'env', 'command', 'call', 'start', 'then', 'do', 'else', '{',
                 '!', 'if', 'while', 'until', 'xargs', 'nice', 'timeout', 'caffeinate', 'ssh', 'su', 'bash', 'sh', 'zsh',
                 'python', 'python3', 'py', 'cmd', 'powershell', 'pwsh', 'start-process', 'ionice', 'chrt', 'doas', 'runuser'}
+# A paste that runs a script (python3 audit.py, bash ./offboard.sh) holds no gam
+# commands itself; the script it names is checked instead when it exists here.
+SCRIPT_RUNNERS = {'python', 'python3', 'py', 'bash', 'sh', 'zsh', 'pwsh', 'powershell', 'source', '.', 'call'}
+SCRIPT_EXTS = ('.py', '.sh', '.bash', '.zsh', '.ps1', '.bat', '.cmd')
 SEPARATORS = {';', '&&', '||', '|', '&', '(', ')', ';;', '|&', '{', '}'}
 REDIRECTS = {'>', '>>', '<', '>&', '<&', '&>', '&>>', '<<', '<<<', '>|'}
 
@@ -821,6 +825,32 @@ class Context:
         return [Finding(self.file, line, UNKNOWN, f'runs every gam command in {file_tok}, which was not provided',
                         command, note='check that file too: gamcheck.py ' + file_tok)]
 
+    def follow_script(self, script_tok, line, command):
+        """Check a script the line runs (python3 x.py, bash x.sh), if it exists on this computer.
+
+        ~ and the home-folder variables are expanded to the checker's own home folder, which is
+        right when the paste is checked on the machine that will run it. Any other variable is
+        reported as decided at runtime.
+        """
+        home = str(Path.home())
+        path = re.sub(r'^~(?=[\\/]|$)|\$\{?HOME\}?\b|%USERPROFILE%|\$env:USERPROFILE\b', lambda m: home, script_tok, flags=re.I)
+        if re.search(r'\$|%[^%\s]+%', path):
+            return [Finding(self.file, line, UNKNOWN, 'runs a script whose path is decided at runtime', command)]
+        cands = [Path(path)] if Path(path).is_absolute() else [base / path for base in self.base_dirs]
+        p = next((c for c in cands if c.is_file()), None)
+        if p is None:
+            return [Finding(self.file, line, UNKNOWN, f'runs {script_tok}, which was not provided', command,
+                            note='check that file too: gamcheck.py ' + script_tok)]
+        if self.depth >= 3:
+            return [Finding(self.file, line, UNKNOWN, f'scripts nested too deeply at {p.name}', command)]
+        inner = self.checker.check_file(p, depth=self.depth + 1)
+        for f in inner:
+            f.note = '; '.join(n for n in (f.note, f'from {p.name} run at {self.file} line {line}') if n)
+        if not any(f.command.startswith('gam') for f in inner):
+            inner.append(Finding(self.file, line, UNKNOWN, f'runs {p.name}, where no gam commands were found', command,
+                                 note='if that script does run gam, the checker could not see how'))
+        return inner
+
 
 def _gam_name(tok, gam_vars, wrappers):
     """True when a token names the gam executable, a variable holding its path, or a wrapper function."""
@@ -967,6 +997,8 @@ class Checker:
                     if self._gam_hidden(seg, gam_vars, wrappers):
                         findings.append(Finding(ctx.file, n, UNKNOWN, 'gam appears in a command the checker could not follow',
                                                 short(seg), note='handed to another program (bash -c, ssh, Start-Process); check the inner command on its own'))
+                    elif (script := self._script_path(seg)) is not None:
+                        findings.extend(ctx.follow_script(script, n, short(seg)))
                     local_text.extend([' '.join(seg), sep])
                     continue
                 args = [_dynamic(t, lang) for t in seg[at + 1:]]
@@ -992,6 +1024,29 @@ class Checker:
             if not re.fullmatch(r'[A-Za-z_]\w*=.*', t) and _gam_name(t.strip('`"\''), gam_vars, wrappers):
                 return True
         return False
+
+    @staticmethod
+    def _script_path(seg):
+        """The script a segment runs: python3 x.py, bash x.sh, pwsh -File x.ps1, ./x.sh, sudo bash x.sh.
+
+        python -m, python -c and bash -c run code that is not a file, so they return None.
+        """
+        k = 0
+        while k < len(seg) and (re.fullmatch(r'[A-Za-z_]\w*=.*', seg[k]) or
+                                (seg[k].lower() in PREFIX_WORDS and seg[k].lower() not in SCRIPT_RUNNERS)):
+            k += 1
+        if k >= len(seg):
+            return None
+        word = seg[k].strip('`"\'')
+        if word.lower().endswith(SCRIPT_EXTS):
+            return word
+        if re.split(r'[\\/]', word)[-1].lower().removesuffix('.exe') not in SCRIPT_RUNNERS:
+            return None
+        args = [t.strip('`"\'') for t in seg[k + 1:]]
+        if any(t.lower() in ('-m', '-c', '-command', '-encodedcommand') for t in args):
+            return None
+        names = [t for t in args if not t.startswith('-')]
+        return next((t for t in names if t.lower().endswith(SCRIPT_EXTS)), names[0] if names else None)
 
     @staticmethod
     def _drop_redirects(seg):

@@ -69,6 +69,20 @@ def test_details(checker):
     batch = findings('batch_follow.sh')
     assert any('stale@example.com' in f.command and 'cleanup.txt' in f.file for f in batch), batch
 
+    # A paste that only runs a script is checked through the script it names.
+    script = findings('script_follow.sh')
+    assert any('cleanup.txt' in f.file and 'from batch_follow.sh run at' in f.note for f in script), script
+    assert not any('no gam commands found' in f.what for f in script), script
+    missing = findings('script_missing.sh')
+    assert any('not-provided-audit.py, which was not provided' in f.what for f in missing), missing
+    for line in ('python3 -m http.server', 'python3 -c "print(1)"', 'bash -c "ls"', 'ls ./x.py'):
+        assert g.Checker._script_path(g._tokenise(line, 'shell')) is None, line
+    for line, want in (('pwsh -ExecutionPolicy Bypass -File x.ps1', 'x.ps1'), ('sudo bash run', 'run'),
+                       ('./x.sh -y', './x.sh'), ('A=1 python3 "$HOME/a b.py" --yes', '$HOME/a b.py')):
+        assert g.Checker._script_path(g._tokenise(line, 'shell')) == want, line
+    pasted = checker.check_text(f'python3 "{FIXTURES / "wrapper.py"}" --yes\n', '<pasted>', 'shell')
+    assert any(f.level == g.DESTRUCTIVE and 'wrapper.py' in f.file for f in pasted), pasted
+
 
 def test_gates_and_wording(checker):
     """GAM's own doit/preview gates, group membership actions, and 'delete' that only removes a link.
