@@ -288,12 +288,16 @@ class TestExternalFileShareChecks(CtxTestCase):
                        "user,out@other.com,other.com,reader,\n"
                        "u@example.com,f2,dom.doc,doc,1,u@example.com,"
                        "domain,,other.com,reader,\n"
+                       "u@example.com,f4,aud.doc,doc,1,u@example.com,"
+                       "domain,,c03abc.audience.googledomains.com,reader,\n"
                        "u@example.com,f3,int.doc,doc,1,u@example.com,"
                        "user,in@example.com,example.com,reader,")
         findings = {f.fid: f for f in ts.check_external_file_shares(self.ctx)}
         self.assertIn("external-user-shares", findings)
         self.assertIn("external-domain-shares", findings)
         self.assertEqual(1, len(findings["external-user-shares"].evidence))
+        self.assertEqual(["dom.doc"], [e["File"] for e in
+                                       findings["external-domain-shares"].evidence])
         self.assertEqual("MEDIUM", findings["external-user-shares"].severity)
         self.assertEqual("HIGH", findings["external-domain-shares"].severity)
 
@@ -2456,6 +2460,103 @@ class TestCollectOrdering(CtxTestCase):
         self.assertEqual(1, self.ctx.manifest["meta"]["user_count"])
         self.assertIn("collected_at", self.ctx.manifest["meta"])
         self.assertFalse(self.ctx.manifest["meta"]["include_suspended"])
+
+
+class TestResumeUnscannedSharedDrives(CtxTestCase):
+    """A resume re-runs a scan that left drives UNSCANNED; with nothing
+    unscanned it stays done."""
+
+    NOTE = ("2 drive(s) UNSCANNED (admin not a member; re-run with "
+            "--grant-temp-access to cover them)")
+
+    def test_rescan_only_with_unscanned_note(self):
+        mod = ts.MODULE_BY_KEY["shareddrive_external"]
+        self.ctx.set_module("shareddrive_external", "empty", 0, self.NOTE)
+        self.assertTrue(ts._needs_run(self.ctx, mod))
+        self.ctx.set_module("shareddrive_external", "ok", 5, "")
+        self.assertFalse(ts._needs_run(self.ctx, mod))
+
+
+class TestTempGrantFailure(CtxTestCase):
+    """A refused temp grant is reported with GAM's reason, not as a drive
+    the operator should re-run with --grant-temp-access."""
+
+    def test_unlicensed_admin_note(self):
+        self.write_csv("shareddrives", "id,name\nD1,Finance")
+        self.write_csv("shareddriveacls", "id,permission.emailAddress\n"
+                       "D1,someone@example.com")
+        self.ctx.args.grant_temp_access = True
+        reason = ("Add Failed: Cannot set the requested role for that user "
+                  "as they lack the necessary license.")
+        original = ts.run_gam
+        ts.run_gam = lambda args, **kw: (50, "", "User: a, " + reason + "\n")
+        try:
+            status, rows, note = ts.collect_sd_external(
+                self.ctx, ts.MODULE_BY_KEY["shareddrive_external"])
+        finally:
+            ts.run_gam = original
+        self.assertEqual(("empty", 0), (status, rows))
+        self.assertIn("lack the necessary license", note)
+        self.assertNotIn("UNSCANNED", note)
+
+
+class TestSharedDriveScanAsMember(CtxTestCase):
+    """A drive the admin is not in is listed as an active member, organizers
+    first, with no grant; a failing member falls through to the next."""
+
+    def setUp(self):
+        super().setUp()
+        self.write_csv("users", "primaryEmail,suspended\n"
+                       "org@example.com,False\nwriter@example.com,False\n"
+                       "gone@example.com,True")
+        self.write_csv("shareddrives", "id,name\nD1,Finance")
+        self.write_csv("shareddriveacls",
+                       "id,permission.emailAddress,permission.role,permission.type\n"
+                       "D1,writer@example.com,writer,user\n"
+                       "D1,gone@example.com,organizer,user\n"
+                       "D1,org@example.com,organizer,user\n"
+                       "D1,team@example.com,organizer,group")
+        self.calls = []
+
+    def run_with(self, fake):
+        original = ts.run_gam
+        ts.run_gam = lambda args, **kw: (self.calls.append(args), fake(args))[1]
+        try:
+            return ts.collect_sd_external(
+                self.ctx, ts.MODULE_BY_KEY["shareddrive_external"])
+        finally:
+            ts.run_gam = original
+
+    def test_organizer_first_no_grant(self):
+        out = "id,name,permission.type\nF1,a.doc,anyone\n"
+        status, rows, note = self.run_with(lambda a: (0, out, ""))
+        self.assertEqual(("ok", 1, ""), (status, rows, note))
+        self.assertEqual("org@example.com", self.calls[0][1])
+        self.assertFalse(any("drivefileacl" in c for c in self.calls))
+        self.assertEqual("org@example.com",
+                         self.ctx.rows("shareddrive_external")[0]["shareddrive.scannedAs"])
+
+    def test_failed_member_falls_through(self):
+        def fake(args):
+            if args[1] == "org@example.com":
+                return 1, "", "Drive Service/App not enabled\n"
+            return 0, "id,name\nF1,a.doc\n", ""
+        status, rows, _ = self.run_with(fake)
+        self.assertEqual(["org@example.com", "writer@example.com"],
+                         [c[1] for c in self.calls])
+        self.assertEqual(("ok", 1), (status, rows))
+
+    def test_drive_off_exit_60_is_not_an_empty_drive(self):
+        # Seen live on dev 2026-10-02: Drive switched off for the member's
+        # OU gives exit 60 and a header-only CSV, like an empty drive.
+        def fake(args):
+            if args[1] == "org@example.com":
+                return (60, "Owner,id,name\n",
+                        "User: org@example.com, Drive Service/App not enabled\n")
+            return 0, "id,name\nF1,a.doc\n", ""
+        status, rows, _ = self.run_with(fake)
+        self.assertEqual("writer@example.com", self.calls[-1][1])
+        self.assertEqual(("ok", 1), (status, rows))
 
 
 class TestLicenceWasteGating(CtxTestCase):

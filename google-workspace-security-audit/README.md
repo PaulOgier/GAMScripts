@@ -97,7 +97,7 @@ the full module registry with keys and tiers.
 
 - Fewer than two super admins [Critical]
 - Super admins **without 2-step verification** (2SV / MFA) [Critical]
-- Super admins with app passwords [Critical]
+- Admin accounts with app passwords [High]
 - Admin accounts nobody has signed into for months [High]
 - Delegates on admin mailboxes [High]
 - Admin roles still held by suspended accounts [High]
@@ -235,11 +235,13 @@ runs can be diffed by who was named, not just by counts.
 
 Every GAM command the script issues is a read (`print`, `report`, `info`,
 `oauth info`, `check serviceaccount`), with one opt-in exception:
-`--grant-temp-access` temporarily adds the auditing admin as organizer on
-Shared Drives they are not a member of, scans them, and removes the grant
-again. GAM's `filelist` has no admin-access mode, so without membership a
-scan silently returns zero rows and the drive would look clean; by default
-those drives are reported **UNSCANNED** instead.
+`--grant-temp-access`. GAM's `filelist` has no admin-access mode, so a
+non-member scan silently returns zero rows and the drive would look clean.
+Each Shared Drive is therefore listed as one of its own active members,
+organizers first, and nobody's access changes. Only a drive that no member
+can list (none active, or none with a Drive licence) needs the flag, which
+adds the auditing admin as organizer, scans, and removes the grant again; by
+default those drives are reported **UNSCANNED** instead.
 
 Backup verification codes never reach disk. The collector keeps only the
 per-user count.
@@ -342,10 +344,14 @@ nobody has ever signed into is exactly the thing an audit should find:
 python3 tenant_scope.py --admin admin@yourdomain.com --skip-never-logged-in
 ```
 
-**Shared Drives the admin is not a member of.** `filelist` has no admin-access
-mode, so a non-member scan returns zero rows and looks clean. Those drives are
-reported UNSCANNED unless you pass `--grant-temp-access`, which adds the
-auditing admin as organizer, scans, and removes the grant again:
+**Shared Drives.** `filelist` has no admin-access mode, so a non-member scan
+returns zero rows and looks clean. Each drive is listed as one of its own active
+members instead (the `shareddrive.scannedAs` column says who), which works even
+when the auditing admin has no Workspace licence. A member sees what membership
+shows them, so a limited-access folder they are kept out of is not covered.
+A drive no member can list is reported UNSCANNED unless you pass
+`--grant-temp-access`, which adds the auditing admin as organizer, scans, and
+removes the grant again:
 
 ```
 python3 tenant_scope.py --admin admin@yourdomain.com --grant-temp-access --only shareddrive_external
@@ -461,7 +467,8 @@ which path ran.
 
 **Is it safe to run against a live production tenant?**
 Yes. Every command is a read. The only write, `--grant-temp-access`, is off
-by default and removes its own grant when the scan finishes.
+by default, is only used on a drive none of its members can list, and removes
+its own grant when the scan finishes.
 
 **Does it work with GAMADV-XTD3?**
 It is built and tested against GAM7 (GAM ADV X), the successor to

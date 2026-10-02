@@ -43,7 +43,7 @@ YOU ASSUME ALL RISK ASSOCIATED WITH THE USE OF THIS SOFTWARE.
 Author:       Paul Ogier
 Created:      2026-08-15
 Updated:      2026-10-01
-Version:      1.6.1
+Version:      1.6.2
 Status:       Production
 Python:       3.9+
 Dependencies: GAM ADV X (GAM7) only. Stdlib only on the Python side.
@@ -67,18 +67,21 @@ A READ-ONLY Google Workspace tenant audit. Three stages, each restartable:
 Safety posture
 --------------
 Every GAM command issued is a read (print / report / info / oauth info /
-check serviceaccount), with ONE opt-in exception: --grant-temp-access
-temporarily adds the auditing admin as organizer on Shared Drives they are
-not a member of (GAM's filelist cannot use admin access, so a non-member scan
-silently returns zero rows), scans, then removes that access again. Off by
-default; without it those drives are reported as UNSCANNED.
+check serviceaccount). GAM's filelist cannot use admin access, so a
+non-member scan silently returns zero rows; each Shared Drive is therefore
+listed as one of its own active members, and nobody's access changes. ONE
+opt-in exception: --grant-temp-access, for a drive no member can list,
+temporarily adds the auditing admin as organizer, scans, then removes that
+access again. Off by default; without it those drives are reported as
+UNSCANNED.
 
 Module tiers
 ------------
   1  tenant-level, cheap (domains, users, groups, admins, shared drive
      metadata, devices, policies, tokens, Vault, reports, the last
      30 days of admin log, risky sign-ins and Alert Center alerts, and
-     Classroom courses on Education tenants)
+     Classroom courses, rosters, invitations and guardians on Education
+     tenants)
   2  per-user Gmail/Calendar settings via domain-wide delegation
      (send-as, delegates, forwarding, IMAP/POP, ASPs, backup-code counts,
      calendar ACLs)
@@ -108,6 +111,17 @@ Notes that matter when reading results:
     in the report where they apply.
 
 Changelog
+  2026-10-02 - v1.6.2 - Shared Drives are listed as one of their own
+                        active members (organizers first), so no grant is
+                        needed and an unlicensed audit admin works;
+                        --grant-temp-access is only the fallback for a
+                        drive no member can list, and a refused grant
+                        reports Google's reason. Any resume re-runs drives
+                        left UNSCANNED. My Drive scan limit 1h -> 4h.
+                        Admin app passwords are HIGH, not CRITICAL: they
+                        cannot sign in to the Admin console, only to
+                        mail, calendar and contacts apps. Target audiences
+                        are no longer reported as external domain shares.
   2026-10-01 - v1.6.1 - Classroom, after the first run on an Education
                         tenant: rosters, class invitations and guardians
                         are collected; classes with outside members or
@@ -229,7 +243,7 @@ csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
 # CONFIGURATION
 ###############################################################################
 
-SCRIPT_VERSION = "1.6.1"
+SCRIPT_VERSION = "1.6.2"
 
 # [OPTIONAL] Startup check against the remote VERSION file. Fail-silent.
 CHECK_FOR_UPDATES = True
@@ -819,7 +833,8 @@ MODULES: List[Dict] = [
     # ---- Tier 3: heavy Drive scans ----
     dict(key="mydrive_external", title="My Drive files shared externally",
          tier=3, args=None, collector="mydrive_external",
-         scopes=[SCOPE_DRIVE], timeout=3600),
+         scopes=[SCOPE_DRIVE], timeout=14400),
+    # 3600s killed a 58-user tenant's scan with 0 rows (2026-10-01).
     # Applied per drive, not per module. 3600s killed a single large drive
     # mid-scan on a 660GB drive (2026-08-17) and lost every row for it.
     dict(key="shareddrive_external",
@@ -1540,11 +1555,18 @@ def collect_sd_external(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
     """Scan each Shared Drive for external ACLs.
 
     filelist has NO adminaccess option, so running it as a non-member of the
-    drive returns zero rows and looks clean. Drives the auditing admin is not
-    a member of are therefore reported UNSCANNED unless --grant-temp-access
-    is set, in which case the admin is added as organizer (via admin access),
-    the drive is scanned, and the grant is removed again - the one write in
-    the whole script.
+    drive returns zero rows and looks clean. Each drive is therefore listed
+    AS one of its own members, impersonated through domain-wide delegation:
+    the auditing admin when they are a member, otherwise an active member
+    from shareddriveacls, organizers first. Nobody's access changes. A member
+    sees what membership shows them, so a limited-access folder they are
+    kept out of is not covered.
+
+    Only when no member can list the drive (none active, or each one fails,
+    e.g. no Drive licence) does --grant-temp-access apply: the admin is
+    added as organizer via admin access, the drive is scanned, and the
+    grant is removed again - the one write in the whole script. Without the
+    flag such drives are reported UNSCANNED.
     """
     drives = ctx.rows("shareddrives")
     if not drives:
@@ -1553,18 +1575,54 @@ def collect_sd_external(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
         return "skipped", 0, "domains module has no rows; run it first"
     if not ctx.admin:
         return "skipped", 0, "--admin required for Shared Drive scans"
-    acls = ctx.rows("shareddriveacls")
-    member_drives = set()
     admin_lower = ctx.admin.lower()
-    for acl in acls:
-        if col(acl, "permission.emailAddress", "emailAddress").lower() == admin_lower:
-            member_drives.add(col(acl, "id"))
+    active = {col(u, "primaryEmail").lower() for u in ctx.rows("users")
+              if col(u, "suspended").lower() != "true"}
+    rank = {"organizer": 0, "fileorganizer": 1, "writer": 2,
+            "commenter": 3, "reader": 4}
+    members: Dict[str, List[Tuple[int, str]]] = {}
+    for acl in ctx.rows("shareddriveacls"):
+        email = col(acl, "permission.emailAddress", "emailAddress").lower()
+        if col(acl, "permission.type", "type").lower() != "user":
+            continue
+        if email != admin_lower and email not in active:
+            continue
+        role = rank.get(col(acl, "permission.role", "role").lower(), 5)
+        # The admin goes first: the run already proved it can use them.
+        members.setdefault(col(acl, "id"), []).append(
+            (-1 if email == admin_lower else role, email))
 
     pm = external_pm_args(ctx.internal_domains)
     rows: List[Dict[str, str]] = []
     unscanned: List[str] = []
     failed: List[str] = []
+    grant_errors: List[str] = []
     errors = 0
+
+    def scan(drive_id: str, drive_name: str, as_user: str) -> Tuple[bool, str]:
+        """List one drive as one user; rows are kept only on success."""
+        rc, out, err = run_gam(
+            ["user", as_user, "print", "filelist",
+             "select", "shareddriveid", drive_id, "fields",
+             "id,name,mimeType,basicpermissions"] + pm,
+            timeout=mod.get("timeout", 3600), dry_run=ctx.args.dry_run)
+        ctx.stderr_log(mod["key"], err)
+        if ctx.args.dry_run:
+            return True, ""
+        # A member whose Drive is off gets exit 60 and a header-only CSV,
+        # the same shape as an empty drive; only stderr tells them apart.
+        # Without this check the drive reads as scanned and clean.
+        skipped = any(m in err for m in PER_USER_SKIP_MARKERS)
+        if not skipped and (rc == 0 or (rc == 60 and is_header_only(out))):
+            for row in csv.DictReader(io.StringIO(out)):
+                row["shareddrive.id"] = drive_id
+                row["shareddrive.name"] = drive_name
+                row["shareddrive.scannedAs"] = as_user
+                rows.append(row)
+            return True, ""
+        return False, (err.strip().splitlines()[-1] if err.strip()
+                       else f"exit {rc}")
+
     for drive in drives:
         if shutdown_requested:
             return "error", len(rows), "interrupted"
@@ -1572,62 +1630,70 @@ def collect_sd_external(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
         drive_name = col(drive, "name")
         if not drive_id:
             continue
-        is_member = drive_id in member_drives
-        granted = False
-        if not is_member:
-            if not ctx.args.grant_temp_access:
-                unscanned.append(f"{drive_name} ({drive_id})")
-                continue
-            rc, out, err = run_gam(
-                ["user", ctx.admin, "add", "drivefileacl", drive_id,
-                 "user", ctx.admin, "role", "organizer", "adminaccess"],
-                timeout=120, dry_run=ctx.args.dry_run)
-            ctx.stderr_log(mod["key"], err)
-            if not ctx.args.dry_run and rc != 0:
-                unscanned.append(f"{drive_name} ({drive_id}) - temp grant failed")
-                errors += 1
-                continue
-            granted = True
+        # Three members tried per drive, then the grant fallback.
+        candidates = [e for _, e in sorted(members.get(drive_id, []))][:3]
+        done = False
+        for as_user in candidates:
+            done, _ = scan(drive_id, drive_name, as_user)
+            if done:
+                break
+        if done:
+            continue
+        if candidates and candidates[0] == admin_lower:
+            # The admin is a member and still failed: a scan failure, which
+            # a grant would not fix.
+            errors += 1
+            failed.append(f"{drive_name} ({drive_id})")
+            unscanned.append(f"{drive_name} ({drive_id}) - scan failed")
+            continue
+        if not ctx.args.grant_temp_access:
+            unscanned.append(f"{drive_name} ({drive_id})")
+            continue
+        rc, out, err = run_gam(
+            ["user", ctx.admin, "add", "drivefileacl", drive_id,
+             "user", ctx.admin, "role", "organizer", "adminaccess"],
+            timeout=120, dry_run=ctx.args.dry_run)
+        ctx.stderr_log(mod["key"], err)
+        if not ctx.args.dry_run and rc != 0:
+            unscanned.append(f"{drive_name} ({drive_id}) - temp grant failed")
+            grant_errors.append(err.strip().splitlines()[-1] if err.strip() else f"exit {rc}")
+            errors += 1
+            continue
         try:
-            rc, out, err = run_gam(
-                ["user", ctx.admin, "print", "filelist",
-                 "select", "shareddriveid", drive_id, "fields",
-                 "id,name,mimeType,basicpermissions"] + pm,
-                timeout=mod.get("timeout", 3600), dry_run=ctx.args.dry_run)
-            ctx.stderr_log(mod["key"], err)
-            if ctx.args.dry_run:
-                continue
-            if rc == 0 or (rc == 60 and is_header_only(out)):
-                for row in csv.DictReader(io.StringIO(out)):
-                    row["shareddrive.id"] = drive_id
-                    row["shareddrive.name"] = drive_name
-                    rows.append(row)
-            else:
+            ok, _ = scan(drive_id, drive_name, ctx.admin)
+            if not ok:
                 errors += 1
                 failed.append(f"{drive_name} ({drive_id})")
                 unscanned.append(f"{drive_name} ({drive_id}) - scan failed")
         finally:
-            if granted:
-                # Remove the temporary grant even when the scan itself failed.
-                rc, out, err = run_gam(
-                    ["user", ctx.admin, "delete", "drivefileacl", drive_id,
-                     ctx.admin, "adminaccess"],
-                    timeout=120, dry_run=ctx.args.dry_run)
-                ctx.stderr_log(mod["key"], err)
-                if not ctx.args.dry_run and rc != 0:
-                    print_error(
-                        f"Could not remove the temporary organizer grant on "
-                        f"Shared Drive {drive_name} ({drive_id}). Remove "
-                        f"{ctx.admin} manually in the Admin console.")
+            # Remove the temporary grant even when the scan itself failed.
+            rc, out, err = run_gam(
+                ["user", ctx.admin, "delete", "drivefileacl", drive_id,
+                 ctx.admin, "adminaccess"],
+                timeout=120, dry_run=ctx.args.dry_run)
+            ctx.stderr_log(mod["key"], err)
+            if not ctx.args.dry_run and rc != 0:
+                print_error(
+                    f"Could not remove the temporary organizer grant on "
+                    f"Shared Drive {drive_name} ({drive_id}). Remove "
+                    f"{ctx.admin} manually in the Admin console.")
     if ctx.args.dry_run:
         return "dry-run", 0, ""
     write_rows(ctx.csv_path(mod["key"]), rows)
     ctx.manifest["meta"]["unscanned_shared_drives"] = unscanned
     note = ""
-    not_member = len(unscanned) - len(failed)
+    not_member = len(unscanned) - len(failed) - len(grant_errors)
+    if grant_errors:
+        # Kept apart from not_member: re-running with the flag cannot fix
+        # these (an unlicensed admin cannot be made organizer), so the note
+        # must not ask for that, and must not carry the UNSCANNED marker
+        # that makes a resume retry them.
+        note = (f"{len(grant_errors)} drive(s) not scanned, temp grant "
+                f"failed: {grant_errors[0]}")
     if not_member:
-        note = (f"{not_member} drive(s) UNSCANNED (admin not a member; "
-                f"re-run with --grant-temp-access to cover them)")
+        note = (note + "; " if note else "")
+        note += (f"{not_member} drive(s) UNSCANNED (no member could list it; "
+                 f"re-run with --grant-temp-access to cover them)")
     if failed:
         # Name them: a timed-out drive contributes nothing and the operator
         # has to know which one to re-run.
@@ -1843,8 +1909,12 @@ def _needs_run(ctx: RunContext, mod: Dict) -> bool:
     # A partial module is re-run only when it was cut short by a timeout;
     # partial because one mailbox has Gmail off would re-scan the whole
     # tenant on every resume and end partial again.
-    if status in ("ok", "empty") or (status == "partial"
-                                     and "Timed out" not in note):
+    # A Shared Drive scan that left drives UNSCANNED is re-run: a resume may
+    # add --grant-temp-access, and runs from before member scanning skipped
+    # every drive the admin was not in.
+    rescan = "UNSCANNED" in note
+    if not rescan and (status in ("ok", "empty") or
+                       (status == "partial" and "Timed out" not in note)):
         print_info(f"{key}: already collected, skipping (resume)")
         return False
     if ctx.failed_scopes and set(mod.get("scopes", [])) & set(ctx.failed_scopes):
@@ -2074,6 +2144,10 @@ def check_external_file_shares(ctx: RunContext) -> List[Finding]:
                     named.append(entry)
             elif ptype == "domain":
                 dom = col(row, "permission.domain").lower()
+                # A target audience is an internal group, but Drive reports it
+                # as type=domain with <id>.audience.googledomains.com.
+                if dom.endswith(".audience.googledomains.com"):
+                    continue
                 if dom and dom not in internal:
                     entry["Shared with"] = f"everyone at {dom}"
                     domains.append(entry)
@@ -2192,11 +2266,13 @@ def check_admin_asps(ctx: RunContext) -> List[Finding]:
                  "App password name": col(r, "name"),
                  "Created": col(r, "creationTime")} for r in hits]
     return [Finding(
-        "admin-asps", "CRITICAL",
+        "admin-asps", "HIGH",
         "Admin accounts using app passwords",
-        "App passwords bypass 2-step verification: anything holding one can "
-        "sign in as the admin without a second factor. On an admin account "
-        "that undoes the strongest protection the tenant has.",
+        "An app password cannot sign in to the browser or the Admin console, "
+        "but it lets an older mail, calendar or contacts app (IMAP, POP, "
+        "SMTP) into the account with no second factor. Anyone holding it can "
+        "read and send the admin's mail, including password reset and "
+        "security alert messages.",
         "Identify what each app password is for, replace it with modern "
         "OAuth sign-in, and revoke the app passwords on all admin accounts.",
         evidence, "asps.csv")]
@@ -5373,10 +5449,10 @@ def parse_args(argv=None):
                         "modules (default: active users only, stated in the "
                         "report)")
     parser.add_argument("--grant-temp-access", action="store_true",
-                        help="THE ONE WRITE: temporarily add --admin as "
-                        "organizer on Shared Drives they are not a member "
-                        "of, scan, then remove the grant. Without this, "
-                        "those drives are reported UNSCANNED.")
+                        help="THE ONE WRITE: for a Shared Drive none of its "
+                        "members can list, temporarily add --admin as "
+                        "organizer, scan, then remove the grant. Without "
+                        "this, those drives are reported UNSCANNED.")
     parser.add_argument("--render-only", action="store_true",
                         help="Skip collection; re-run checks and render from "
                         "an existing --run-dir")
