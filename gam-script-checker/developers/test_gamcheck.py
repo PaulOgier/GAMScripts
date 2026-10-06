@@ -80,6 +80,14 @@ def test_details(checker):
     assert what('gam report customer\n') == ['reads audit report, for the whole tenant']
     assert what('gam sendemail user@example.com subject hi\n') == ['sends email']
 
+    # A stderr redirect is not an argument, and a gam path given to a file command is data, not a hidden gam run.
+    assert what('gam info domain 2>&1 | head -3\n') == ['shows details of domain']
+    assert what('gam print users 2>/dev/null\n') == ['lists user accounts']
+    for line in ('[[ -x $GAMDIR/gam ]]\n', 'cp -a "$GAMDIR" "$backup"\n', 'ls ~/bin/gam7/gam\n'):
+        assert not [f for f in checker.check_text(line, '', 'shell') if 'could not follow' in f.what], line
+    for line in ('bash -c "gam delete user bob@example.com"\n', 'result="$(gam delete user bob@example.com)"\n'):
+        assert [f for f in checker.check_text(line, '', 'shell') if 'could not follow' in f.what], line
+
     # A named mobile device is acted on without doit (verified on dev, 2026-10-06); only a query is gated.
     def level(text):
         return [f.level for f in checker.check_text(text, '', 'shell') if f.command]

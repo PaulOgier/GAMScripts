@@ -426,7 +426,7 @@
   "user_service_account_access_only"
  ],
  "dialect": "modern",
- "gam_version": "7.48.07",
+ "gam_version": "7.48.20",
  "pairs": [
   [
    "main",
@@ -2447,6 +2447,13 @@
   [
    "main",
    "print",
+   "chromebrowser",
+   "PRINT",
+   "doPrintShowChromeBrowsers"
+  ],
+  [
+   "main",
+   "print",
    "chromedevicecounts",
    "PRINT",
    "doPrintShowChromeDeviceCounts"
@@ -3192,6 +3199,13 @@
    "chromeaues",
    "SHOW",
    "doPrintShowChromeAues"
+  ],
+  [
+   "main",
+   "show",
+   "chromebrowser",
+   "SHOW",
+   "doPrintShowChromeBrowsers"
   ],
   [
    "main",
@@ -4281,9 +4295,9 @@
   [
    "user",
    "add",
-   "lookerstudiopermission",
+   "datastudiopermission",
    "ADD",
-   "processLookerStudioPermissions"
+   "processDataStudioPermissions"
   ],
   [
    "user",
@@ -4708,9 +4722,9 @@
   [
    "user",
    "create",
-   "lookerstudiopermission",
+   "datastudiopermission",
    "CREATE",
-   "processLookerStudioPermissions"
+   "processDataStudioPermissions"
   ],
   [
    "user",
@@ -5037,9 +5051,9 @@
   [
    "user",
    "delete",
-   "lookerstudiopermission",
+   "datastudiopermission",
    "DELETE",
-   "processLookerStudioPermissions"
+   "processDataStudioPermissions"
   ],
   [
    "user",
@@ -5898,16 +5912,16 @@
   [
    "user",
    "print",
-   "lookerstudioasset",
+   "datastudioasset",
    "PRINT",
-   "printShowLookerStudioAssets"
+   "printShowDataStudioAssets"
   ],
   [
    "user",
    "print",
-   "lookerstudiopermission",
+   "datastudiopermission",
    "PRINT",
-   "printShowLookerStudioPermissions"
+   "printShowDataStudioPermissions"
   ],
   [
    "user",
@@ -6633,16 +6647,16 @@
   [
    "user",
    "show",
-   "lookerstudioasset",
+   "datastudioasset",
    "SHOW",
-   "printShowLookerStudioAssets"
+   "printShowDataStudioAssets"
   ],
   [
    "user",
    "show",
-   "lookerstudiopermission",
+   "datastudiopermission",
    "SHOW",
-   "printShowLookerStudioPermissions"
+   "printShowDataStudioPermissions"
   ],
   [
    "user",
@@ -7333,9 +7347,9 @@
   [
    "user",
    "update",
-   "lookerstudiopermission",
+   "datastudiopermission",
    "UPDATE",
-   "processLookerStudioPermissions"
+   "processDataStudioPermissions"
   ],
   [
    "user",
@@ -8348,6 +8362,7 @@
    "chatmembers": "chatmember",
    "chatspaces": "chatspace",
    "chromeapps": "chromeapp",
+   "chromebrowsers": "chromebrowser",
    "chromenetworks": "chromenetwork",
    "chromepolicies": "chromepolicy",
    "chromeprofilecommands": "chromeprofilecommand",
@@ -8835,6 +8850,7 @@
      "chromeapp": "doPrintShowChromeApps",
      "chromeappdevices": "doPrintShowChromeAppDevices",
      "chromeaues": "doPrintShowChromeAues",
+     "chromebrowser": "doPrintShowChromeBrowsers",
      "chromedevicecounts": "doPrintShowChromeDeviceCounts",
      "chromehistory": "doPrintShowChromeHistory",
      "chromeneedsattn": "doPrintShowChromeNeedsAttn",
@@ -8982,6 +8998,7 @@
      "chromeapp": "doPrintShowChromeApps",
      "chromeappdevices": "doPrintShowChromeAppDevices",
      "chromeaues": "doPrintShowChromeAues",
+     "chromebrowser": "doPrintShowChromeBrowsers",
      "chromedevicecounts": "doPrintShowChromeDeviceCounts",
      "chromehistory": "doPrintShowChromeHistory",
      "chromeneedsattn": "doPrintShowChromeNeedsAttn",
@@ -9374,10 +9391,8 @@
    "counts": "count",
    "cseidentities": "cseidentity",
    "csekeypairs": "csekeypair",
-   "datastudioasset": "lookerstudioasset",
-   "datastudioassets": "lookerstudioasset",
-   "datastudiopermission": "lookerstudiopermission",
-   "datastudiopermissions": "lookerstudiopermission",
+   "datastudioassets": "datastudioasset",
+   "datastudiopermissions": "datastudiopermission",
    "delegates": "delegate",
    "domaincontact": "peoplecontact",
    "domaincontacts": "peoplecontact",
@@ -9414,8 +9429,10 @@
    "licence": "license",
    "licences": "license",
    "licenses": "license",
-   "lookerstudioassets": "lookerstudioasset",
-   "lookerstudiopermissions": "lookerstudiopermission",
+   "lookerstudioasset": "datastudioasset",
+   "lookerstudioassets": "datastudioasset",
+   "lookerstudiopermission": "datastudiopermission",
+   "lookerstudiopermissions": "datastudiopermission",
    "meetconferences": "meetconference",
    "meetparticipants": "meetparticipant",
    "meetrecordings": "meetrecording",
@@ -9491,6 +9508,7 @@
      "contactdelegate": "processContactDelegates",
      "cseidentity": "createUpdateCSEIdentity",
      "csekeypair": "createCSEKeyPair",
+     "datastudiopermission": "processDataStudioPermissions",
      "delegate": "processDelegates",
      "drivefile": "createDriveFile",
      "drivefileacl": "createDriveFileACL",
@@ -9508,7 +9526,6 @@
      "label": "createLabel",
      "labellist": "createLabelList",
      "license": "createLicense",
-     "lookerstudiopermission": "processLookerStudioPermissions",
      "meetspace": "createMeetSpace",
      "note": "createNote",
      "noteacl": "createNotesACLs",
@@ -9597,6 +9614,7 @@
      "contactdelegate": "processContactDelegates",
      "cseidentity": "createUpdateCSEIdentity",
      "csekeypair": "createCSEKeyPair",
+     "datastudiopermission": "processDataStudioPermissions",
      "delegate": "processDelegates",
      "drivefile": "createDriveFile",
      "drivefileacl": "createDriveFileACL",
@@ -9614,7 +9632,6 @@
      "label": "createLabel",
      "labellist": "createLabelList",
      "license": "createLicense",
-     "lookerstudiopermission": "processLookerStudioPermissions",
      "meetspace": "createMeetSpace",
      "note": "createNote",
      "noteacl": "createNotesACLs",
@@ -9655,6 +9672,7 @@
      "classroominvitation": "deleteClassroomInvitations",
      "contactdelegate": "processContactDelegates",
      "cseidentity": "processCSEIdentity",
+     "datastudiopermission": "processDataStudioPermissions",
      "delegate": "processDelegates",
      "drivefile": "deleteDriveFile",
      "drivefileacl": "deleteDriveFileACLs",
@@ -9672,7 +9690,6 @@
      "labelidlist": "deleteLabelIdList",
      "labellist": "deleteLabelList",
      "license": "deleteLicense",
-     "lookerstudiopermission": "processLookerStudioPermissions",
      "message": "processMessages",
      "note": "deleteInfoNotes",
      "noteacl": "deleteNotesACLs",
@@ -9851,6 +9868,8 @@
      "contactdelegate": "printShowContactDelegates",
      "cseidentity": "printShowCSEIdentities",
      "csekeypair": "printShowCSEKeyPairs",
+     "datastudioasset": "printShowDataStudioAssets",
+     "datastudiopermission": "printShowDataStudioPermissions",
      "delegate": "printShowDelegates",
      "diskusage": "printDiskUsage",
      "driveactivity": "printDriveActivity",
@@ -9884,8 +9903,6 @@
      "imap": "printShowImap",
      "label": "printShowLabels",
      "language": "printShowLanguage",
-     "lookerstudioasset": "printShowLookerStudioAssets",
-     "lookerstudiopermission": "printShowLookerStudioPermissions",
      "meetconference": "printShowMeetConferences",
      "meetparticipant": "printShowMeetParticipants",
      "meetrecording": "printShowMeetRecordings",
@@ -9983,6 +10000,8 @@
      "count": "showCountUser",
      "cseidentity": "printShowCSEIdentities",
      "csekeypair": "printShowCSEKeyPairs",
+     "datastudioasset": "printShowDataStudioAssets",
+     "datastudiopermission": "printShowDataStudioPermissions",
      "delegate": "printShowDelegates",
      "diskusage": "printDiskUsage",
      "driveactivity": "printDriveActivity",
@@ -10013,8 +10032,6 @@
      "imap": "printShowImap",
      "label": "printShowLabels",
      "language": "printShowLanguage",
-     "lookerstudioasset": "printShowLookerStudioAssets",
-     "lookerstudiopermission": "printShowLookerStudioPermissions",
      "meetconference": "printShowMeetConferences",
      "meetparticipant": "printShowMeetParticipants",
      "meetrecording": "printShowMeetRecordings",
@@ -10133,6 +10150,7 @@
      "chatsection": "createUpdateChatSection",
      "chatspace": "updateChatSpace",
      "cseidentity": "createUpdateCSEIdentity",
+     "datastudiopermission": "processDataStudioPermissions",
      "delegate": "updateDelegates",
      "document": "updateGoogleDocument",
      "drivefile": "updateDriveFile",
@@ -10145,7 +10163,6 @@
      "labelid": "updateLabelSettingsById",
      "labelsettings": "updateLabelSettings",
      "license": "updateLicense",
-     "lookerstudiopermission": "processLookerStudioPermissions",
      "meetspace": "updateMeetSpace",
      "othercontact": "processUserPeopleOtherContacts",
      "peoplecontact": "updateUserPeopleContacts",

@@ -39,7 +39,7 @@ YOU ASSUME ALL RISK ASSOCIATED WITH THE USE OF THIS SOFTWARE.
 Author:       Paul Ogier
 Created:      2026-09-13
 Updated:      2026-10-01
-Version:      0.4.2
+Version:      0.4.3
 Status:       Pre-release
 Python:       3.9+
 Dependencies: None. Stdlib only; never runs gam or the script it checks.
@@ -72,7 +72,7 @@ import sys
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
-__version__ = '0.4.2'
+__version__ = '0.4.3'
 
 HERE = Path(__file__).resolve().parent
 VERBS_DIR = HERE / 'verbs'
@@ -146,7 +146,8 @@ NOTES = {
 # getCIDeviceEntity and getCIDeviceUserEntity return doit=True): only a query is gated.
 # purge event is NOT gated: _purgeCalendarEvents skips the gated delete, then moves
 # the matched events into a temporary calendar and deletes it, without doit
-# (dev tenant, GAM 7.48.01, 2026-10-06: a live event was destroyed).
+# (dev tenant, GAM 7.48.01 and 7.48.20, 2026-10-06: a live event was destroyed;
+# reported as GAM-team/GAM#1997, re-test when it closes).
 DOIT_GATED = (
     {('user', v, o) for v in ('delete', 'modify', 'spam', 'trash', 'untrash', 'forward')
      for o in ('message', 'thread')}
@@ -249,6 +250,8 @@ OBJECT_LABEL = {
     'filter': 'Gmail filters', 'delegate': 'mail delegates', 'sendas': 'send-as addresses', 'org': 'org unit',
     'device': 'device', 'deviceuser': 'device user', 'photo': 'profile photo', 'token': 'OAuth tokens',
     'backupcode': '2SV backup codes', 'label': 'Gmail labels', 'drivetrash': 'Drive trash',
+    'datastudioasset': 'Looker Studio assets', 'datastudiopermission': 'Looker Studio sharing',
+    'chromebrowser': 'Chrome browsers',
 }
 
 GAM_NAMES = {'gam', 'gam7', 'gamadv', 'gamadv-xtd3', 'gam.py'}
@@ -291,6 +294,13 @@ LOCAL_RULES = [
     (UNKNOWN, r'(?:^|[\s;&|(])eval\s', 'runs text built at runtime as a command'),
 ]
 # gam named inside a quoted string handed to another program: bash -c "gam ...", "$(gam ...)"
+FD_REDIRECT = re.compile(r'(^|\s)\d(?=[<>])')
+# Commands whose arguments are file paths, never commands to run: a gam path or a
+# variable holding one after these ([[ -x $GAMDIR/gam ]], cp -a "$GAMDIR" ...) is data.
+FILE_COMMANDS = {'[', '[[', 'test', 'cp', 'mv', 'ls', 'ln', 'rm', 'rmdir', 'mkdir', 'cd', 'pushd', 'chmod', 'chown',
+                 'touch', 'stat', 'file', 'du', 'dirname', 'basename', 'realpath', 'readlink', 'tar', 'unzip', 'zip',
+                 'shasum', 'sha256sum', 'md5', 'md5sum', 'diff', 'rsync', 'scp', 'test-path', 'copy-item', 'move-item',
+                 'remove-item', 'get-item', 'get-childitem', 'robocopy', 'xcopy', 'copy', 'move', 'del', 'dir', 'mklink'}
 GAM_INSIDE = re.compile(r'(?:^|[\s"\'(=])(?:\S*[/\\])?gam(?:\.exe|\.py)?\s+[A-Za-z]')
 CREDENTIAL_RE = re.compile(r'(?i)oauth2(?:service)?\.(?:txt|json)|client_secrets\.json')
 NETWORK_COMMANDS = {'curl', 'wget', 'invoke-webrequest', 'invoke-restmethod', 'iwr', 'irm', 'nc', 'ncat', 'scp', 'sftp',
@@ -989,6 +999,9 @@ def _logical_lines(text, lang):
 def _tokenise(line, lang):
     """Split a line into words and shell punctuation; unbalanced quotes fall back to whitespace."""
     posix = lang in ('shell', 'gambatch')
+    # shlex splits 2>&1 into 2, >&, 1 and the redirect is dropped later, so a
+    # file-descriptor number glued to > or < is removed first; else "2" reads as an argument
+    line = FD_REDIRECT.sub(r'\1', line)
     try:
         lex = shlex.shlex(line, posix=posix, punctuation_chars=';&|()<>')
         lex.whitespace_split = True
@@ -1105,9 +1118,12 @@ class Checker:
         Echoed text and assignments (GAM=/path/gam, $gam = "...") are not hidden commands."""
         if not seg or seg[0].lower().strip('`"\'') in ECHO_WORDS or (len(seg) > 1 and seg[1] in ('=', '+=')):
             return False
+        if any(GAM_INSIDE.search(t) for t in seg):
+            return True  # result="$(gam delete ...)" is a command; GAM=/path/gam is not
+        head = next((t for t in seg if not re.fullmatch(r'[A-Za-z_]\w*=.*', t)), '')
+        if head.lower().strip('`"\'') in FILE_COMMANDS:
+            return False
         for t in seg:
-            if GAM_INSIDE.search(t):
-                return True  # result="$(gam delete ...)" is a command; GAM=/path/gam is not
             if not re.fullmatch(r'[A-Za-z_]\w*=.*', t) and _gam_name(t.strip('`"\''), gam_vars, wrappers):
                 return True
         return False
