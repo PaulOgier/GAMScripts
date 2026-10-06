@@ -55,7 +55,7 @@ def test_details(checker):
     assert any(f.level == g.DESTRUCTIVE and 'Gmail messages' in f.what for f in wrapper), wrapper
 
     fstring = findings('fstring.py')
-    assert any('can suspend' in f.note for f in fstring), fstring
+    assert any('suspends the account' in f.note for f in fstring), fstring
 
     forward = findings('forward.sh')
     assert any(f.security for f in forward), forward
@@ -138,7 +138,9 @@ def test_gates_and_wording(checker):
         ('gam user bob@example.com delete drivefile 1abc untrash', g.CHANGES, 'restores'),
         ('gam cros_sn 5CD1 issuecommand command wipe_users', g.READ, 'without doit'),
         ('gam cros_sn 5CD1 issuecommand command wipe_users doit', g.DESTRUCTIVE, 'erases'),
-        ('gam delete device devices/abc', g.READ, 'no doit'),
+        ('gam delete device devices/abc', g.DESTRUCTIVE, 'devices/abc'),
+        ('gam delete device query serial:123', g.READ, 'no doit'),
+        ('gam delete device devicesn 123', g.READ, 'no doit'),
         ('gam delete user bob@example.com', g.DESTRUCTIVE, '20 days'),
     ]
     failures = []
@@ -342,6 +344,105 @@ def test_paste():
         assert code == g.DESTRUCTIVE and 'curly' not in out, prompt + out
 
 
+def corpus_findings(checker):
+    """Every finding the checker gives on the fixtures and the blind set's shell lines."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('blind_set', HERE / 'real-world' / 'blind-adversarial-2026-09-13' / 'blind_set.py')
+    blind = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(blind)
+    found = [f for p in sorted(FIXTURES.iterdir()) if p.suffix != '.csv' for f in checker.check_file(p)]
+    for case in blind.CASES:
+        if case[2] == 'shell':
+            found += checker.check_text(case[1] + '\n', case[0], 'shell')
+    return [f for f in found if f.command]
+
+
+def test_invariants(checker):
+    """Rules that hold for every command, so a new verb or a refactor cannot reopen a class of bug.
+
+    narrowing: a command narrowed to a user, OU or selection is never described as tenant-wide.
+    named target: a change to something written out in the command (an address, a path) names it.
+    doit truth table: each doit-gated command, in its named and query forms, gets the level
+    GAM7's own gate gives it (source cited per row; the named-device and purge rows were run on
+    the dev tenant, 2026-10-06).
+    polarity: switching something off never reads the same as switching it on.
+    tenant guard: a change with no gam info domain check above it gets the NOTE; a guarded one does not.
+    """
+    found = corpus_findings(checker)
+    assert len(found) > 150, len(found)  # positive control: the corpus really was read
+
+    narrow = re.compile(r'\b(user|ou|org|orgunit|select)\s+(?!all\b)\S+', re.I)
+    bad = [f'{f.command} -> {f.what}' for f in found if 'whole tenant' in f.what and narrow.search(f.command)]
+    assert not bad, '\n'.join(bad)
+
+    def targets(cmd):
+        return [t.strip('"\'') for t in cmd.split()[1:] if re.search(r'@|^/', t.strip('"\''))]
+    vague = [f'{f.command} -> {f.what}' for f in found
+             if f.level in (g.CHANGES, g.DESTRUCTIVE) and targets(f.command) and '\n' not in f.command
+             and not any(t in f.what for t in targets(f.command))
+             and not re.search(r'listed in|selected by|runtime|each row|CSV|in the tenant|older GAM', f.what)]
+    assert not vague, '\n'.join(vague)
+
+    def level(cmd):
+        return [f.level for f in checker.check_text(cmd + '\n', '<t>', 'shell') if f.command][0]
+    R, C, D = g.READ, g.CHANGES, g.DESTRUCTIVE
+    CHANGE = 'changes'  # CHANGES or DESTRUCTIVE, whichever the verb is; never a dry run
+    DEVICE_VERBS = {'delete': ('device', 'deviceuser'), 'update': ('device', 'deviceuser'), 'wipe': ('device', 'deviceuser'),
+                    'cancelwipe': ('device', 'deviceuser'), 'approve': ('deviceuser',), 'block': ('deviceuser',)}
+    u = 'gam user bob@example.com'
+    table = [  # (DOIT_GATED key, command, level)
+        *[(('user', v, o), f'{u} {v} {o}s query x', R) for v in ('delete', 'modify', 'spam', 'trash', 'untrash', 'forward')
+          for o in ('message', 'thread')],
+        (('user', 'archive', 'message'), f'{u} archive messages query x', R),
+        (('user', 'forward', 'message'), f'{u} forward messages ids 123 to carol@example.com', C),  # 75588 ids skip the gate
+        *[(('user', v, o), f'{u} {v} {o}s ids 123', VERB) for v, VERB in (('delete', D), ('trash', D), ('spam', C))
+          for o in ('message', 'thread')],  # 75224: explicit ids skip the gate
+        (('user', 'delete', 'filerevision'), f'{u} delete filerevisions 1abc select 123', R),  # 59417 gated even by id
+        (('user', 'update', 'filerevision'), f'{u} update filerevisions 1abc select 123 keepforever', R),
+        (('user', 'delete', 'event'), f'{u} delete events primary eventid abc', R),  # 42390 gated even by id
+        (('user', 'delete', 'event'), f'{u} delete events primary eventid abc doit', D),
+        (('user', 'update', 'calattendees'), f'{u} update calattendees primary eventid abc delete carol@example.com', R),
+        (('calendar', 'deleteevent', None), 'gam calendar c@example.com deleteevent id abc', R),
+        (('calendar', 'delete', 'event'), 'gam calendar c@example.com delete event eventid abc', R),
+        (('main', 'delete', 'mobile'), 'gam delete mobile AbC123', D),  # 33996 named: doit=True
+        (('main', 'delete', 'mobile'), 'gam delete mobile query x', R),
+        (('main', 'update', 'mobile'), 'gam update mobile AbC123 action wipe', D),
+        (('main', 'update', 'mobile'), 'gam update mobile query:x action wipe', R),
+        *[(('main', v, o), f'gam {v} {o} {n}' + (' action wipe' if v == 'update' else ''), CHANGE)
+          for v, objs in DEVICE_VERBS.items()
+          for o, n in (('device', 'devices/abc'), ('deviceuser', 'devices/abc/deviceUsers/def')) if o in objs],  # 31617, 31652
+        *[(('main', v, o), f'gam {v} {o} query x' + (' action wipe' if v == 'update' else ''), R)
+          for v, objs in DEVICE_VERBS.items() for o in objs],
+        (None, f'{u} purge events primary matchfield summary x', D),  # 42889: not gated, destroys events
+        (None, 'gam calendar c@example.com purge event query x', D),
+        (None, 'gam delete device devicesn 123', R),
+    ]
+    def ok(got, want):
+        return got in (C, D) if want == CHANGE else got == want
+    wrong = [f'{cmd}: got {g.LEVEL_NAMES[level(cmd)]}, expected {want if want == CHANGE else g.LEVEL_NAMES[want]}'
+             for _, cmd, want in table if not ok(level(cmd), want)]
+    assert not wrong, '\n'.join(wrong)
+    uncovered = g.DOIT_GATED - {k for k, _, _ in table}
+    assert not uncovered, f'doit-gated commands with no truth-table row: {uncovered}'
+
+    def text(cmd):
+        f = [f for f in checker.check_text(cmd + '\n', '<t>', 'shell') if f.command][0]
+        return (f.what, f.note, f.security)
+    for on, off in ((f'{u} forward on carol@example.com keep', f'{u} forward off'),
+                    ('gam update user bob@example.com suspended on', 'gam update user bob@example.com suspended off'),
+                    ('gam suspend user bob@example.com', 'gam unsuspend user bob@example.com'),
+                    ('gam update group s@example.com add member bob@example.com',
+                     'gam update group s@example.com remove member bob@example.com')):
+        assert text(on) != text(off), (on, text(on))
+    assert not text(f'{u} forward off')[2], 'turning forwarding off is not a security change'
+
+    unguarded = 'gam delete user bob@example.com\n'
+    for script, expect in ((unguarded, 1), ('gam info domain\n' + unguarded, None),
+                           ('gam info domain | grep -q "Customer ID: C000" || exit 1\n' + unguarded, None),
+                           (unguarded + 'gam info domain\n', 1), ('gam print users\n', None)):
+        assert g.tenant_unguarded(checker.check_text(script, '<t>', 'shell'), '<t>') == expect, script
+
+
 def main():
     checker = g.Checker()
     n = test_fixture_verdicts(checker)
@@ -354,7 +455,8 @@ def main():
     test_verb_coverage()
     test_no_false_read_only(checker)
     test_paste()
-    print(f'ok: {n} fixtures, details, verb coverage, positive control, paste, gates, adversarial, inert')
+    test_invariants(checker)
+    print(f'ok: {n} fixtures, details, verb coverage, positive control, paste, gates, adversarial, inert, invariants')
 
 
 if __name__ == '__main__':

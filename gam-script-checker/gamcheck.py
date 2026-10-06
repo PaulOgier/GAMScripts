@@ -39,7 +39,7 @@ YOU ASSUME ALL RISK ASSOCIATED WITH THE USE OF THIS SOFTWARE.
 Author:       Paul Ogier
 Created:      2026-09-13
 Updated:      2026-10-01
-Version:      0.4.1
+Version:      0.4.2
 Status:       Pre-release
 Python:       3.9+
 Dependencies: None. Stdlib only; never runs gam or the script it checks.
@@ -72,7 +72,7 @@ import sys
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
-__version__ = '0.4.1'
+__version__ = '0.4.2'
 
 HERE = Path(__file__).resolve().parent
 VERBS_DIR = HERE / 'verbs'
@@ -123,6 +123,15 @@ VALUE_KEYWORDS = {'file', 'csvfile', 'gsheet', 'gdoc', 'gcsdoc', 'datafile', 'cs
                   'localfile', 'parentid', 'teamdriveid', 'shareddriveid', 'command', 'emailmatchpattern',
                   'emailclearpattern', 'emailretainpattern', 'product', 'productid', 'sku', 'skus'}
 
+# gam all <subtype>: GAM's suffixes, spelled out
+ALL_SUBTYPES = {'users_ns': 'non-suspended users', 'users_susp': 'suspended users',
+                'users_ns_susp': 'users (suspended and not)', 'users_arch': 'archived users',
+                'users_ns_arch': 'non-suspended and archived users', 'users_susp_arch': 'suspended and archived users'}
+
+GMAIL_ITEMS = {'message': 'message', 'messages': 'message', 'thread': 'thread', 'threads': 'thread'}
+TRUE_VALUES = {'on', 'true', 'yes', 'enable', 'enabled', '1'}
+FALSE_VALUES = {'off', 'false', 'no', 'disable', 'disabled', '0'}
+
 NOTES = {
     'suspend': 'blocks sign-in straight away; undone with unsuspend',
 }
@@ -132,16 +141,22 @@ NOTES = {
 # (_processMessagesThreads, archiveMessages, forwardMessagesThreads,
 # deleteFileRevisions, updateFileRevisions, _getCalendarDeleteEventOptions,
 # getUpdateDeleteCIDeviceOptions, _getUpdateDeleteMobileOptions,
-# updateCalendarAttendees). Gmail commands given explicit ids skip the check.
+# updateCalendarAttendees). Gmail commands given explicit ids skip the check, and so
+# does a mobile or Cloud Identity device named directly (getMobileDeviceEntity,
+# getCIDeviceEntity and getCIDeviceUserEntity return doit=True): only a query is gated.
+# purge event is NOT gated: _purgeCalendarEvents skips the gated delete, then moves
+# the matched events into a temporary calendar and deletes it, without doit
+# (dev tenant, GAM 7.48.01, 2026-10-06: a live event was destroyed).
 DOIT_GATED = (
-    {('user', v, o) for v in ('delete', 'modify', 'spam', 'trash', 'untrash', 'archive', 'forward')
+    {('user', v, o) for v in ('delete', 'modify', 'spam', 'trash', 'untrash', 'forward')
      for o in ('message', 'thread')}
+    | {('user', 'archive', 'message')}
     | {('user', 'delete', 'filerevision'), ('user', 'update', 'filerevision'), ('user', 'delete', 'event'),
-       ('user', 'purge', 'event'), ('user', 'update', 'calattendees'), ('calendar', 'deleteevent', None),
-       ('calendar', 'delete', 'event'), ('calendar', 'purge', 'event'), ('main', 'delete', 'mobile'),
+       ('user', 'update', 'calattendees'), ('calendar', 'deleteevent', None),
+       ('calendar', 'delete', 'event'), ('main', 'delete', 'mobile'),
        ('main', 'update', 'mobile')}
-    | {('main', v, o) for v in ('delete', 'update', 'cancelwipe', 'wipe', 'approve', 'block')
-       for o in ('device', 'deviceuser')}
+    | {('main', v, o) for v in ('delete', 'update', 'cancelwipe', 'wipe') for o in ('device', 'deviceuser')}
+    | {('main', 'approve', 'deviceuser'), ('main', 'block', 'deviceuser')}
 )
 # Of those, the ones whose max_to_<action> defaults to 1: with doit, GAM still
 # skips any user where more than one item matches unless max_to_... is given.
@@ -224,7 +239,7 @@ PHRASE = {
     'copy': 'copies', 'transfer': 'transfers', 'suspend': 'suspends', 'unsuspend': 'unsuspends',
     'undelete': 'restores', 'sync': 'syncs (adds and removes to match)', 'deprovision': 'deprovisions',
     'get': 'downloads', 'download': 'downloads', 'export': 'exports', 'sendemail': 'sends email',
-    'signout': 'signs out', 'turnoff2sv': 'turns off 2-Step Verification for',
+    'signout': 'signs out', 'forward': 'forwards', 'turnoff2sv': 'turns off 2-Step Verification for',
 }
 
 OBJECT_LABEL = {
@@ -466,6 +481,19 @@ class GamParser:
         return scope
 
     @staticmethod
+    def _value_after(rest, keyword):
+        """True/False for an on/off value after keyword, None when absent or decided at runtime."""
+        at = next((k for k, t in enumerate(rest) if norm(t) == keyword), None)
+        v = norm(rest[at + 1]) if at is not None and at + 1 < len(rest) else None
+        return True if v in TRUE_VALUES else False if v in FALSE_VALUES else None
+
+    @staticmethod
+    def _shown(tok):
+        if isinstance(tok, Dyn):
+            return f'{tok} (from each row)' if str(tok).startswith('~') else f'{tok} (set at runtime)'
+        return str(tok)
+
+    @staticmethod
     def _tok(a, i):
         return a[i] if 0 <= i < len(a) else None
 
@@ -543,7 +571,11 @@ class GamParser:
             return [Finding(ctx.file, line, UNKNOWN, f'gam {word} without a visible inner gam command',
                             short(['gam'] + a))]
         rows = count_rows(file_tok, ctx.base_dirs)
-        where = f'once per row of {file_tok}' + (f' ({rows} rows)' if rows is not None else ' (file not provided, row count unknown)')
+        filtered = any(norm(t) in ('matchfield', 'skipfield') for t in a[i + 2:inner_at])
+        if rows is not None and filtered:
+            where = f'once per row of {file_tok} that passes its matchfield/skipfield ({rows} rows before filtering)'
+        else:
+            where = f'once per row of {file_tok}' + (f' ({rows} rows)' if rows is not None else ' (file not provided, row count unknown)')
         # ~field and ~~field~~ are filled from each CSV row
         inner = [Dyn(t) if isinstance(t, str) and '~' in t and not isinstance(t, Dyn) else t for t in a[inner_at + 1:]]
         results = self.parse(inner, ctx, line)
@@ -565,7 +597,12 @@ class GamParser:
                 return Finding(ctx.file, line, UNKNOWN, f"'{verb}' on something decided at runtime ({obj_tok})",
                                short(['gam'] + a))
             return self._unrecognised(ctx, line, a, scope, a[i], obj_tok)
-        return self._finding(ctx, line, a, scope, verb, obj, a[i + 2:], entity)
+        rest = a[i + 2:]
+        named = ''
+        if scope == 'main' and not entity and rest and verb not in ('print', 'show') \
+                and norm(rest[0]) not in VALUE_KEYWORDS | {'devicesn'}:
+            named = self._shown(rest[0])
+        return self._finding(ctx, line, a, scope, verb, obj, rest, entity, named)
 
     def _subcommand(self, ctx, line, a, i, cmd):
         """oauth, audit, calendars, course(s) and resource(s), which each have their own sub-grammar."""
@@ -625,7 +662,7 @@ class GamParser:
             if sel == 'all':
                 sub = low(self._tok(a, i + 1)) or '?'
                 kind = 'cros' if sub == 'cros' else 'user'
-                entity, start = f'all {sub} in the tenant', i + 2
+                entity, start = f'all {ALL_SUBTYPES.get(sub, sub)} in the tenant', i + 2
             elif sel in ('datafile', 'csvdatafile', 'csvkmd'):
                 sub = low(self._tok(a, i + 1)) or ''
                 kind = 'cros' if sub.startswith('cros') else 'user'
@@ -684,8 +721,14 @@ class GamParser:
 
     # ----- classification
 
-    def _finding(self, ctx, line, a, scope, verb, obj, rest, entity):
-        """Build the finding for a recognised command, including argument-dependent levels."""
+    def _finding(self, ctx, line, a, scope, verb, obj, rest, entity, named=''):
+        """Build the finding for a recognised command, including argument-dependent levels.
+
+        named is the object the command acts on (gam delete user <x>), shown after the
+        object label so a reviewer can check the target, not just the kind of change."""
+        if scope == 'user' and verb == 'forward' and obj is None and norm(self._tok(rest, 0)) in GMAIL_ITEMS:
+            # setForward hands forward messages|threads to forwardMessagesThreads
+            obj, rest = GMAIL_ITEMS[norm(rest[0])], rest[1:]
         words = {norm(t) for t in rest if not isinstance(t, Dyn)}
         no_target = obj in ('message', 'thread', 'orphans', 'chatmember') or verb == 'issuecommand' or (scope, verb, obj) == ('main', 'sync', 'device')
         flags = self._flags(rest, positional=not no_target)
@@ -726,6 +769,9 @@ class GamParser:
                         notes.append('removes every member not in the list')
             else:
                 key = None  # a settings update: preview is not accepted there
+        if verb == 'purge' and obj == 'event':
+            notes.append('deletes the matched events permanently even without doit, though GAM prints "Not Deleted"')
+            undo = 'none: the events skip the calendar trash'
         if obj == 'drivefile' and verb == 'delete':
             if 'purge' in words:
                 undo = UNDO[('purge', 'drivefile')]
@@ -745,9 +791,10 @@ class GamParser:
                 level, notes = DESTRUCTIVE, notes + [f'action {action} erases the device']
             elif action and norm(action).startswith('deprovision'):
                 level, notes = DESTRUCTIVE, notes + ['deprovisions the ChromeOS device']
-        # getMobileDeviceEntity sets doit itself for named devices; only a query needs it
-        named_mobile = obj == 'mobile' and 'query' not in words and not (low(self._tok(rest, 0)) or '').startswith('query:')
-        if key in DOIT_GATED and not (obj in ('message', 'thread') and 'ids' in words) and not named_mobile:
+        # A device named directly gets doit from GAM itself; only a query (or devicesn) needs it
+        named_device = (obj in ('mobile', 'device', 'deviceuser') and not words & {'query', 'devicesn'}
+                        and not (low(self._tok(rest, 0)) or '').startswith('query:'))
+        if key in DOIT_GATED and not (obj in ('message', 'thread') and 'ids' in words) and not named_device:
             if 'doit' in flags:
                 if key in MAX_TO_ONE and not any(w.startswith('maxto') for w in words):
                     notes.append(f'GAM skips any user where more than 1 item matches, unless max_to_{verb} is given')
@@ -779,8 +826,15 @@ class GamParser:
             if 'password' in words:
                 security = 'sets the account password'
             if 'suspended' in words:
-                notes.append('can suspend the account')
-        if verb in SECURITY_VERBS:
+                state = self._value_after(rest, 'suspended')
+                notes.append({True: 'suspends the account', False: 'unsuspends the account'}.get(state, 'can suspend the account'))
+            if words & {'ou', 'org', 'orgunit'}:
+                notes.append('moves the account to another OU, which can change its policies and licences')
+        if verb == 'forward' and obj in ('message', 'thread'):
+            security = 'sends copies of existing mail to another address'
+        elif verb == 'forward' and obj is None and self._value_after(['forward'] + list(rest), 'forward') is False:
+            what = f'turns off mail forwarding, for {entity}'
+        elif verb in SECURITY_VERBS:
             security = SECURITY_VERBS[verb]
         elif obj in SECURITY_OBJECTS and (level > READ or obj == 'backupcode'):
             security = SECURITY_OBJECTS[obj]
@@ -790,6 +844,10 @@ class GamParser:
             phrase = PHRASE.get(verb, verb)
             target = OBJECT_LABEL.get(obj, obj) if obj else ''
             what = ' '.join(p for p in (phrase, target) if p)
+            if named:
+                what = f'{what} {named}'
+            if (verb, obj) == ('transfer', 'drive') and rest:
+                what = f'{what} to {self._shown(rest[0])}'
             if entity:
                 what = f'{what}, for {entity}' if not entity.startswith('for ') else f'{what}, {entity}'
         if dry:
@@ -1579,6 +1637,20 @@ def verdict(findings):
 DOTS = ['\U0001F7E2', '\U0001F7E0', '⚪', '\U0001F534', '\U0001F534']  # green, orange, white, red, red; by level
 
 
+def tenant_unguarded(findings, path):
+    """Line of the first change in the checked file when no gam info domain comes before it, else None.
+
+    A script run under the wrong gam.cfg section changes the wrong tenant; reading
+    gam info domain first and stopping on a customer-ID mismatch is the guard."""
+    own = sorted((f for f in findings if f.file == path), key=lambda f: f.line)
+    for f in own:
+        if re.search(r'\binfo\s+domain\b', f.command, re.I):
+            return None
+        if f.level in (CHANGES, DESTRUCTIVE):
+            return f.line
+    return None
+
+
 def can_print_dots(stream):
     """True when the stream can encode the level dots.
 
@@ -1604,6 +1676,10 @@ def render(path, findings, tables, quiet=False, dots=False):
            f'VERDICT: {dot(v)}{LEVEL_NAMES[v]}',
            '  ' + ', '.join(f'{n} {k.lower()}' for k, n in counts.items() if n)
            + (f'; {sec} security-sensitive' if sec else ''), '']
+    unguarded = tenant_unguarded(findings, str(path))
+    if unguarded:
+        out += [f'NOTE: nothing checks which tenant GAM is pointed at before the first change (L{unguarded}).',
+                '      A gam info domain check that stops on the wrong customer ID belongs above it.', '']
     older = sorted({f.note.split(';')[0][len('written for '):] for f in findings if f.note.startswith('written for ')})
     if older:
         out += [f'NOTE: parts of this script are written for {", ".join(older)} and will fail on GAM7.', '']
