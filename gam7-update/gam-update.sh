@@ -98,7 +98,15 @@ echo "rollback copy: $backup"
 installer=$(mktemp)
 curl -fsSL -o "$installer" \
   https://raw.githubusercontent.com/GAM-team/GAM/master/src/gam-install.sh
-bash "$installer" -l -p false -d "$(dirname "$GAMDIR")"
+# The installer clears lib/ with rm -frv, which prints every file it removes
+# (a bare path from BSD rm, "removed '<path>'" from GNU rm):
+# several hundred lines that bury the result, and land in a cron log on every
+# upgrade. Those lines are dropped and counted; everything else, errors
+# included, passes through. pipefail keeps the installer's exit code.
+bash "$installer" -l -p false -d "$(dirname "$GAMDIR")" 2>&1 |
+  awk -v lib="$GAMDIR/lib" '{ s = $0; sub(/^removed (directory )?[^\/]*/, "", s) }
+    index(s, lib) == 1 { n++; next } { print }
+    END { if (n) print "(" n " old files removed from " lib "; list hidden)" }'
 rm -f "$installer"
 
 # Ask GAM again rather than trusting the installer's own report. Exit 0 now
