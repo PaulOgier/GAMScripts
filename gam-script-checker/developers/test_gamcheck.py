@@ -69,6 +69,26 @@ def test_details(checker):
     batch = findings('batch_follow.sh')
     assert any('stale@example.com' in f.command and 'cleanup.txt' in f.file for f in batch), batch
 
+    # A report narrowed to one user, an OU or a selection is not tenant-wide; only an unnarrowed one is.
+    def what(text):
+        return [f.what for f in checker.check_text(text, '', 'shell') if f.command]
+    assert what('gam report login user user@example.com start 2026-08-01\n') == ['reads audit report, for user user@example.com']
+    assert what('gam report drive ou /Staff\n') == ['reads audit report, for the users in OU /Staff']
+    assert what('gam report admin select group staff@example.com\n') == ['reads audit report, for the users selected by group staff@example.com']
+    assert what('gam report usage user user user@example.com\n') == ['reads audit report, for user user@example.com']
+    assert what('gam report login user all\n') == ['reads audit report, for the whole tenant']
+    assert what('gam report customer\n') == ['reads audit report, for the whole tenant']
+    assert what('gam sendemail user@example.com subject hi\n') == ['sends email']
+
+    # A named mobile device is acted on without doit (verified on dev, 2026-10-06); only a query is gated.
+    def level(text):
+        return [f.level for f in checker.check_text(text, '', 'shell') if f.command]
+    assert level('gam update mobile AbC123 action wipe\n') == [g.DESTRUCTIVE]
+    assert level('gam delete mobile AbC123\n') == [g.DESTRUCTIVE]
+    assert level('gam update mobile query email:user@example.com action wipe\n') == [g.READ]
+    assert level('gam update mobile query:email:user@example.com action wipe\n') == [g.READ]
+    assert level('gam update mobile query email:user@example.com action wipe doit\n') == [g.DESTRUCTIVE]
+
     # A paste that only runs a script is checked through the script it names.
     script = findings('script_follow.sh')
     assert any('cleanup.txt' in f.file and 'from batch_follow.sh run at' in f.note for f in script), script
@@ -196,7 +216,8 @@ def test_adversarial(checker):
         ('gam cros_sn doit issuecommand command wipe_users', g.READ),
         ('gam update group s@example.com sync member preview file u.txt', g.READ),
         ('gam user bob@example.com collect orphans preview', g.READ),
-        ('gam update mobile abc action wipe', g.READ),
+        ('gam update mobile abc action wipe', g.DESTRUCTIVE),
+        ('gam update mobile query x action wipe', g.READ),
         ('echo "gam delete user frank@example.com"\ngam info domain', g.READ),
         ('GAM=/usr/local/bin/gam\n$GAM info domain', g.READ),
     ]

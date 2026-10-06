@@ -39,7 +39,7 @@ YOU ASSUME ALL RISK ASSOCIATED WITH THE USE OF THIS SOFTWARE.
 Author:       Paul Ogier
 Created:      2026-09-13
 Updated:      2026-10-01
-Version:      0.4.0
+Version:      0.4.1
 Status:       Pre-release
 Python:       3.9+
 Dependencies: None. Stdlib only; never runs gam or the script it checks.
@@ -72,7 +72,7 @@ import sys
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
-__version__ = '0.4.0'
+__version__ = '0.4.1'
 
 HERE = Path(__file__).resolve().parent
 VERBS_DIR = HERE / 'verbs'
@@ -422,7 +422,8 @@ class GamParser:
         if word == 'loop' or word in tb['BATCH_CSV_COMMANDS']:
             results = self._wrapper(word, a, i, ctx, line)
         elif word in tb['MAIN_COMMANDS']:
-            results = [self._finding(ctx, line, a, 'main', word, None, a[i + 1:], 'for the whole tenant')]
+            scope = self._report_scope(a[i + 1:]) if word == 'report' else ''
+            results = [self._finding(ctx, line, a, 'main', word, None, a[i + 1:], scope)]
         elif word in tb['MAIN_COMMANDS_WITH_OBJECTS']:
             results = [self._with_object(ctx, line, a, i, 'main', tb['MAIN_COMMANDS_WITH_OBJECTS'],
                                          tb['MAIN_COMMANDS_OBJ_ALIASES'], '')]
@@ -437,6 +438,32 @@ class GamParser:
         return results
 
     # ----- grammar pieces
+
+    def _report_scope(self, rest):
+        """Who a gam report covers, so a one-user report is not described as tenant-wide.
+
+        GAM7 doReport narrows user reports with user <x>|all, ou|org|orgunit <path> or
+        select <entity>, the last one given winning; report usage user also takes a bare
+        user selector. Customer reports are always tenant-wide."""
+        kind = norm(self._tok(rest, 0))
+        k = 2 if kind == 'usage' else 1
+        if kind in ('customer', 'customers', 'domain', 'usageparameters') or kind == 'usage' and norm(self._tok(rest, 1)) == 'customer':
+            return 'for the whole tenant'
+        scope = 'for the whole tenant'
+        while k < len(rest):
+            w, v = norm(rest[k]), self._tok(rest, k + 1)
+            if v is not None and w == 'user':
+                scope = 'for the whole tenant' if norm(v) == 'all' else f'for user {v}'
+            elif v is not None and w in ('ou', 'org', 'orgunit'):
+                scope = f'for the users in OU {v}'
+            elif w == 'select' or kind == 'usage' and w in ('csv', 'csvfile', 'file', 'csvdata'):
+                picked = rest[k + 1:k + 3] if w == 'select' else rest[k:k + 2]
+                scope = f'for the users selected by {short(picked, 60)}'
+            else:
+                k += 1
+                continue
+            k += 2
+        return scope
 
     @staticmethod
     def _tok(a, i):
@@ -718,7 +745,9 @@ class GamParser:
                 level, notes = DESTRUCTIVE, notes + [f'action {action} erases the device']
             elif action and norm(action).startswith('deprovision'):
                 level, notes = DESTRUCTIVE, notes + ['deprovisions the ChromeOS device']
-        if key in DOIT_GATED and not (obj in ('message', 'thread') and 'ids' in words):
+        # getMobileDeviceEntity sets doit itself for named devices; only a query needs it
+        named_mobile = obj == 'mobile' and 'query' not in words and not (low(self._tok(rest, 0)) or '').startswith('query:')
+        if key in DOIT_GATED and not (obj in ('message', 'thread') and 'ids' in words) and not named_mobile:
             if 'doit' in flags:
                 if key in MAX_TO_ONE and not any(w.startswith('maxto') for w in words):
                     notes.append(f'GAM skips any user where more than 1 item matches, unless max_to_{verb} is given')
