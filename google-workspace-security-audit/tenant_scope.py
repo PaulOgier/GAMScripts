@@ -15,6 +15,12 @@ Grobler's request for help with his tenant-scoping batch script on the
 google-apps-manager group inspired us to publish it for the community
 (https://groups.google.com/g/google-apps-manager/c/9r_AeuiWOSg).
 
+The tenant-settings checks against the CISA SCuBA Google Workspace baselines
+use CISA's ScubaGoggles (https://github.com/cisagov/ScubaGoggles, public
+domain) as a guide: its rules for what passes, and its reading of Google's
+documented policy defaults. The checks themselves are this script's own and
+run on the data GAM collects.
+
 Licence: Apache License 2.0 (full text in LICENSE at the repository root)
 
 In plain English:
@@ -42,8 +48,8 @@ YOU ASSUME ALL RISK ASSOCIATED WITH THE USE OF THIS SOFTWARE.
 
 Author:       Paul Ogier
 Created:      2026-08-15
-Updated:      2026-10-01
-Version:      1.6.2
+Updated:      2026-10-07
+Version:      1.7.0
 Status:       Production
 Python:       3.9+
 Dependencies: GAM ADV X (GAM7) only. Stdlib only on the Python side.
@@ -61,8 +67,10 @@ A READ-ONLY Google Workspace tenant audit. Three stages, each restartable:
             findings (severity, plain-English title, what it means,
             remediation, evidence rows).
   render  : a single self-contained HTML report (print stylesheet -> clean
-            PDF). Preflight results and any modules that could not run are
-            always listed - nothing is silently absent.
+            PDF), compared with the previous completed run of the same
+            customer, and an internal qa_report.html that says whether the
+            report is ready to send. Preflight results and any modules that
+            could not run are always listed - nothing is silently absent.
 
 Safety posture
 --------------
@@ -83,11 +91,11 @@ Module tiers
      Classroom courses, rosters, invitations and guardians on Education
      tenants)
   2  per-user Gmail/Calendar settings via domain-wide delegation
-     (send-as, delegates, forwarding, IMAP/POP, ASPs, backup-code counts,
-     calendar ACLs)
+     (send-as, delegates, forwarding, filters, IMAP/POP, ASPs,
+     backup-code counts, calendar ACLs)
   3  heavy Drive scans, skippable (external sharing outbound and inbound,
      Shared Drive external exposure, Sites inventory)
-  4  off by default, enabled with --full (filters, vacation, browsers,
+  4  off by default, enabled with --full (vacation, browsers,
      context-aware access levels, mailbox profiles, file counts)
   DNS  per-domain MX/SPF/DKIM/DMARC via the tamingdns.com MCP endpoint,
      with a dns.google fallback when it is unreachable
@@ -100,6 +108,11 @@ Example usage:
   python tenant_scope.py --admin admin@example.com --run-dir <dir>  # resume
   python tenant_scope.py --admin admin@example.com --full --grant-temp-access
   python tenant_scope.py --render-only --run-dir <dir>  # re-render, no GAM
+  python tenant_scope.py --tenant clienta --admin admin@clienta.example
+  python tenant_scope.py --all --yes --no-open       # every tenant in tenants.json
+
+Exit codes: 0 complete; 1 preflight failed or wrong tenant; 2 complete but
+some modules could not run; 130 interrupted. --all returns the worst, in that order of priority.
 
 Notes that matter when reading results:
   - "all users" in GAM iterates ACTIVE users only. By default this audit does
@@ -111,6 +124,29 @@ Notes that matter when reading results:
     in the report where they apply.
 
 Changelog
+  2026-10-07 - v1.7.0 - New findings: files made public or shared outside
+                        in the last 30 days (Drive audit log), domain-wide
+                        delegation granted in the last 30 days, Gmail
+                        filters matching business-email-compromise
+                        patterns, super admins without a phishing-resistant
+                        second factor, files shared with target audiences,
+                        and settings below the CISA SCuBA Google Workspace
+                        baseline (each row cites its requirement). Settings
+                        the Policy API omits are judged at Google's
+                        documented default (policy_defaults.json). Each run
+                        is compared with the last completed run of the same
+                        customer (resolved, new, rows new this month), with
+                        a posture score and six-run trend; a finding whose
+                        data was incomplete in either run is not compared,
+                        never resolved, and a module that ran in neither run
+                        is left out. --tenants/--tenant/--all with a
+                        customer-ID hard stop and break-glass accounts;
+                        qa_report.html delivery gate; exit codes 0/1/2/130,
+                        with not-applicable modules (Classroom without an
+                        Education licence) not counted. Shared Drive scan
+                        reads ACLs only for items shared beyond the drive's
+                        members. Gmail filters run by default. Log lines
+                        carry one tag.
   2026-10-02 - v1.6.2 - Shared Drives are listed as one of their own
                         active members (organizers first), so no grant is
                         needed and an unlicensed audit admin works;
@@ -212,6 +248,7 @@ Changelog
 
 import argparse
 import csv
+import hashlib
 import io
 import json
 import logging
@@ -233,7 +270,7 @@ from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 # `print policies formatjson` puts a whole policy JSON in one cell; the csv
 # module's default 128 KB field limit raises mid-check on a large DLP rule.
@@ -243,7 +280,7 @@ csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
 # CONFIGURATION
 ###############################################################################
 
-SCRIPT_VERSION = "1.6.2"
+SCRIPT_VERSION = "1.7.0"
 
 # [OPTIONAL] Startup check against the remote VERSION file. Fail-silent.
 CHECK_FOR_UPDATES = True
@@ -257,6 +294,32 @@ UPDATE_CHECK_URL = (
 # installer writes a shell alias, not a PATH entry, so which() misses it)
 # and the conventional Windows path C:\GAM7\gam.exe.
 GAM_COMMAND = "gam"
+
+# The report credit, shown in the header and footer of every report. The
+# report checks it in the browser and shows a notice instead of its contents
+# if either credit was edited, removed, hidden or pointed elsewhere. The
+# NOTICE file at the repository root carries the same attribution, which
+# Apache 2.0 clause 4(d) requires redistributions to keep.
+CREDIT_NAME = "Outsource House (OSH.co.za)"
+CREDIT_URL = "https://osh.co.za"
+CREDIT_PREFIX = "Prepared by"
+SCRIPT_DIR = Path(__file__).resolve().parent
+# Where tenants.json is looked for when --tenants is not given, in order.
+# JSON rather than TOML: the script supports Python 3.9 and tomllib is 3.11.
+TENANTS_FILE_CANDIDATES = [
+    Path("~/.osh/workspace-audit/tenants.json").expanduser(),
+    SCRIPT_DIR / "tenants.json",
+]
+# Modules behind the Critical checks: if one of these failed, the report may
+# be missing its most serious findings and must not go out unreviewed.
+DELIVERY_CRITICAL_MODULES = ("users", "forwards", "asps", "mydrive_external",
+                             "shareddrive_external")
+# Google's documented default for each policy field the API leaves out when
+# it was never changed (policy_defaults.json says where it comes from).
+POLICY_DEFAULTS_FILE = SCRIPT_DIR / "policy_defaults.json"
+# Exit codes, worst last, for --all to report the worst across tenants.
+EXIT_PRIORITY = [0, 2, 1, 130]
+FOLDER_MIME = "application/vnd.google-apps.folder"
 GAM_FALLBACK_PATHS = [
     Path.home() / "bin" / "gam7" / "gam",
     Path(r"C:\GAM7\gam.exe"),
@@ -404,7 +467,9 @@ class _PlainFormatter(logging.Formatter):
 def setup_logging(run_dir: Path):
     global logger
     _force_utf8_console()
-    fmt = "%(asctime)s [%(levelname)s] %(message)s"
+    # No level name: print_warning and print_error tag their own lines, and
+    # the level name doubled it ("[ERROR] [ERROR] [CRITICAL] ...").
+    fmt = "%(asctime)s %(message)s"
     file_handler = logging.FileHandler(run_dir / "tenant_scope.log",
                                        encoding="utf-8")
     file_handler.setFormatter(_PlainFormatter(fmt))
@@ -796,6 +861,14 @@ MODULES: List[Dict] = [
                                           + LOGIN_BLOCKED_EVENTS
                                           + LOGIN_FAILURE_EVENTS)],
          timeout=1800),
+    # The cheap monthly view of new Drive exposure. Event names checked
+    # against the Reports API Drive appendix, 2026-10-07; tier 1 because it
+    # is one tenant-level report, like the login report above.
+    dict(key="report_drive_sharing",
+         title="Drive sharing changes (last 30 days, audit log)", tier=1,
+         args=["report", "drive", "start", f"-{ACTIVITY_DAYS}d", "events",
+               "change_document_visibility,change_user_access"],
+         timeout=1800),
     # createTime filter is mandatory in practice: one unfiltered "User
     # reported spam spike" alert embeds every reported message body.
     dict(key="alerts", title="Alert Center alerts (last 30 days)", tier=1,
@@ -816,6 +889,11 @@ MODULES: List[Dict] = [
     dict(key="forwardingaddresses", title="Forwarding addresses", tier=2,
          args=["all", "users", "print", "forwardingaddresses"],
          scopes=[SCOPE_GMAIL_SHARING]),
+    # Default since v1.7.0: filters hiding payment mail are one of the first
+    # signs of a mailbox takeover, worth a sweep every month.
+    dict(key="filters", title="Gmail filters", tier=2,
+         args=["all", "users", "print", "filters"],
+         scopes=[SCOPE_GMAIL_BASIC], timeout=3600),
     dict(key="imap", title="IMAP settings", tier=2,
          args=["all", "users", "print", "imap"],
          scopes=[SCOPE_GMAIL_BASIC]),
@@ -848,9 +926,6 @@ MODULES: List[Dict] = [
     dict(key="sites", title="Google Sites inventory", tier=3,
          args=None, collector="sites", scopes=[SCOPE_DRIVE], timeout=3600),
     # ---- Tier 4: off by default (--full) ----
-    dict(key="filters", title="Gmail filters", tier=4,
-         args=["all", "users", "print", "filters"],
-         scopes=[SCOPE_GMAIL_BASIC], timeout=3600),
     dict(key="vacation", title="Vacation responders", tier=4,
          args=["all", "users", "print", "vacation"],
          scopes=[SCOPE_GMAIL_BASIC], timeout=3600),
@@ -886,6 +961,41 @@ PER_USER_SKIP_MARKERS = (
     "Service not applicable",
     "Does not exist",
 )
+
+# A per-user line naming an account that has no such service at all, or no
+# longer exists: there is nothing to read for it, so it is not a gap.
+_NO_SERVICE_RE = re.compile(
+    r"User: ([^,\s]+), .*(?:Service/App not enabled|Service not applicable|"
+    r"Does not exist)")
+_FAILURE_RE = re.compile(r"error|fail|timed out|denied|quota|exceed|invalid|"
+                         r"not authori", re.IGNORECASE)
+NO_SERVICE_NOTE = "nothing to read for account(s) without the service: "
+
+
+def no_service_only(err: str) -> Optional[List[str]]:
+    """The accounts GAM skipped for having no such service, when that is the
+    ONLY kind of failure in its stderr; None when anything else failed.
+
+    Without this, one account with Gmail switched off left every Gmail module
+    partial every month, so its findings were never compared month to month
+    and the delivery gate always held."""
+    users = []
+    for line in err.splitlines():
+        text = line.strip()
+        if not text or text.startswith(("Getting ", "Got ")):
+            continue
+        match = _NO_SERVICE_RE.search(text)
+        if match:
+            users.append(match.group(1).lower())
+        elif _FAILURE_RE.search(text):
+            return None
+    return sorted(set(users))
+
+
+def _no_service_result(rows: int, users: List[str]) -> Tuple[str, int, str]:
+    return (("empty" if rows == 0 else "ok"), rows,
+            NO_SERVICE_NOTE + ", ".join(users))
+
 
 # print browsers without Chrome browser management access fails 403.
 BROWSERS_AUTH_ERROR = "Forbidden"
@@ -1136,6 +1246,20 @@ def preflight(ctx: RunContext, modules: List[Dict]) -> bool:
             customer = info.get("customer_id", "?")
             ctx.manifest["meta"]["primary_domain"] = domain
             ctx.manifest["meta"]["customer_id"] = customer
+            expected = (getattr(args, "tenant_entry", None) or {}).get(
+                "customer_id")
+            if expected and customer != expected:
+                # The GAM config named for this tenant answers for another
+                # one. Never collect: the report would carry the wrong
+                # client's data under this client's name.
+                table.append(("Tenant", f"{domain} (customer {customer})",
+                              f"NOT {expected} as tenants.json says; run "
+                              "aborted"))
+                ctx.manifest["preflight"] = [list(r) for r in table]
+                ctx.save()
+                print_error(f"Wrong tenant: GAM answered for {customer} "
+                            f"({domain}), tenants.json expects {expected}.")
+                return False
             table.append(("Tenant", f"{domain} (customer {customer})",
                           "Confirmed by operator" if not args.yes
                           else "Confirmed via --yes"))
@@ -1379,6 +1503,7 @@ def collect_simple(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
     # GAM reports a skipped mailbox on stderr; searching the CSV as well made
     # a signature containing "Does not exist" flip a clean module to partial.
     per_user_skips = any(marker in err for marker in PER_USER_SKIP_MARKERS)
+    no_service = no_service_only(err) if per_user_skips else None
 
     def keep():
         if out_path is None or not out_path.exists():
@@ -1387,6 +1512,8 @@ def collect_simple(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
     if rc == 0 or (rc == 60 and header_only):
         # Exit 60 with a header-only CSV is GAM for "no rows", not a failure.
         keep()
+        if no_service:
+            return _no_service_result(rows, no_service)
         if per_user_skips:
             # A batched scan exits 0 even when a mailbox failed: the failure
             # happened in a child process. Only stderr carries it, so without
@@ -1405,6 +1532,8 @@ def collect_simple(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
         # Some users were skipped and the rest simply had nothing to report:
         # partial coverage over an empty result, not a module failure.
         keep()
+        if no_service:
+            return _no_service_result(0, no_service)
         note = err.strip().splitlines()[-1:] or [""]
         return "partial", 0, f"some users failed - exit {rc}: {note[0]}"
     if not header_only:
@@ -1413,6 +1542,8 @@ def collect_simple(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
         # user's rows. Discarding those rows would lose good data; keep them
         # and say plainly that coverage is partial.
         keep()
+        if no_service:
+            return _no_service_result(rows, no_service)
         note = (err or out).strip().splitlines()[-1:] or ["unknown error"]
         return "partial", rows, f"some users failed - exit {rc}: {note[0]}"
     note = (err or out).strip().splitlines()[-1:] or ["unknown error"]
@@ -1472,6 +1603,9 @@ def collect_backupcodes(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
         reduced.append({"User": col(row, "User"),
                         "verificationCodesCount": count})
     write_rows(ctx.csv_path(mod["key"]), reduced)
+    no_service = no_service_only(err) if failed else None
+    if no_service:
+        return _no_service_result(len(reduced), no_service)
     if failed:
         # One mailbox failing (Gmail off, deleted mid-run) used to blank the
         # whole finding; the other users' counts are still good data.
@@ -1599,29 +1733,78 @@ def collect_sd_external(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
     grant_errors: List[str] = []
     errors = 0
 
-    def scan(drive_id: str, drive_name: str, as_user: str) -> Tuple[bool, str]:
-        """List one drive as one user; rows are kept only on success."""
-        rc, out, err = run_gam(
-            ["user", as_user, "print", "filelist",
-             "select", "shareddriveid", drive_id, "fields",
-             "id,name,mimeType,basicpermissions"] + pm,
-            timeout=mod.get("timeout", 3600), dry_run=ctx.args.dry_run)
+    def listed(args: List[str]) -> Tuple[bool, str, str]:
+        """One filelist call: (ok, csv text, why it failed)."""
+        rc, out, err = run_gam(args, timeout=mod.get("timeout", 3600),
+                               dry_run=ctx.args.dry_run)
         ctx.stderr_log(mod["key"], err)
         if ctx.args.dry_run:
-            return True, ""
+            return True, "", ""
         # A member whose Drive is off gets exit 60 and a header-only CSV,
         # the same shape as an empty drive; only stderr tells them apart.
         # Without this check the drive reads as scanned and clean.
         skipped = any(m in err for m in PER_USER_SKIP_MARKERS)
         if not skipped and (rc == 0 or (rc == 60 and is_header_only(out))):
+            return True, out, ""
+        return False, "", (err.strip().splitlines()[-1] if err.strip()
+                           else f"exit {rc}")
+
+    def scan(drive_id: str, drive_name: str, as_user: str) -> Tuple[bool, str]:
+        """List one drive as one user; rows are kept only on success.
+
+        The Drive API returns no permissions for Shared Drive files in a
+        list, so asking for them makes GAM fetch each file's ACL with its
+        own call: 5,000 files took 35 minutes. Instead the drive is listed
+        with hasAugmentedPermissions (true when a file has permissions of
+        its own, beyond the drive's members), and ACLs are fetched only for
+        those files. Drive members are checked separately from
+        shareddriveacls.
+
+        Files inside a folder shared outside inherit that sharing and are
+        NOT flagged themselves (verified on dev 2026-10-07), so a flagged
+        folder is listed with everything under it: per-file calls are spent
+        only on the contents of folders shared outside."""
+        ok, out, why = listed(
+            ["user", as_user, "print", "filelist",
+             "select", "shareddriveid", drive_id, "fields",
+             "id,name,mimeType,hasaugmentedpermissions"])
+        if not ok:
+            return False, why
+        listing = list(csv.DictReader(io.StringIO(out)))
+        ctx.manifest["meta"].setdefault("shared_drive_file_counts", {})[
+            drive_id] = len(listing)
+        flagged = [r for r in listing
+                   if truthy(col(r, "hasAugmentedPermissions"))]
+        if not flagged and not ctx.args.dry_run:
+            return True, ""
+        is_folder = lambda r: col(r, "mimeType") == FOLDER_MIME
+        seen = set()
+        for kind, picked, extra in (
+                ("files", [r for r in flagged if not is_folder(r)],
+                 ["norecursion"]),
+                ("folders", [r for r in flagged if is_folder(r)],
+                 ["showparent"])):
+            if not picked and not ctx.args.dry_run:
+                continue
+            id_file = ctx.run_dir / f"_sd_flagged_{kind}_{drive_id}.csv"
+            write_rows(id_file, [{"id": r["id"]} for r in picked])
+            ok, out, why = listed(
+                ["user", as_user, "print", "filelist",
+                 "select", "csvfile", f"{id_file}:id"] + extra
+                + ["fields", "id,name,mimeType,basicpermissions"] + pm)
+            if not ok:
+                return False, why
             for row in csv.DictReader(io.StringIO(out)):
+                # A flagged file inside a flagged folder comes back twice.
+                key = (row.get("id"), row.get("permission.id"))
+                if key in seen:
+                    continue
+                seen.add(key)
                 row["shareddrive.id"] = drive_id
                 row["shareddrive.name"] = drive_name
                 row["shareddrive.scannedAs"] = as_user
                 rows.append(row)
-            return True, ""
-        return False, (err.strip().splitlines()[-1] if err.strip()
-                       else f"exit {rc}")
+        return True, ""
 
     for drive in drives:
         if shutdown_requested:
@@ -1833,7 +2016,9 @@ def collect_classroom(ctx: RunContext, mod: Dict) -> Tuple[str, int, str]:
     after the tenant-level pool (a non-simple collector lands in the heavy
     pass), so licenses.csv is on disk by then."""
     if not education_skus_held(ctx):
-        return "skipped", 0, "no Education licence held; Classroom not audited"
+        # "n/a", not "skipped": nothing failed, so it must not turn a
+        # complete run into exit 2 on every non-Education tenant.
+        return "n/a", 0, "no Education licence held; Classroom not audited"
     status, rows, note = collect_simple(ctx, mod)
     if status not in ("ok", "empty") or ctx.args.dry_run:
         return status, rows, note
@@ -1943,6 +2128,8 @@ def _record(ctx: RunContext, mod: Dict, status: str, rows: int, note: str,
         label += f" - {note}"
     if status in ("ok", "empty", "dry-run"):
         print_success(label)
+    elif status == "n/a":
+        print_info(label)
     elif status in ("skipped", "partial"):
         print_warning(label)
     else:
@@ -2015,11 +2202,18 @@ SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "INFO"]
 
 
 class Finding:
-    """One report finding: fixed client-facing copy plus evidence rows."""
+    """One report finding: fixed client-facing copy plus evidence rows.
+
+    id_field names the evidence column that identifies a row across runs, so
+    the month-to-month comparison can say which accounts or files were fixed,
+    not just that the count went down. Without it the row's first column is
+    used, which is the account, file, group or org unit in nearly every
+    finding."""
 
     def __init__(self, fid: str, severity: str, title: str, meaning: str,
                  remediation: str, evidence: List[Dict[str, str]],
-                 source: str, count: Optional[int] = None):
+                 source: str, count: Optional[int] = None,
+                 id_field: Optional[str] = None):
         self.fid = fid
         self.severity = severity
         self.title = title
@@ -2031,6 +2225,28 @@ class Finding:
         self.all_evidence = evidence
         self.count = count if count is not None else len(evidence)
         self.source = source
+        self.id_field = id_field
+        self.modules: List[str] = []
+        # new / persisting / first_run / not_compared, set by the comparison.
+        self.change = ""
+        self.row_changes: Dict[str, str] = {}
+
+
+def _evidence_id(finding: Finding, row: Dict[str, str]) -> str:
+    """Stable identity of one evidence row: the finding id plus the row's
+    identifying column, or a short hash of its non-empty cells when it has
+    none. The column comes from this run's rows, never from a row read back
+    from findings_evidence.csv, whose columns are the union of every finding's
+    and so in a different order."""
+    field = finding.id_field
+    if not field and finding.all_evidence:
+        field = next(iter(finding.all_evidence[0]), "")
+    key = str(row.get(field, "") or "")
+    if not key:
+        cells = {k: str(v) for k, v in row.items() if v not in (None, "")}
+        key = hashlib.sha1(json.dumps(cells, sort_keys=True).encode()
+                           ).hexdigest()[:12]
+    return f"{finding.fid}:{key.lower()}"
 
 
 def _module_usable(ctx: RunContext, key: str) -> bool:
@@ -2125,6 +2341,7 @@ def check_external_file_shares(ctx: RunContext) -> List[Finding]:
     findings = []
     internal = {d.lower() for d in ctx.internal_domains}
     named, domains = [], []
+    audiences: Dict[str, List[Dict[str, str]]] = {}
     for key, where in (("mydrive_external", "My Drive"),
                        ("shareddrive_external", "Shared Drives")):
         if not _module_usable(ctx, key):
@@ -2144,9 +2361,13 @@ def check_external_file_shares(ctx: RunContext) -> List[Finding]:
                     named.append(entry)
             elif ptype == "domain":
                 dom = col(row, "permission.domain").lower()
-                # A target audience is an internal group, but Drive reports it
-                # as type=domain with <id>.audience.googledomains.com.
+                # A target audience comes back as type=domain with
+                # <id>.audience.googledomains.com. It can belong to another
+                # organisation (verified 2026-10-05) and no API lists a
+                # tenant's own audiences, so these are listed for the admin
+                # to match by hand rather than judged here.
                 if dom.endswith(".audience.googledomains.com"):
+                    audiences.setdefault(dom.split(".", 1)[0], []).append(entry)
                     continue
                 if dom and dom not in internal:
                     entry["Shared with"] = f"everyone at {dom}"
@@ -2172,6 +2393,23 @@ def check_external_file_shares(ctx: RunContext) -> List[Finding]:
             "Review the list; remove shares whose purpose has passed, and "
             "prefer expiring access for the rest.",
             named, "mydrive_external.csv"))
+    if audiences:
+        findings.append(Finding(
+            "target-audience-shares", "INFO",
+            "Files shared with target audiences: confirm each one is yours",
+            "These files are shared with a target audience. An audience from "
+            "another organisation can be added to a file the same way as your "
+            "own, gives that organisation's members access, and looks the "
+            "same in Drive. Google offers no way to list your own audiences, "
+            "so the audit cannot tell them apart.",
+            "In the Admin console, open Directory > Target audiences and open "
+            "each audience: its ID is the last part of the page address. Any "
+            "ID below that is not in your list belongs to another "
+            "organisation; remove that share from the files listed.",
+            [{"Audience ID": aid, "Files": str(len(rows)),
+              "Example file": rows[0]["File"], "Owner": rows[0]["Owner"]}
+             for aid, rows in sorted(audiences.items())],
+            "mydrive_external.csv"))
     if _module_usable(ctx, "sharedwithme_external"):
         inbound = [{"File": col(r, "name"),
                     "External owner": col(r, "owners.0.emailAddress"),
@@ -2334,21 +2572,37 @@ def check_shared_drive_external(ctx: RunContext) -> List[Finding]:
     internal = set(ctx.internal_domains)
     if _module_usable(ctx, "shareddriveacls"):
         hits = []
+        # From the Shared Drive scan's first pass; every file in the drive
+        # is open to these members, so the count is the exposure.
+        file_counts = {k: str(v) for k, v in ctx.manifest["meta"].get(
+            "shared_drive_file_counts", {}).items()}
         for row in ctx.rows("shareddriveacls"):
             if truthy(col(row, "permission.deleted")):
                 continue
             addr = col(row, "permission.emailAddress", "emailAddress")
-            if addr and email_domain(addr) not in internal:
-                hits.append({"Shared Drive": col(row, "name"),
-                             "External member": addr,
-                             "Role": col(row, "permission.role", "role")})
+            # A whole outside domain can be a member too. The per-file scan
+            # used to surface it through every file; since v1.7.0 the scan
+            # skips inherited access, so it is reported here.
+            dom = col(row, "permission.domain").lower()
+            if col(row, "permission.type", "type").lower() == "domain" \
+                    and dom and dom not in internal:
+                addr = f"everyone at {dom}"
+            elif not (addr and email_domain(addr) not in internal):
+                continue
+            hits.append({"Shared Drive": col(row, "name"),
+                         "External member": addr,
+                         "Role": col(row, "permission.role", "role"),
+                         "Files in drive": file_counts.get(
+                             col(row, "id"), "not scanned")})
         if hits:
             findings.append(Finding(
                 "sd-external-members", "HIGH",
                 "Shared Drives with members from outside the organisation",
                 "External people are full members of these Shared Drives and "
                 "see everything in them, now and in future - membership "
-                "outlives the project it was granted for.",
+                "outlives the project it was granted for. Every file in "
+                "the drive is open to them, so the files are not listed "
+                "one by one.",
                 "Review each external member: still needed? If yes, confirm "
                 "the drive holds nothing beyond their remit; if not, remove "
                 "them.",
@@ -2478,6 +2732,86 @@ def check_filter_forwarding(ctx: RunContext) -> List[Finding]:
         "deliberate business arrangements, and review those accounts' "
         "recent sign-in activity.",
         hits, "filters.csv")]
+
+
+# Labels and words seen in business email compromise. Same lists as
+# m365_scope.py (BEC_FOLDERS, BEC_WORDS) so both reports flag the same
+# patterns; change both together.
+BEC_FOLDERS = ("rss feeds", "rss subscriptions", "conversation history",
+               "archive", "junk email", "deleted items", "notes")
+BEC_WORDS = ("invoice", "payment", "bank", "banking", "remittance", "wire",
+             "transfer", "statement", "eft", "proof of payment", "account",
+             "urgent", "ceo", "password")
+_BEC_WORD_RE = re.compile(
+    r"\b(" + "|".join(re.escape(w) for w in BEC_WORDS) + r")\b")
+
+
+def suspicious_filter(row: Dict[str, str], internal: Iterable[str]
+                      ) -> Optional[str]:
+    """Why a Gmail filter looks like business email compromise, or None.
+
+    An attacker in a mailbox hides the replies to their fraud: mail about
+    payments sent to trash, archived or marked read, or everything from the
+    one outside address they are impersonating. Archiving a single sender
+    alone is how people file newsletters, so a sender needs trash or
+    mark-as-read as well. GAM7 writes each criterion and action as its own
+    column, the value prefixed with its name ("subject invoice", "label X")."""
+    def value(name: str) -> str:
+        return col(row, name).removeprefix(name).strip()
+    trash, archive = bool(col(row, "trash")), bool(col(row, "archive"))
+    markread = bool(col(row, "markread"))
+    if not (trash or archive or markread):
+        return None
+    text = " ".join(value(c) for c in ("subject", "query")).lower()
+    word = _BEC_WORD_RE.search(text)
+    if word:
+        return f"hides mail about '{word.group(1)}'"
+    sender = value("from")
+    if (trash or markread) and re.fullmatch(r"[^\s@,|()]+@[^\s@,|()]+",
+                                            sender) \
+            and email_domain(sender) not in internal:
+        return f"hides mail from {sender}"
+    label = value("label").lower()
+    if label and (label in BEC_FOLDERS or label in ("rss", "..", ".")
+                  or (len(label) <= 2 and not label.isalnum())):
+        return f"files mail out of sight under the label '{value('label')}'"
+    return None
+
+
+def check_filter_bec(ctx: RunContext) -> List[Finding]:
+    """Filters that hide mail the way a mailbox takeover does."""
+    if not _module_usable(ctx, "filters"):
+        return []
+    internal = {d.lower() for d in ctx.internal_domains}
+    hits = []
+    for row in ctx.rows("filters"):
+        why = suspicious_filter(row, internal)
+        if not why:
+            continue
+        actions = [a for a in ("trash", "archive", "markread")
+                   if col(row, a)]
+        hits.append({"User": col(row, "User", "user"),
+                     "Filter ID": col(row, "id"),
+                     "Why": why, "Actions": ", ".join(actions)})
+    if not hits:
+        return []
+    scope = ""
+    if ctx.module_status("filters") == "partial":
+        scope = (" Filters could only be read for some users on this run "
+                 "(see Coverage gaps), so this list may not be complete.")
+    return [Finding(
+        "filter-bec-patterns", "HIGH",
+        "Gmail filters that hide payment mail or a single sender",
+        "Someone who takes over a mailbox sets filters like these so the "
+        "real owner never sees the replies to their fraud: mail about "
+        "invoices or payments sent to trash, archived or marked read, or "
+        "everything from one outside address hidden. Some will be "
+        "legitimate, but each needs the owner to confirm they made it."
+        + scope,
+        "Ask each user whether they created the filter. Delete any they do "
+        "not recognise, reset that account's password, sign it out of all "
+        "sessions and review its recent sign-ins and sent mail.",
+        hits, "filters.csv", id_field="Filter ID")]
 
 
 def check_unmanaged_accounts(ctx: RunContext) -> List[Finding]:
@@ -2667,6 +3001,19 @@ def _dormant_login(last: str, days: int = DORMANT_DAYS) -> bool:
     return stamp < datetime.now(timezone.utc) - timedelta(days=days)
 
 
+def _break_glass(ctx: RunContext, email: str) -> bool:
+    """True for an emergency account listed in tenants.json. Such an account
+    is deliberately never used, so dormancy checks skip it; the report names
+    every one it skipped so the exclusion is never silent."""
+    email = email.lower()
+    if email not in ctx.manifest["meta"].get("break_glass", []):
+        return False
+    seen = ctx.manifest["meta"].setdefault("break_glass_seen", [])
+    if email not in seen:
+        seen.append(email)
+    return True
+
+
 def check_dormant_accounts(ctx: RunContext) -> List[Finding]:
     """Dormancy in three tiers: dormant admins (HIGH, licence irrelevant),
     licensed accounts that have never signed in, and licensed accounts idle
@@ -2676,7 +3023,8 @@ def check_dormant_accounts(ctx: RunContext) -> List[Finding]:
     admin_hits, never_hits, idle_hits = [], [], []
     for row in _live_users(ctx):
         last = col(row, "lastLoginTime")
-        if not _dormant_login(last):
+        if not _dormant_login(last) \
+                or _break_glass(ctx, col(row, "primaryEmail")):
             continue
         paid = _paid_licences(row)
         entry = {"User": col(row, "primaryEmail"),
@@ -2841,7 +3189,8 @@ def check_at_risk_accounts(ctx: RunContext) -> List[Finding]:
         # Holding an admin role is not itself a factor: an admin without 2SV
         # already has a CRITICAL finding of its own and appeared here a third
         # time. It still raises the severity when an admin does qualify.
-        if _dormant_login(col(row, "lastLoginTime")):
+        if _dormant_login(col(row, "lastLoginTime")) \
+                and not _break_glass(ctx, email):
             reasons.append(f"no sign-in in {DORMANT_DAYS}+ days")
         if len(reasons) >= 2:
             admin_flagged = admin_flagged or admin
@@ -3434,8 +3783,10 @@ def check_user_password_strength(ctx: RunContext) -> List[Finding]:
     policy check says what the rule is; this says who is not meeting it."""
     if not _module_usable(ctx, "report_users"):
         return []
+    # users only narrows the list to live accounts, so it is read without
+    # recording it: its absence must not stop a clean result.
     live = {col(r, "primaryEmail").lower() for r in _live_users(ctx)} \
-        if _module_usable(ctx, "users") else None
+        if ctx.module_status("users") in ("ok", "empty", "partial") else None
     hits = []
     for row in ctx.rows("report_users"):
         email = col(row, "email", "userEmail").lower()
@@ -3485,7 +3836,26 @@ def check_admin_second_factors(ctx: RunContext) -> List[Finding]:
                      "2SV enrolled": col(admin, "isEnrolledIn2Sv")})
     if not rows:
         return []
-    return [Finding(
+    # Admins with no 2SV at all have their own CRITICAL finding; this one is
+    # for those whose second step exists but can be phished.
+    weak = [{"Super admin": r["Super admin"]} for r in rows
+            if truthy(r["2SV enrolled"])
+            and r["Security keys"] in ("", "0") and r["Passkeys"] in ("", "0")]
+    findings = []
+    if weak:
+        findings.append(Finding(
+            "admins-not-phish-resistant", "MEDIUM",
+            "Super admins without a security key or passkey",
+            "These super admins use 2-step verification, but only with codes "
+            "or prompts. Those stop a stolen password on its own, not a "
+            "phishing page that relays the code and takes the session. "
+            "Security keys and passkeys cannot be relayed that way. "
+            "Usage-report figures lag about two days.",
+            "Give every super admin a passkey or security key (two, so one "
+            "can be lost), then require security keys for the admin "
+            "organisational unit under Security > 2-step verification.",
+            weak, "report_users.csv"))
+    return findings + [Finding(
         "admin-second-factors", "INFO",
         "Second factors held by each super admin",
         "Security keys and passkeys cannot be phished; codes from an app or "
@@ -3916,9 +4286,204 @@ def _parse_policy_settings(ctx: RunContext) -> List[Dict]:
             if isinstance(value, dict):
                 resolved.update(value)
         out.append({"type": stype, "ou": ou, "value": resolved})
+    _apply_policy_defaults(out, bool(education_skus_held(ctx)))
     out.extend(rules)
     ctx._policy_cache = out
     return out
+
+
+def _apply_policy_defaults(settings: List[Dict], education: bool = False):
+    """Fill in Google's documented defaults at the root org unit.
+
+    The Policy API does not return a setting, or a field of one, that was
+    never changed from Google's default. Without this, a tenant that left
+    automatic forwarding or Drive publishing at their default (allowed) was
+    never judged on them. Only the root is filled: a child org unit without
+    its own row inherits the root's value. Each filled field is recorded in
+    "defaulted" so the report can say the value is Google's default."""
+    try:
+        defaults = json.loads(POLICY_DEFAULTS_FILE.read_text(
+            encoding="utf-8")).get("defaults", {})
+    except (OSError, json.JSONDecodeError):
+        return
+    root = {s["type"]: s for s in settings if s["ou"] == "/"}
+    if not education:
+        # Google: "For K12 customers: ALLOW_NONE, otherwise: ALLOW_ALL". A
+        # business tenant is never K12; on an Education tenant the audit
+        # cannot tell a school from a university, so it stays unknown.
+        defaults = dict(defaults)
+        defaults["workspace_marketplace.apps_access_options"] = dict(
+            defaults.get("workspace_marketplace.apps_access_options", {}),
+            accessLevel="ALLOW_ALL")
+    for stype, fields in defaults.items():
+        entry = root.get(stype)
+        if entry is None:
+            entry = {"type": stype, "ou": "/", "value": {}}
+            settings.append(entry)
+        for field, value in fields.items():
+            if field not in entry["value"]:
+                entry["value"][field] = value
+                entry.setdefault("defaulted", []).append(field)
+
+
+# Settings checked against the CISA SCuBA Google Workspace baselines, using
+# the rules of CISA's ScubaGoggles (v1.0.1, public domain) as the guide for
+# what counts as passing. Severity is set for small and medium businesses,
+# not US federal agencies, and requirements that only make sense for a
+# federal agency are left out. (setting, field, fails(value, whole setting),
+# severity, plain-English label, CISA requirement)
+_SAFE_CONSEQUENCES = ("SPAM_FOLDER", "QUARANTINE")
+_ATTACHMENT_CONSEQUENCES = {
+    "enableEncryptedAttachmentProtection": "encryptedAttachmentProtectionConsequence",
+    "enableAttachmentWithScriptsProtection": "attachmentWithScriptsProtectionConsequence",
+    "enableAnomalousAttachmentProtection": "anomalousAttachmentProtectionConsequence",
+}
+_SPOOFING_CONSEQUENCES = {
+    "detectDomainNameSpoofing": "domainNameSpoofingConsequence",
+    "detectEmployeeNameSpoofing": "employeeNameSpoofingConsequence",
+    "detectDomainSpoofingFromUnauthenticatedSenders": "domainSpoofingConsequence",
+    "detectUnauthenticatedEmails": "unauthenticatedEmailConsequence",
+    "detectGroupsSpoofing": "groupsSpoofingConsequence",
+}
+
+
+def _kept_in_inbox(value: Dict, pairs: Dict[str, str]) -> List[str]:
+    """Protections that are on but only warn, leaving the mail in the inbox."""
+    return [cons for flag, cons in pairs.items()
+            if value.get(flag) is True and cons in value
+            and value[cons] not in _SAFE_CONSEQUENCES]
+
+
+POLICY_BASELINE = [
+    ("gmail.auto_forwarding", "enableAutoForwarding",
+     lambda v, s: v is True, "MEDIUM",
+     "Users can set up automatic forwarding to outside addresses",
+     "GWS.GMAIL.11.1"),
+    ("security.two_step_verification_device_trust", "allowTrustingDevice",
+     lambda v, s: v is True, "MEDIUM",
+     "Users can skip 2-step verification on a device they mark as trusted",
+     "GWS.COMMONCONTROLS.1.5"),
+    ("api_controls.internal_apps", "trustInternalApps",
+     lambda v, s: v is True, "MEDIUM",
+     "Apps built inside the organisation are trusted without review",
+     "GWS.COMMONCONTROLS.10.3"),
+    ("workspace_marketplace.apps_access_options", "accessLevel",
+     lambda v, s: v == "ALLOW_ALL", "MEDIUM",
+     "Users can install any Google Workspace Marketplace app",
+     "GWS.COMMONCONTROLS.11.1"),
+    ("security.less_secure_apps", "allowLessSecureApps",
+     lambda v, s: v is True, "MEDIUM",
+     "Less secure apps (password-only sign-in) are allowed",
+     "GWS.COMMONCONTROLS.10.5"),
+    ("drive_and_docs.external_sharing", "allowPublishingFiles",
+     lambda v, s: v is True and s.get("externalSharingMode") != "DISALLOWED",
+     "MEDIUM", "Users can publish Drive files to the web",
+     "GWS.DRIVEDOCS.1.5"),
+    ("drive_and_docs.external_sharing", "accessCheckerSuggestions",
+     lambda v, s: v == "RECIPIENTS_OR_AUDIENCE_OR_PUBLIC", "MEDIUM",
+     "Drive suggests making a file public when sharing it",
+     "GWS.DRIVEDOCS.1.6"),
+    ("drive_and_docs.general_access_default", "defaultFileAccess",
+     lambda v, s: str(v).startswith("PRIMARY_AUDIENCE"), "MEDIUM",
+     "New files are open to the whole organisation by default",
+     "GWS.DRIVEDOCS.1.8"),
+    ("gmail.email_attachment_safety", "attachment protections",
+     lambda v, s: bool(_kept_in_inbox(s, _ATTACHMENT_CONSEQUENCES)), "MEDIUM",
+     "Risky attachments are flagged but left in the inbox",
+     "GWS.GMAIL.5.5"),
+    ("gmail.spoofing_and_authentication", "spoofing protections",
+     lambda v, s: bool(_kept_in_inbox(s, _SPOOFING_CONSEQUENCES)), "MEDIUM",
+     "Spoofed and unauthenticated mail is flagged but left in the inbox",
+     "GWS.GMAIL.7.6"),
+    ("groups_for_business.groups_sharing", "createGroupsAccessLevel",
+     lambda v, s: v == "ANYONE_CAN_CREATE", "MEDIUM",
+     "Anyone, including people outside the organisation, can create groups",
+     "GWS.GROUPS.2.1"),
+    ("drive_and_docs.external_sharing", "allowNonGoogleInvites",
+     lambda v, s: v is True and s.get("externalSharingMode") == "ALLOWED",
+     "INFO", "Files can be shared with people who have no Google account",
+     "GWS.DRIVEDOCS.1.4"),
+    ("drive_and_docs.file_security_update", "securityUpdate",
+     lambda v, s: v != "APPLY_TO_IMPACTED_FILES"
+     or s.get("allowUsersToManageUpdate") is not False, "INFO",
+     "Users can opt files out of Drive's link security update",
+     "GWS.DRIVEDOCS.3.1"),
+    ("drive_and_docs.drive_sdk", "enableDriveSdkApiAccess",
+     lambda v, s: v is True, "INFO",
+     "Third-party apps can use the Drive SDK to reach users' files",
+     "GWS.DRIVEDOCS.4.1"),
+    ("groups_for_business.groups_sharing", "createGroupsAccessLevel",
+     lambda v, s: v == "USERS_IN_DOMAIN", "INFO",
+     "Every user can create groups, not only admins", "GWS.GROUPS.2.1"),
+    ("groups_for_business.groups_sharing",
+     "ownersCanAllowIncomingMailFromPublic",
+     lambda v, s: v is True, "INFO",
+     "Group owners can let anyone on the internet post to their group",
+     "GWS.GROUPS.1.3"),
+    ("calendar.secondary_calendar_max_allowed_external_sharing",
+     "maxAllowedExternalSharing",
+     lambda v, s: v != "EXTERNAL_FREE_BUSY_ONLY", "INFO",
+     "Secondary calendars can show event details to outside people",
+     "GWS.CALENDAR.1.2"),
+    ("chat.chat_file_sharing", "externalFileSharing",
+     lambda v, s: v not in (None, "NO_FILES"), "INFO",
+     "Files can be shared in Chat with outside people",
+     "GWS.CHAT.2.1"),
+    ("gmail.workspace_sync_for_outlook",
+     "enableGoogleWorkspaceSyncForMicrosoftOutlook",
+     lambda v, s: v is True, "INFO",
+     "Google Workspace Sync for Outlook is allowed", "GWS.GMAIL.10.1"),
+]
+
+
+def check_policy_baseline(ctx: RunContext) -> List[Finding]:
+    """Tenant settings below the CISA Google Workspace baselines, one row per
+    setting and org unit, saying whether the value is Google's default (the
+    tenant never changed it) or was set by an admin."""
+    by_type: Dict[str, List[Dict]] = {}
+    for pol in _policy_settings(ctx):
+        by_type.setdefault(pol["type"], []).append(pol)
+    rows: Dict[str, List[Dict[str, str]]] = {"MEDIUM": [], "INFO": []}
+    for stype, field, fails, sev, label, ref in POLICY_BASELINE:
+        for pol in by_type.get(stype, []):
+            value = pol["value"]
+            current = value.get(field)
+            if field in value or " " in field:
+                if not fails(current, value):
+                    continue
+            else:
+                continue
+            shown = current if current is not None else ", ".join(
+                _kept_in_inbox(value, _ATTACHMENT_CONSEQUENCES
+                               if "attachment" in field
+                               else _SPOOFING_CONSEQUENCES))
+            rows[sev].append({
+                "Setting": label, "Org unit": pol["ou"] or "/",
+                "Value": str(shown),
+                "Set by": "Google default" if field in pol.get(
+                    "defaulted", []) else "admin",
+                "CISA baseline": ref})
+    findings = []
+    if rows["MEDIUM"]:
+        findings.append(Finding(
+            "policy-baseline", "MEDIUM",
+            "Settings below the CISA Google Workspace baseline",
+            "These tenant settings are looser than the CISA (US Cybersecurity "
+            "and Infrastructure Security Agency) baseline for Google "
+            "Workspace. Each one widens what a phished account or a careless "
+            "click can do. \"Google default\" means nobody has changed it.",
+            "Review each in the Admin console and tighten it unless the "
+            "organisation relies on it; the baseline reference names the "
+            "requirement.", rows["MEDIUM"], "policies.csv"))
+    if rows["INFO"]:
+        findings.append(Finding(
+            "policy-baseline-info", "INFO",
+            "Other settings the CISA baseline would tighten",
+            "Lower-risk settings the CISA baseline recommends changing. Most "
+            "organisations leave some of these on deliberately.",
+            "Decide on each and record the reason for any left as they are.",
+            rows["INFO"], "policies.csv"))
+    return findings
 
 
 def check_password_policy(ctx: RunContext) -> List[Finding]:
@@ -4251,7 +4816,8 @@ CONSOLE_ONLY_SETTINGS = [
     ("Security > API controls", "Domain-wide delegation clients",
      "Only service accounts the organisation knows, each with the narrowest "
      "scopes that work. A client here can read every mailbox and Drive "
-     "without any user signing in."),
+     "without any user signing in. Grants made in the last 30 days are in "
+     "the findings; older ones only show here."),
     ("Apps > Web and mobile apps", "SAML apps",
      "Only apps in use; each one is a sign-in path that inherits the "
      "Google session."),
@@ -4515,11 +5081,8 @@ RAW_POLICY_SETTINGS = {
     "security.passkeys_restriction": "Passkeys allowed",
     "security.login_challenges": "Login challenge (employee ID)",
     "drive_and_docs.external_file_warning": "Warning on files from outside",
-    "drive_and_docs.file_security_update": "Link-sharing security update",
     "sites.sites_creation_and_modification": "Sites creation and editing",
-    "chat.chat_file_sharing": "Chat file sharing",
     "chat.chat_apps_access": "Chat apps and webhooks",
-    "api_controls.internal_apps": "Trust internal apps",
     "api_controls.app_approval_requests": "Users may request app approval",
     "gmail.user_email_uploads": "Users may import mail and contacts",
     "gmail.confidential_mode": "Gmail confidential mode",
@@ -4585,6 +5148,52 @@ EDITION_FEATURES = [
       _SKU_ENT_PLUS, _SKU_ENT_ESS, _SKU_ENT_ESS_PLUS, _SKU_CI_PREMIUM,
       "1010490001"} | _SKU_EDU_STD | _SKU_EDU_PLUS),
 ]
+
+
+# For the upgrade opportunities section: the editions that add each feature
+# (in plain words, from the SKU sets above) and why a client would want it.
+UPGRADE_NOTES = {
+    "Data loss prevention (DLP)": (
+        "Enterprise Standard or Plus, Frontline Standard or Plus, "
+        "Enterprise Essentials Plus or an Education edition",
+        "Warns or blocks when ID numbers, card numbers or other sensitive "
+        "data is shared outside the organisation from Drive, Gmail or Chat."),
+    "Context-Aware Access": (
+        "Enterprise Standard or Plus, Frontline Standard or Plus, "
+        "Enterprise Essentials Plus, Education Standard or Plus, or Cloud "
+        "Identity Premium",
+        "Lets company data be opened only from approved devices or "
+        "locations, so a stolen password alone is not enough."),
+    "Drive trust rules": (
+        "Enterprise Standard or Plus, Frontline Plus, Enterprise Essentials "
+        "Plus, or Education Standard or Plus",
+        "Controls who each team can share files with, inside and outside the "
+        "organisation, instead of one setting for everyone."),
+    "Security center": (
+        "Enterprise Standard or Plus, Frontline Standard or Plus, Enterprise "
+        "Essentials Plus, or Education Standard or Plus",
+        "Gives the investigation tool and security dashboard used to trace "
+        "and clean up a phishing message or a leaked file across the tenant."),
+    "Advanced mobile management": (
+        "Business Plus or any Enterprise, Frontline or Education Standard or "
+        "Plus edition",
+        "Lets the organisation require a screen lock, approve devices and "
+        "wipe company data from a lost or departing employee's phone."),
+}
+
+
+def upgrade_opportunities(ctx: RunContext) -> List[Dict[str, str]]:
+    """Protections the tenant's editions do not include. Shown in their own
+    report section and never scored: a client is not marked down for what
+    their licence cannot do."""
+    if ctx.module_status("licenses") not in ("ok", "empty", "partial"):
+        return []
+    held = {col(r, "skuId") for r in ctx.rows("licenses")} - {""}
+    if not held:
+        return []
+    return [{"Protection": feature, "Needs": UPGRADE_NOTES[feature][0],
+             "Why it matters": UPGRADE_NOTES[feature][1]}
+            for feature, skus in EDITION_FEATURES if not (skus & held)]
 
 
 def _feature_usage(ctx: RunContext, feature: str) -> Tuple[str, Optional[bool]]:
@@ -4665,6 +5274,112 @@ def check_edition_features(ctx: RunContext) -> List[Finding]:
 ADMIN_EVENT_PATTERN = re.compile(
     r"APPLICATION_SETTING|ROLE|TWO_STEP|2SV|SSO|RULE|SECURITY|DOMAIN|"
     r"ALLOWLIST|TRUST|PASSWORD_POLICY|RECOVERY", re.IGNORECASE)
+
+
+# Link-sharing values that open a file to anyone, from the Reports API Drive
+# appendix (change_document_visibility new_value).
+PUBLIC_VISIBILITY = {"people_with_link": "anyone with the link",
+                     "public_on_the_web": "public on the web"}
+
+
+def check_drive_sharing_log(ctx: RunContext) -> List[Finding]:
+    """New Drive exposure in the last ACTIVITY_DAYS days, from the audit log:
+    files opened to anyone, and files shared with outside people, by the
+    user who did it. Cheap enough for every monthly run, where the full file
+    scans are not."""
+    if not _module_usable(ctx, "report_drive_sharing"):
+        return []
+    internal = {d.lower() for d in ctx.internal_domains}
+    public: Dict[str, Dict[str, str]] = {}
+    outside: Dict[str, Dict[str, set]] = {}
+    for row in ctx.rows("report_drive_sharing"):
+        event, actor = col(row, "name"), col(row, "actor.email")
+        doc = col(row, "doc_id")
+        if event == "change_document_visibility":
+            made = PUBLIC_VISIBILITY.get(col(row, "new_value"))
+            if made:
+                public[doc] = {"User": actor, "File": col(row, "doc_title"),
+                               "File ID": doc, "Opened to": made,
+                               "When": col(row, "id.time")}
+        elif event == "change_user_access":
+            target = col(row, "target_user").lower()
+            if not target or col(row, "new_value") == "none":
+                continue
+            # target_user is an address, or a bare domain for a domain share.
+            if email_domain(target) in internal or target in internal:
+                continue
+            entry = outside.setdefault(actor, {"files": set(),
+                                               "people": set()})
+            entry["files"].add(doc)
+            entry["people"].add(target)
+    findings = []
+    if public:
+        rows = sorted(public.values(), key=lambda r: (r["User"], r["File"]))
+        findings.append(Finding(
+            "drive-made-public-30d", "HIGH",
+            f"Files opened to anyone in the last {ACTIVITY_DAYS} days",
+            "These files were set so that anyone with the link, or anyone on "
+            "the web, can open them. Links get forwarded, pasted into tickets "
+            "and indexed, so treat each file as readable by strangers. The "
+            "audit log shows the change, not today's setting: some may "
+            "since have been closed again.",
+            "Ask each person whether the file needs to be open. Switch the "
+            "rest to Restricted, and share with named people instead.",
+            rows, "report_drive_sharing.csv", id_field="File ID"))
+    if outside:
+        rows = [{"User": actor or "(unknown)",
+                 "Files shared out": str(len(e["files"])),
+                 "Outside recipients": ", ".join(sorted(e["people"])[:5])
+                 + (" ..." if len(e["people"]) > 5 else "")}
+                for actor, e in sorted(outside.items())]
+        findings.append(Finding(
+            "drive-shared-outside-30d", "MEDIUM",
+            f"Files shared with outside people in the last {ACTIVITY_DAYS} days",
+            "Who shared Drive files with people or domains outside the "
+            "organisation this month. Most of it is normal work; the "
+            "pattern to look for is one person sharing many files, or "
+            "sharing with personal addresses.",
+            "Review the people with the most files shared out, and remove "
+            "access that is no longer needed.",
+            rows, "report_drive_sharing.csv"))
+    return findings
+
+
+def check_dwd_grants(ctx: RunContext) -> List[Finding]:
+    """Domain-wide delegation granted in the last ACTIVITY_DAYS days, from
+    the admin log (AUTHORIZE_API_CLIENT_ACCESS). Neither GAM7 nor any Google
+    API lists the grants that already exist (checked against GAM7 7.48.22),
+    so older grants stay on the check-by-hand list; this catches new ones
+    each month."""
+    if not _module_usable(ctx, "report_admin"):
+        return []
+    rows = []
+    for row in ctx.rows("report_admin"):
+        if col(row, "name") != "AUTHORIZE_API_CLIENT_ACCESS":
+            continue
+        scopes = [x.strip() for x in col(row, "API_SCOPES").split(",")
+                  if x.strip()]
+        broad = sorted({RISKY_SCOPES[x] for x in scopes if x in RISKY_SCOPES})
+        rows.append({"Client ID": col(row, "API_CLIENT_NAME"),
+                     "Granted by": col(row, "actor.email"),
+                     "When": col(row, "id.time"),
+                     "Scopes": str(len(scopes)),
+                     "Broad access": ", ".join(broad) or "none"})
+    if not rows:
+        return []
+    broad_rows = [r for r in rows if r["Broad access"] != "none"]
+    return [Finding(
+        "dwd-granted-30d", "MEDIUM" if broad_rows else "INFO",
+        f"Domain-wide delegation granted in the last {ACTIVITY_DAYS} days",
+        "A service account with domain-wide delegation can act as any user "
+        "without them signing in, within the scopes granted. Full Gmail or "
+        "Drive scopes mean it can read every mailbox or every file. If GAM "
+        "itself was set up this month, its own service account appears here "
+        "and is expected.",
+        "Confirm each client ID belongs to a tool the organisation knows "
+        "(Security > API controls > Domain-wide delegation), remove any it "
+        "does not, and trim the rest to the scopes they need.",
+        rows, "report_admin.csv", id_field="Client ID")]
 
 
 def check_admin_activity(ctx: RunContext) -> List[Finding]:
@@ -4969,6 +5684,7 @@ CHECKS = [
     check_shared_drive_external,
     check_group_exposure,
     check_filter_forwarding,
+    check_filter_bec,
     check_unmanaged_accounts,
     check_dns_findings,
     check_2sv_enrolment,
@@ -5002,6 +5718,9 @@ CHECKS = [
     check_policy_settings_raw,
     check_edition_features,
     check_admin_activity,
+    check_drive_sharing_log,
+    check_dwd_grants,
+    check_policy_baseline,
     check_login_risk,
     check_security_alerts,
     check_licence_waste,
@@ -5041,6 +5760,7 @@ CHECK_TITLES = {
     "check_shared_drive_external": "Shared Drive external members and open settings",
     "check_group_exposure": "Groups open to joining, posting or external members",
     "check_filter_forwarding": "Gmail filters forwarding externally",
+    "check_filter_bec": "Gmail filters hiding payment mail or a sender",
     "check_unmanaged_accounts": "Personal Google accounts on company domains",
     "check_dns_findings": "Mail DNS (MX, SPF, DKIM, DMARC)",
     "check_2sv_enrolment": "2-step verification enrolment across users",
@@ -5074,6 +5794,9 @@ CHECK_TITLES = {
     "check_policy_settings_raw": "Other checklist settings (raw)",
     "check_edition_features": "Edition security features in use",
     "check_admin_activity": "Admin log: settings and role changes",
+    "check_drive_sharing_log": "Drive sharing in the last 30 days",
+    "check_dwd_grants": "Domain-wide delegation granted in the last 30 days",
+    "check_policy_baseline": "Settings against the CISA Google Workspace baseline",
     "check_login_risk": "Risky sign-in events and failed sign-ins",
     "check_security_alerts": "Alert Center alerts",
     "check_licence_waste": "Licences owned but unassigned",
@@ -5104,15 +5827,24 @@ def run_checks(ctx: RunContext) -> List[Finding]:
     print_header("STAGE 2 - CHECK")
     findings: List[Finding] = []
     ctx.clean_checks = []
+    ctx.manifest["meta"]["break_glass_seen"] = []
     for check in CHECKS:
         ctx.consulted = []
         try:
             raised = check(ctx)
+            # Every module the check read, usable or not: the comparison
+            # needs all of them complete in both runs to call a row fixed.
+            read = sorted({k for k, _ in ctx.consulted})
+            for finding in raised:
+                finding.modules = read
             findings.extend(raised)
-            # Clean means the check looked at real data and found nothing.
-            # A check whose every module was missing is a coverage gap,
-            # listed as such elsewhere, not a clean result.
-            if not raised and any(usable for _, usable in ctx.consulted):
+            # Clean means the check saw all of its data and found nothing.
+            # One missing or partly collected module makes it a coverage
+            # gap, listed as such elsewhere, not a clean result.
+            complete = bool(ctx.consulted) and all(
+                ctx.module_status(k) in ("ok", "empty")
+                for k, _ in ctx.consulted)
+            if not raised and complete:
                 modules = sorted({k for k, usable in ctx.consulted if usable})
                 ctx.clean_checks.append((CHECK_TITLES[check.__name__],
                                          ", ".join(modules)))
@@ -5130,10 +5862,161 @@ def run_checks(ctx: RunContext) -> List[Finding]:
                 [], "tenant_scope.log"))
     findings.sort(key=lambda f: SEVERITY_ORDER.index(f.severity))
     for finding in findings:
-        marker = {"CRITICAL": print_error, "HIGH": print_warning,
-                  "MEDIUM": print_warning, "INFO": print_info}[finding.severity]
-        marker(f"[{finding.severity}] {finding.title} ({finding.count})")
+        # The severity is the line's only tag; print_error and friends would
+        # add their own in front of it ("[INFO] [INFO] ...").
+        level, colour = {"CRITICAL": ("error", Colours.RED),
+                         "HIGH": ("warning", Colours.YELLOW),
+                         "MEDIUM": ("warning", Colours.YELLOW),
+                         "INFO": ("info", Colours.CYAN)}[finding.severity]
+        _emit(level, f"{colour}[{finding.severity}] {finding.title} "
+                     f"({finding.count}){Colours.RESET}")
     return findings
+
+
+###############################################################################
+# HISTORY - POSTURE SCORE AND COMPARISON WITH THE PREVIOUS RUN
+###############################################################################
+
+SCORE_WEIGHTS = {"CRITICAL": 15, "HIGH": 7, "MEDIUM": 3, "INFO": 0}
+SCORE_HALF_POINTS = 70
+SCORE_TREND_RUNS = 6
+
+
+def posture_score(findings: List[Finding]) -> int:
+    """Google has no Secure Score, so the report computes one: each finding
+    (not each evidence row) costs points by severity and the score halves for
+    every SCORE_HALF_POINTS. It never reaches 0, so a badly configured tenant
+    still shows progress month to month. Same formula as m365_scope.py; change
+    both together."""
+    points = sum(SCORE_WEIGHTS[f.severity] for f in findings
+                 if not f.fid.startswith("check-error"))
+    return max(1, round(100 * 0.5 ** (points / SCORE_HALF_POINTS)))
+
+
+def _read_manifest(run_dir: Path) -> Dict:
+    try:
+        return json.loads((run_dir / "manifest.json").read_text(
+            encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def earlier_runs(ctx: RunContext) -> List[Path]:
+    """Completed earlier runs of the same customer in the same output folder,
+    oldest first. An interrupted run or another tenant's folder is never a
+    baseline: comparing against it would report fixes that never happened."""
+    customer = ctx.manifest["meta"].get("customer_id")
+    parent = ctx.run_dir.resolve().parent
+    if not customer or not parent.is_dir():
+        return []
+    current = ctx.run_dir.resolve()
+    runs = []
+    for d in sorted(parent.iterdir()):
+        if not d.is_dir() or d.resolve() == current \
+                or d.name > ctx.run_dir.resolve().name:
+            continue
+        meta = _read_manifest(d).get("meta", {})
+        if meta.get("customer_id") == customer and meta.get("complete"):
+            runs.append(d)
+    return runs
+
+
+def find_previous_run(ctx: RunContext) -> Optional[Path]:
+    """--compare-with wins; otherwise the newest completed earlier run."""
+    if getattr(ctx.args, "compare_with", None):
+        return Path(ctx.args.compare_with)
+    runs = earlier_runs(ctx)
+    return runs[-1] if runs else None
+
+
+def score_trend(ctx: RunContext, score: int) -> List[Tuple[str, int]]:
+    """(collected date, score) for up to the last SCORE_TREND_RUNS runs,
+    this one included. Runs from before v1.7.0 carry no score and are left
+    out rather than recomputed from different checks."""
+    points = []
+    for d in earlier_runs(ctx):
+        meta = _read_manifest(d).get("meta", {})
+        if isinstance(meta.get("posture_score"), int):
+            points.append((str(meta.get("collected_at", d.name))[:10],
+                           meta["posture_score"]))
+    points.append((str(ctx.manifest["meta"].get("collected_at", "now"))[:10],
+                   score))
+    return points[-SCORE_TREND_RUNS:]
+
+
+def compare_with_previous(ctx: RunContext, findings: List[Finding],
+                          prev_dir: Optional[Path]) -> Dict:
+    """Mark each finding and evidence row new or persisting against the
+    previous run, and list the findings that were resolved. A finding whose
+    data was only partly collected in either run is "not compared", never
+    resolved: a row missing because a user's scan failed is not a fix."""
+    summary: Dict = {"previous": "", "new": [], "persisting": [],
+                     "resolved": [], "not_compared": [], "resolved_rows": 0,
+                     "prev_counts": {}, "prev_score": None}
+    if not prev_dir:
+        for f in findings:
+            f.change = "first_run"
+        return summary
+    prev_manifest = _read_manifest(prev_dir)
+    prev_modules = prev_manifest.get("modules", {})
+    prev_meta = prev_manifest.get("meta", {})
+    summary["previous"] = str(prev_meta.get("collected_at", prev_dir.name))
+    summary["prev_score"] = prev_meta.get("posture_score")
+    prev_f = {r["id"]: r for r in read_csv_rows(prev_dir / "findings.csv")
+              if r.get("id")}
+    for r in prev_f.values():
+        sev = r.get("severity", "")
+        summary["prev_counts"][sev] = summary["prev_counts"].get(sev, 0) + 1
+    # Rows are re-keyed with this run's id rules rather than trusting a stored
+    # evidence_id, so a run from before v1.7.0 still compares row by row.
+    prev_rows: Dict[str, List[Dict[str, str]]] = {}
+    for r in read_csv_rows(prev_dir / "findings_evidence.csv"):
+        row = {k: v for k, v in r.items()
+               if k not in ("id", "severity", "evidence_id", "change")
+               and v not in (None, "")}
+        prev_rows.setdefault(r.get("id", ""), []).append(row)
+
+    def comparable(mods: Iterable[str]) -> bool:
+        # A module missing or partial in either run drops rows that were
+        # never looked at; reporting those as fixed would be false progress.
+        # A module that ran in neither run (tier 4 without --full, Classroom
+        # on a non-Education tenant) cost both runs the same rows, so it is
+        # left out, and a finding that reads no module compares as it is.
+        ran_in_one = [m for m in mods
+                      if ctx.module_status(m) not in ("", "n/a")
+                      or prev_modules.get(m, {}).get("status", "")
+                      not in ("", "n/a")]
+        return all(
+            ctx.module_status(m) in ("ok", "empty")
+            and prev_modules.get(m, {}).get("status") in ("ok", "empty")
+            for m in ran_in_one)
+
+    current_ids: Set[str] = set()
+    for f in findings:
+        current_ids.add(f.fid)
+        if not comparable(f.modules):
+            f.change = "not_compared"
+            summary["not_compared"].append(f)
+            continue
+        f.change = "persisting" if f.fid in prev_f else "new"
+        summary[f.change].append(f)
+        before = {_evidence_id(f, r) for r in prev_rows.get(f.fid, [])}
+        now = set()
+        for row in f.all_evidence:
+            eid = _evidence_id(f, row)
+            now.add(eid)
+            f.row_changes[eid] = "persisting" if eid in before else "new"
+        summary["resolved_rows"] += len(before - now)
+    for fid, r in prev_f.items():
+        if fid in current_ids:
+            continue
+        # A run from before v1.7.0 has no modules column, so it cannot say.
+        mods = [m for m in (r.get("modules") or "").split(";") if m]
+        if r.get("modules") is not None and comparable(mods):
+            summary["resolved"].append(r)
+        else:
+            summary["not_compared"].append(r)
+    return summary
 
 
 ###############################################################################
@@ -5141,22 +6024,130 @@ def run_checks(ctx: RunContext) -> List[Finding]:
 ###############################################################################
 
 SEVERITY_COLOURS = {"CRITICAL": "#c0392b", "HIGH": "#e67e22",
-                    "MEDIUM": "#f1c40f", "INFO": "#3498db"}
+                    "MEDIUM": "#d4ac0d", "INFO": "#3498db"}
 
 TAMINGDNS_TOOL_LINKS = ("mx", "spf", "dkim", "dmarc")
 
+# Shared with m365_scope.py so the two reports read as one product.
+STYLE = """
+  :root { --ink:#1f2933; --muted:#5f6b76; --line:#e2e6ea; --bg:#f5f6f8;
+          --card:#fff; --head:#14202b; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+         margin:0; color:var(--ink); background:var(--bg); line-height:1.45; }
+  .wrap { max-width:980px; margin:0 auto; padding:24px 16px; }
+  header.page { background:var(--head); color:#fff; padding:32px 16px; }
+  header.page .inner { max-width:980px; margin:0 auto; }
+  header.page h1 { margin:0 0 6px; font-size:26px; }
+  header.page p { margin:0; color:#b8c4cf; }
+  h2 { margin:32px 0 12px; font-size:20px; border-bottom:2px solid var(--line);
+       padding-bottom:6px; }
+  .tiles { display:flex; gap:12px; margin:20px 0; flex-wrap:wrap; }
+  .tile { background:var(--card); border-radius:8px; padding:14px 20px;
+          min-width:120px; box-shadow:0 1px 3px rgba(0,0,0,.12);
+          text-align:center; flex:1; }
+  .tile .num { font-size:30px; font-weight:700; }
+  .tile .lbl { color:var(--muted); }
+  .tile .delta { font-size:12px; color:var(--muted); }
+  section.card { background:var(--card); border-radius:8px; padding:16px 20px;
+          margin-bottom:14px; box-shadow:0 1px 3px rgba(0,0,0,.12); }
+  section.card h3 { margin:0 0 8px; font-size:17px; }
+  .sev { color:#fff; font-size:12px; padding:2px 8px; border-radius:4px;
+         vertical-align:middle; margin-right:6px; }
+  .badge { font-size:11px; padding:1px 6px; border-radius:4px;
+           border:1px solid var(--muted); color:var(--muted); margin-left:6px;
+           vertical-align:middle; }
+  .badge.new { border-color:#c0392b; color:#c0392b; }
+  table { border-collapse:collapse; width:100%; font-size:13.5px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line);
+           vertical-align:top; }
+  th { background:#f0f2f4; }
+  .scroll { overflow-x:auto; }
+  .more, .note { color:var(--muted); font-size:13px; }
+  .fid { color:#8a96a0; font-size:12px; font-weight:normal; }
+  .scores { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .scores .tile { text-align:left; }
+  ol.top li { margin-bottom:6px; }
+  footer { color:var(--muted); font-size:13px; padding:24px 16px;
+           text-align:center; }
+  body.locked > *:not(noscript) { display:none; }
+  @media print {
+    body { background:#fff; }
+    section.card, .tile { box-shadow:none; border:1px solid #ccc;
+                          page-break-inside:avoid; }
+    a { color:var(--ink); text-decoration:none; }
+  }
+"""
 
-def _evidence_table(finding: Finding) -> str:
+
+
+def _fnv1a(text: str) -> str:
+    """32-bit FNV-1a over UTF-16 code units, the same as the report's own
+    check in the browser (JavaScript's charCodeAt)."""
+    value = 0x811C9DC5
+    data = text.encode("utf-16-le")
+    for i in range(0, len(data), 2):
+        value ^= data[i] | (data[i + 1] << 8)
+        value = (value * 0x01000193) & 0xFFFFFFFF
+    return format(value, "08x")
+
+
+def _credit_html(element_id: str) -> str:
+    return (f"<span id='{element_id}'>{CREDIT_PREFIX} <a href='{CREDIT_URL}'>"
+            f"{CREDIT_NAME}</a></span>")
+
+
+def _credit_guard_script() -> str:
+    """Inline script that shows the report only when both credits are intact
+    and visible. The body starts locked (hidden), so deleting this script
+    leaves a blank page rather than an unchecked report. Same check as
+    m365_scope.py: FNV-1a over the link's href attribute, "|", and the
+    credit's text."""
+    expected = _fnv1a(f"{CREDIT_URL}|{CREDIT_PREFIX} {CREDIT_NAME}")
+    return f"""<script>
+(function () {{
+  function h(t) {{ var v = 0x811c9dc5;
+    for (var i = 0; i < t.length; i++) {{
+      v ^= t.charCodeAt(i); v = Math.imul(v, 0x01000193) >>> 0; }}
+    return ('0000000' + v.toString(16)).slice(-8); }}
+  function shown(e) {{
+    for (; e && e.nodeType === 1; e = e.parentNode) {{
+      var c = window.getComputedStyle(e);
+      if (c.display === 'none' || c.visibility === 'hidden' ||
+          c.opacity === '0') {{ return false; }} }}
+    return true; }}
+  function ok(id) {{ var e = document.getElementById(id);
+    var a = e && e.getElementsByTagName('a')[0];
+    return !!a && shown(e) &&
+      h(a.getAttribute('href') + '|' + e.textContent) === '{expected}'; }}
+  document.body.className = '';
+  if (!(ok('osh-credit-head') && ok('osh-credit-foot'))) {{
+    document.body.innerHTML = '<p style="padding:40px;font-size:18px">' +
+      'This report has been altered and cannot be shown. Ask ' +
+      'Outsource House (https://osh.co.za) for the original.</p>'; }}
+}})();
+</script>"""
+
+
+def _evidence_table(finding: Finding, show_changes: bool = False) -> str:
     if not finding.evidence:
         return ""
     # Union of keys, not row 0's: evidence built from different joins (the
     # at-risk composite, the delegation map) can carry different columns.
     headers = list(dict.fromkeys(k for r in finding.evidence for k in r))
+    # Within a finding that was also there last month, mark the rows that
+    # were not, so the reader sees who is new rather than a bare count.
+    marked = show_changes and finding.change == "persisting"
     head = "".join(f"<th>{escape(h)}</th>" for h in headers)
+    if marked:
+        head += "<th>This month</th>"
     body = ""
     for row in finding.evidence:
         cells = "".join(f"<td>{escape(str(row.get(h, '')))}</td>"
                         for h in headers)
+        if marked:
+            new = finding.row_changes.get(_evidence_id(finding, row)) == "new"
+            cells += ("<td><span class='badge new'>new</span></td>" if new
+                      else "<td></td>")
         body += f"<tr>{cells}</tr>"
     more = ""
     if finding.count > len(finding.evidence):
@@ -5168,29 +6159,124 @@ def _evidence_table(finding: Finding) -> str:
             f"<tbody>{body}</tbody></table></div>{more}")
 
 
-def render_html(ctx: RunContext, findings: List[Finding]) -> Path:
+def _delta(now: int, before: Optional[int]) -> str:
+    if before is None:
+        return "first audit"
+    if now == before:
+        return "same as last month"
+    return f"{'down' if now < before else 'up'} from {before}"
+
+
+def render_html(ctx: RunContext, findings: List[Finding],
+                history: Optional[Dict] = None) -> Path:
+    """Write audit_report.html, findings.csv and findings_evidence.csv, after
+    comparing with the previous completed run of the same customer."""
     print_header("STAGE 3 - RENDER")
     meta = ctx.manifest["meta"]
     domain = meta.get("primary_domain", "unknown domain")
+    if history is None:
+        history = compare_with_previous(ctx, findings, find_previous_run(ctx))
+    score = posture_score(findings)
+    meta["posture_score"] = score
+    ctx.save()
+    show_changes = bool(history["previous"])
+    prev = history["prev_counts"]
     counts = {sev: 0 for sev in SEVERITY_ORDER}
     for finding in findings:
         counts[finding.severity] += 1
     tiles = "".join(
         f"<div class='tile' style='border-top:6px solid "
         f"{SEVERITY_COLOURS[sev]}'><div class='num'>{counts[sev]}</div>"
-        f"<div class='lbl'>{sev.title()}</div></div>"
+        f"<div class='lbl'>{sev.title()}</div><div class='delta'>"
+        f"{_delta(counts[sev], prev.get(sev, 0) if show_changes else None)}"
+        f"</div></div>"
         for sev in SEVERITY_ORDER)
 
-    sections = ""
-    for finding in findings:
-        sections += f"""
-<section class='finding'>
+    trend = score_trend(ctx, score)
+    trend_text = " &rarr; ".join(f"{escape(d)}: {v}" for d, v in trend) \
+        if len(trend) > 1 else ""
+    prev_score = history["prev_score"] if show_changes else None
+    scores = f"""
+<div class='scores'>
+  <div class='tile'><div class='num'>{score}</div>
+  <div class='lbl'>Posture score (out of 100)</div>
+  <div class='delta'>{_delta(score, prev_score)}. {trend_text}</div>
+  <div class='delta'>Findings cost {SCORE_WEIGHTS['CRITICAL']} (critical),
+  {SCORE_WEIGHTS['HIGH']} (high) or {SCORE_WEIGHTS['MEDIUM']} (medium) points;
+  every {SCORE_HALF_POINTS} points halves the score. Google has no score of
+  its own, so this one is calculated from the findings below.</div></div>
+</div>"""
+
+    top = [f for f in findings if f.severity != "INFO"][:5]
+    top_items = "".join(
+        f"<li><strong>{escape(f.title)}</strong>. "
+        f"{escape(f.remediation.split('. ')[0].rstrip('.'))}.</li>"
+        for f in top)
+    top_block = (f"<section class='card'><h3>Top actions</h3>"
+                 f"<ol class='top'>{top_items}</ol></section>") if top else ""
+
+    like_for_like = ""
+    if show_changes and history["not_compared"]:
+        like_for_like = (
+            f"<p class='note'>{len(history['not_compared'])} finding(s) could "
+            "not be compared with the last run because their data was not "
+            "fully collected in one of the two runs, so the changes on the "
+            "tiles and the score are not like for like. See \"What changed\" "
+            "below.</p>")
+
+    changed = ""
+    if show_changes:
+        resolved = "".join(
+            f"<li>{escape(r.get('title', r.get('id', '')))} "
+            f"<span class='note'>({escape(r.get('severity', ''))})</span></li>"
+            for r in history["resolved"])
+        new = "".join(
+            f"<li>{escape(f.title)} <span class='note'>({f.severity})</span>"
+            "</li>" for f in history["new"] if f.severity != "INFO")
+        changed = f"""
+<section class='card'>
+  <h3>What changed since {escape(history['previous'])}</h3>
+  <p><strong>Resolved:</strong></p><ul>{resolved or '<li>none</li>'}</ul>
+  <p><strong>New:</strong></p><ul>{new or '<li>none</li>'}</ul>
+  <p class='note'>{len(history['persisting'])} finding(s) carried over;
+  {history['resolved_rows']} item(s) within them were fixed (accounts, files
+  or settings no longer listed). {len(history['not_compared'])} could not be
+  compared because their data was missing or only partly collected in one of
+  the two runs, or the earlier run predates comparison.</p>
+</section>"""
+
+    def card(finding: Finding) -> str:
+        badge = ""
+        if show_changes and finding.change == "new":
+            badge = "<span class='badge new'>new this month</span>"
+        elif show_changes and finding.change == "persisting":
+            badge = "<span class='badge'>also last month</span>"
+        return f"""
+<section class='card'>
   <h3><span class='sev' style='background:{SEVERITY_COLOURS[finding.severity]}'>
-  {finding.severity}</span> {escape(finding.title)}
+  {finding.severity}</span> {escape(finding.title)}{badge}
   <code class='fid'>{escape(finding.fid)}</code></h3>
   <p><strong>What this means:</strong> {escape(finding.meaning)}</p>
   <p><strong>What to do:</strong> {escape(finding.remediation)}</p>
-  {_evidence_table(finding)}
+  {_evidence_table(finding, show_changes)}
+</section>"""
+
+    sections = "".join(card(f) for f in findings)
+    upgrades = upgrade_opportunities(ctx)
+    upgrade_block = ""
+    if upgrades:
+        upgrade_rows = "".join(
+            f"<tr><td>{escape(u['Protection'])}</td><td>{escape(u['Needs'])}"
+            f"</td><td>{escape(u['Why it matters'])}</td></tr>"
+            for u in upgrades)
+        upgrade_block = f"""
+<section class='card'>
+  <h3>Upgrade opportunities</h3>
+  <p>These protections are not part of the current licences, so they are
+  neither checked nor counted against the score.</p>
+  <div class='scroll'><table><thead><tr><th>Protection</th><th>Needs</th>
+  <th>Why it matters</th></tr></thead><tbody>{upgrade_rows}</tbody></table>
+  </div>
 </section>"""
 
     # Preflight appendix.
@@ -5222,7 +6308,7 @@ def render_html(ctx: RunContext, findings: List[Finding]) -> Path:
             f"<tr><td>{escape(title)}</td><td>{escape(mods)}</td></tr>"
             for title, mods in ctx.clean_checks)
         clean_block = f"""
-<section class='finding'>
+<section class='card'>
   <h3>Checked and clean</h3>
   <p>These checks ran over collected data and raised nothing. A check
   absent from both this list and the findings above had no data to look at;
@@ -5239,7 +6325,7 @@ def render_html(ctx: RunContext, findings: List[Finding]) -> Path:
     not_checked_block = ""
     if not_checked:
         not_checked_block = f"""
-<section class='finding'>
+<section class='card'>
   <h3>Coverage gaps</h3>
   <p>These areas were not fully audited on this run, for the reason given.
   <strong>skipped</strong> and <strong>error</strong> mean no data at all -
@@ -5286,7 +6372,7 @@ def render_html(ctx: RunContext, findings: List[Finding]) -> Path:
                      f"<td>{escape(path)}</td><td>{links}</td></tr>")
         if rows:
             dns_block = f"""
-<section class='finding'>
+<section class='card'>
   <h3>Mail DNS per domain</h3>
   <p>Checked via tamingdns.com where available (full detail in
   <code>dns.json</code>); "doh" means the fallback path ran with
@@ -5305,6 +6391,32 @@ def render_html(ctx: RunContext, findings: List[Finding]) -> Path:
                      "Per-user checks (mail settings, calendars, Drive "
                      "sharing) cover ACTIVE users only; suspended accounts "
                      "were not swept.")
+    if ctx.module_status("mydrive_external") in ("ok", "empty", "partial"):
+        coverage_note += (" Drive: the full file scan ran, so external "
+                          "sharing covers every file, not only recent changes.")
+    elif ctx.module_status("report_drive_sharing") in ("ok", "empty"):
+        coverage_note += (" Drive: only sharing changes from the last "
+                          f"{ACTIVITY_DAYS} days were read (audit log); "
+                          "older shares are not in this report.")
+    no_service = sorted({u for e in ctx.manifest["modules"].values()
+                         if e.get("note", "").startswith(NO_SERVICE_NOTE)
+                         for u in e["note"][len(NO_SERVICE_NOTE):].split(", ")
+                         if u})
+    if no_service:
+        coverage_note += (" Accounts with Gmail, Drive or Calendar switched "
+                          "off had nothing to read for that service: "
+                          f"{', '.join(no_service)}.")
+    not_applicable = sorted(
+        MODULE_BY_KEY.get(k, {}).get("title", k)
+        for k, e in ctx.manifest["modules"].items() if e["status"] == "n/a")
+    if not_applicable:
+        coverage_note += (" Not applicable to this tenant (no Education "
+                          f"licence): {', '.join(not_applicable)}.")
+    bg_seen = meta.get("break_glass_seen") or []
+    if bg_seen:
+        coverage_note += (" Emergency (break-glass) accounts excluded from the "
+                          "dormancy checks as configured: "
+                          f"{', '.join(sorted(bg_seen))}.")
     never_skipped = ctx.manifest["meta"].get("skipped_never_logged_in", 0)
     if never_skipped:
         coverage_note += (f" {never_skipped} account(s) that have never "
@@ -5317,70 +6429,49 @@ def render_html(ctx: RunContext, findings: List[Finding]) -> Path:
 <meta charset='utf-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1'>
 <title>Workspace Audit - {escape(domain)}</title>
-<style>
-  body {{ font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-         margin: 0; color: #222; background: #f5f6f8; }}
-  .wrap {{ max-width: 960px; margin: 0 auto; padding: 24px; }}
-  header.page {{ background: #1a2733; color: #fff; padding: 32px 24px; }}
-  header.page h1 {{ margin: 0 0 4px; font-size: 26px; }}
-  header.page p {{ margin: 0; color: #b8c4cf; }}
-  .tiles {{ display: flex; gap: 16px; margin: 24px 0; flex-wrap: wrap; }}
-  .tile {{ background: #fff; border-radius: 8px; padding: 16px 24px;
-          box-shadow: 0 1px 3px rgba(0,0,0,.12); min-width: 110px;
-          text-align: center; }}
-  .tile .num {{ font-size: 32px; font-weight: 700; }}
-  .tile .lbl {{ color: #667; }}
-  section.finding {{ background: #fff; border-radius: 8px; padding: 16px 24px;
-          margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.12); }}
-  .sev {{ color: #fff; font-size: 12px; padding: 2px 8px; border-radius: 4px;
-          vertical-align: middle; margin-right: 6px; }}
-  table {{ border-collapse: collapse; width: 100%; font-size: 14px; }}
-  th, td {{ text-align: left; padding: 6px 10px;
-          border-bottom: 1px solid #e4e7ea; }}
-  th {{ background: #f0f2f4; }}
-  .scroll {{ overflow-x: auto; }}
-  .more {{ color: #667; font-size: 13px; }}
-  .fid {{ color: #889; font-size: 12px; font-weight: normal; }}
-  footer {{ color: #667; font-size: 13px; padding: 24px; text-align: center; }}
-  @media print {{
-    body {{ background: #fff; }}
-    section.finding, .tile {{ box-shadow: none;
-          border: 1px solid #ccc; page-break-inside: avoid; }}
-    a {{ color: #222; text-decoration: none; }}
-  }}
-</style>
+<style>{STYLE}</style>
 </head>
-<body>
-<header class='page'>
+<body class='locked'>
+<noscript><p style="padding:40px;font-size:18px">This report needs
+JavaScript to open. Allow scripts for this file, or ask Outsource House
+(https://osh.co.za) for a PDF copy.</p></noscript>
+<header class='page'><div class='inner'>
   <h1>Google Workspace Audit - {escape(domain)}</h1>
   <p>Customer {escape(meta.get('customer_id', '?'))} &middot;
      collected {escape(meta.get('collected_at', 'unknown'))} &middot;
      rendered {datetime.now().strftime('%Y-%m-%d %H:%M')} &middot;
      tenant_scope.py v{SCRIPT_VERSION} (read-only audit)</p>
-</header>
+  <p>{_credit_html("osh-credit-head")}</p>
+</div></header>
 <div class='wrap'>
   <div class='tiles'>{tiles}</div>
-  <section class='finding'>
+  {like_for_like}
+  {scores}
+  {top_block}
+  <section class='card'>
     <h3>How to read this report</h3>
     <p>Findings are ordered by severity. Each one says what was found, why
     it matters, and what to do about it, with a sample of the affected
     items; full lists sit in the CSV files next to this report.
     {escape(coverage_note)}</p>
   </section>
+  {changed}
   {sections}
+  {upgrade_block}
   {dns_block}
   {clean_block}
   {not_checked_block}
-  <section class='finding'>
+  <section class='card'>
     <h3>Preflight checks</h3>
     <div class='scroll'><table><thead>
     <tr><th>Check</th><th>Result</th><th>Consequence</th></tr></thead>
     <tbody>{preflight_rows}</tbody></table></div>
   </section>
 </div>
-<footer>Produced by tenant_scope.py v{SCRIPT_VERSION} -
-Paul Ogier, Outsource House (osh.co.za) - print this page for a PDF copy.
+<footer>{_credit_html("osh-credit-foot")} with tenant_scope.py
+v{SCRIPT_VERSION}. Print this page for a PDF copy.
 </footer>
+{_credit_guard_script()}
 </body>
 </html>"""
     out_path = ctx.run_dir / "audit_report.html"
@@ -5389,20 +6480,121 @@ Paul Ogier, Outsource House (osh.co.za) - print this page for a PDF copy.
     findings_csv = ctx.run_dir / "findings.csv"
     with open(findings_csv, "w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["severity", "id", "title", "count", "source"])
+        writer.writerow(["severity", "id", "title", "count", "source",
+                         "change", "modules"])
         for finding in findings:
             writer.writerow([finding.severity, finding.fid, finding.title,
-                             finding.count, finding.source])
+                             finding.count, finding.source, finding.change,
+                             ";".join(finding.modules)])
     print_success(f"Findings CSV written: {findings_csv}")
     evidence_csv = ctx.run_dir / "findings_evidence.csv"
     evidence_rows = []
     for finding in findings:
         for row in finding.all_evidence:
-            evidence_rows.append(dict({"id": finding.fid,
-                                       "severity": finding.severity}, **row))
+            eid = _evidence_id(finding, row)
+            evidence_rows.append(dict(
+                {"id": finding.fid, "severity": finding.severity,
+                 "evidence_id": eid,
+                 "change": finding.row_changes.get(eid, finding.change)},
+                **row))
     write_rows(evidence_csv, evidence_rows)
     print_success(f"Evidence CSV written: {evidence_csv}")
     return out_path
+
+
+###############################################################################
+# DELIVERY GATE AND INTERNAL QA REPORT
+###############################################################################
+
+def delivery_gate(ctx: RunContext) -> Tuple[bool, List[str]]:
+    """Whether the report can go to the client without a person reading it
+    first, and if not, why. Same rules as m365_scope.py."""
+    reasons = []
+    if not ctx.manifest["meta"].get("complete"):
+        reasons.append("the run did not finish")
+    broken = [k for k in DELIVERY_CRITICAL_MODULES
+              if ctx.module_status(k) in ("error", "partial", "skipped")]
+    if broken:
+        reasons.append("modules behind critical checks did not complete: "
+                       + ", ".join(broken))
+    return not reasons, reasons
+
+
+def exit_code(ctx: RunContext) -> int:
+    """0 complete, 2 complete but some modules could not run, 130 stopped.
+    1 (preflight failed) is returned before anything is collected."""
+    if shutdown_requested or not ctx.manifest["meta"].get("complete", True):
+        return 130
+    if any(e.get("status") in ("error", "partial", "skipped")
+           for e in ctx.manifest["modules"].values()):
+        return 2
+    return 0
+
+
+def render_qa(ctx: RunContext, history: Dict,
+              gate: Tuple[bool, List[str]]) -> Path:
+    """qa_report.html: the delivery verdict and run detail for whoever sends
+    the report. Never sent to the client."""
+    meta = ctx.manifest["meta"]
+    ok, reasons = gate
+    verdict = ("<p style='color:#27ae60'><strong>Ready to send.</strong></p>"
+               if ok else
+               "<p style='color:#c0392b'><strong>Hold for review:</strong>"
+               "</p><ul>" + "".join(f"<li>{escape(r)}</li>" for r in reasons)
+               + "</ul>")
+    mods = "".join(
+        f"<tr><td>{escape(k)}</td><td>{escape(e.get('status', ''))}</td>"
+        f"<td>{e.get('rows', '')}</td><td>{escape(e.get('note', ''))}</td>"
+        "</tr>" for k, e in sorted(ctx.manifest["modules"].items()))
+    domain = meta.get("primary_domain", "")
+    html = f"""<!DOCTYPE html>
+<html lang='en'><head><meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>QA - {escape(domain)}</title><style>{STYLE}</style></head>
+<body><header class='page'><div class='inner'>
+<h1>Internal QA: {escape(meta.get('tenant_name') or domain)}</h1>
+<p>Never send this file to the client. Run {escape(ctx.run_dir.name)}
+&middot; customer {escape(meta.get('customer_id', '?'))}</p>
+</div></header><div class='wrap'>
+<h2>Delivery gate</h2><section class='card'>{verdict}</section>
+<h2>Comparison</h2><section class='card'><p>Previous run:
+{escape(str(history.get('previous') or 'none'))}; new
+{len(history.get('new', []))}, persisting {len(history.get('persisting', []))},
+resolved {len(history.get('resolved', []))}, not compared
+{len(history.get('not_compared', []))}.</p></section>
+<h2>Modules</h2><section class='card'><div class='scroll'><table><thead><tr>
+<th>Module</th><th>Status</th><th>Rows</th><th>Note</th></tr></thead>
+<tbody>{mods}</tbody></table></div></section>
+</div></body></html>"""
+    out = ctx.run_dir / "qa_report.html"
+    out.write_text(html, encoding="utf-8")
+    print_success(f"QA report written: {out}")
+    return out
+
+
+def finish(ctx: RunContext) -> Tuple[int, Path]:
+    """check, compare, render both reports; returns (exit code, report)."""
+    findings = run_checks(ctx)
+    history = compare_with_previous(ctx, findings, find_previous_run(ctx))
+    report = render_html(ctx, findings, history)
+    gate = delivery_gate(ctx)
+    ctx.manifest["meta"]["delivery_ready"] = gate[0]
+    ctx.save()
+    render_qa(ctx, history, gate)
+    if gate[0]:
+        print_success("Delivery gate: ready to send.")
+    else:
+        print_warning("Delivery gate: hold for review ("
+                      + "; ".join(gate[1]) + "). See qa_report.html.")
+    worst = next((f.severity for f in findings
+                  if f.severity in ("CRITICAL", "HIGH")), None)
+    if worst:
+        print_warning(f"Highest severity found: {worst}. "
+                      "Open audit_report.html for the detail.")
+    else:
+        print_success("No critical or high findings. "
+                      "Open audit_report.html for the full picture.")
+    return exit_code(ctx), report
 
 
 ###############################################################################
@@ -5439,7 +6631,7 @@ def parse_args(argv=None):
     parser.add_argument("--skip-tier", type=_tier_list, default=[],
                         help="Comma-separated tiers to skip, e.g. --skip-tier 3")
     parser.add_argument("--full", action="store_true",
-                        help="Include the tier-4 modules (filters, vacation, "
+                        help="Include the tier-4 modules (vacation, "
                         "browsers, context-aware access, Gmail profile "
                         "sizes, Drive file counts)")
     parser.add_argument("--no-dns", action="store_true",
@@ -5453,6 +6645,20 @@ def parse_args(argv=None):
                         "members can list, temporarily add --admin as "
                         "organizer, scan, then remove the grant. Without "
                         "this, those drives are reported UNSCANNED.")
+    parser.add_argument("--tenants", type=Path, default=None,
+                        help="tenants.json naming each client's GAM config "
+                        "folder, customer ID and break-glass accounts "
+                        "(default ~/.osh/workspace-audit/tenants.json)")
+    parser.add_argument("--tenant", help="Audit this tenant key from "
+                        "tenants.json")
+    parser.add_argument("--all", action="store_true",
+                        help="Audit every enabled tenant in tenants.json, one "
+                        "after another; one tenant failing does not stop the "
+                        "rest, and the exit code is the worst of them")
+    parser.add_argument("--compare-with", type=Path, default=None,
+                        help="Run directory to compare with (default: the "
+                        "newest completed earlier run of the same customer "
+                        "in the same output folder)")
     parser.add_argument("--render-only", action="store_true",
                         help="Skip collection; re-run checks and render from "
                         "an existing --run-dir")
@@ -5477,6 +6683,12 @@ def parse_args(argv=None):
         parser.error("--render-only needs --run-dir")
     if args.grant_temp_access and not args.admin:
         parser.error("--grant-temp-access needs --admin")
+    if args.tenant and args.all:
+        parser.error("--tenant and --all are alternatives")
+    if args.all and (args.run_dir or args.compare_with):
+        parser.error("--run-dir and --compare-with name one tenant's runs; "
+                     "use --tenant with them")
+    args.tenant_entry = None
     return args
 
 
@@ -5519,36 +6731,69 @@ def open_report(path: Path, args) -> bool:
     return opened
 
 
-def main(argv=None):
-    args = parse_args(argv)
-    if args.list:
-        list_modules()
-        return 0
+class ConfigError(Exception):
+    pass
 
+
+def load_tenants(path: Path) -> Dict[str, Dict]:
+    """tenants.json -> {key: entry}. Each entry needs the customer ID the
+    run must find (the hard stop against auditing the wrong tenant); the GAM
+    config folder, name and break-glass list are optional."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ConfigError(f"Cannot read {path}: {exc}")
+    tenants = {}
+    for key, entry in (data.get("tenants") or {}).items():
+        if not entry.get("customer_id"):
+            raise ConfigError(f"tenants.{key} has no customer_id")
+        entry = dict(entry, key=key)
+        entry.setdefault("name", key)
+        entry.setdefault("enabled", True)
+        entry["break_glass"] = [u.lower() for u in entry.get("break_glass", [])]
+        if entry.get("gamcfgdir"):
+            entry["gamcfgdir"] = str(Path(entry["gamcfgdir"]).expanduser())
+        tenants[key] = entry
+    return tenants
+
+
+def run_tenant(args, tenant: Optional[Dict]) -> int:
+    """One audit, start to finish; returns its exit code. With a tenant from
+    tenants.json, GAM runs against that tenant's config folder (GAMCFGDIR)
+    and its runs live under <output-dir>/<tenant key>/ so each tenant's
+    history stays separate."""
+    args.tenant_entry = tenant
+    if tenant and tenant.get("gamcfgdir"):
+        os.environ["GAMCFGDIR"] = tenant["gamcfgdir"]
     if args.run_dir:
         run_dir = args.run_dir
         if not run_dir.is_dir():
             print(f"Run directory not found: {run_dir}")
-            return 2
+            return 1
     else:
         root = args.output_dir or OUTPUT_DIRECTORY
+        if tenant:
+            root = root / tenant["key"]
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         run_dir = root / f"tenant_audit_{stamp}"
         run_dir.mkdir(parents=True, exist_ok=True)
 
     setup_logging(run_dir)
-    print_header(f"TENANT SCOPING AUDIT v{SCRIPT_VERSION}")
+    print_header(f"TENANT SCOPING AUDIT v{SCRIPT_VERSION}"
+                 + (f": {tenant['name']}" if tenant else ""))
     print_info(f"Run directory: {run_dir}")
-    if not args.render_only:
-        check_for_updates()
 
     ctx = RunContext(run_dir, args)
+    if tenant:
+        ctx.manifest["meta"].update(tenant_key=tenant["key"],
+                                    tenant_name=tenant["name"],
+                                    break_glass=tenant["break_glass"])
     modules = selected_modules(args)
 
     if args.render_only:
-        findings = run_checks(ctx)
-        open_report(render_html(ctx, findings), args)
-        return 0
+        code, report = finish(ctx)
+        open_report(report, args)
+        return code
 
     if not preflight(ctx, modules):
         print_error("Preflight failed; nothing was collected.")
@@ -5558,25 +6803,70 @@ def main(argv=None):
     if args.dry_run:
         print_info("Dry run complete - no data collected, no report rendered.")
         return 0
-    findings = run_checks(ctx)
-    report_path = render_html(ctx, findings)
+    # Only a run that collected every selected module is a baseline for next
+    # month's comparison; set before rendering so a re-render keeps it.
+    ctx.manifest["meta"]["complete"] = not shutdown_requested
+    ctx.save()
+    code, report = finish(ctx)
     if shutdown_requested:
         # A stopped run still renders what it has, but a scheduled --yes run
         # must be able to tell "complete" from "stopped at module 3".
         print_warning("Run was interrupted; the report covers the modules "
                       f"collected so far. Resume with --run-dir {run_dir}")
-        return 130
+    open_report(report, args)
+    return code
 
-    worst = next((f.severity for f in findings
-                  if f.severity in ("CRITICAL", "HIGH")), None)
-    if worst:
-        print_warning(f"Highest severity found: {worst}. "
-                      "Open audit_report.html for the detail.")
+
+def main(argv=None):
+    args = parse_args(argv)
+    if args.list:
+        list_modules()
+        return 0
+    if not args.render_only:
+        check_for_updates()
+    if not (args.tenant or args.all):
+        return run_tenant(args, None)
+
+    path = args.tenants or next(
+        (c for c in TENANTS_FILE_CANDIDATES if c.is_file()), None)
+    if not path:
+        print("No tenants.json found. Copy tenants.example.json to "
+              "~/.osh/workspace-audit/tenants.json and fill it in, or pass "
+              "--tenants.")
+        return 1
+    try:
+        tenants = load_tenants(path)
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}")
+        return 1
+    if args.all:
+        chosen = [t for t in tenants.values() if t["enabled"]]
+    elif args.tenant in tenants:
+        chosen = [tenants[args.tenant]]
     else:
-        print_success("No critical or high findings. "
-                      "Open audit_report.html for the full picture.")
-    open_report(report_path, args)
-    return 0
+        print(f"Tenant '{args.tenant}' is not in {path}. "
+              f"Known: {', '.join(sorted(tenants))}")
+        return 1
+    worst = 0
+    saved_cfg = os.environ.get("GAMCFGDIR")
+    for tenant in chosen:
+        if shutdown_requested:
+            break
+        try:
+            code = run_tenant(args, tenant)
+        except Exception as exc:            # one tenant must not stop the rest
+            print_error(f"{tenant['key']}: {type(exc).__name__}: {exc}")
+            code = 1
+        finally:
+            # Never let one tenant's GAM config leak into the next.
+            if saved_cfg is None:
+                os.environ.pop("GAMCFGDIR", None)
+            else:
+                os.environ["GAMCFGDIR"] = saved_cfg
+        if EXIT_PRIORITY.index(code if code in EXIT_PRIORITY else 1) \
+                > EXIT_PRIORITY.index(worst):
+            worst = code
+    return worst
 
 
 if __name__ == "__main__":

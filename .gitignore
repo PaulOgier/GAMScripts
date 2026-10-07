@@ -34,6 +34,8 @@ google-workspace-offboarding/SESSION_RECOVERY_*.md
 
 # Tenant audit run data (real tenant CSVs; never on GitHub).
 google-workspace-security-audit/tenant_audit_runs/
+# A real tenants.json names clients; only tenants.example.json is shipped.
+google-workspace-security-audit/tenants.json
 
 # Local-only docs-coverage guard, run by .git/hooks/pre-commit.
 google-workspace-offboarding/check-docs-coverage.py

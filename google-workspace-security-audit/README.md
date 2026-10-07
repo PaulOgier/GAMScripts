@@ -81,6 +81,8 @@ the full module registry with keys and tiers.
 - Files shared with entire external domains [High]
 - Files shared to named external people [Medium]
 - Externally-owned files shared into the tenant [Info]
+- Files opened to anyone in the last 30 days, from the Drive audit log [High]
+- Files shared with outside people in the last 30 days, per user [Medium]
 - Drive for desktop allowed on any computer, and Takeout per service [Info]
 
 ### Shared Drives
@@ -104,6 +106,7 @@ the full module registry with keys and tiers.
 - Organisational units where policy blocks 2SV enrolment [High]
 - 2SV enrolment percentage across the tenant [Medium]
 - 2SV that accepts text or phone-call codes [Medium]
+- Super admins with 2SV but no security key or passkey [Medium]
 - Super admins enrolled in 2SV but not held to it by policy [Medium]
 - Super admins with no backup codes [Medium]
 - Super admins who can reset their own password by phone or email [Medium]
@@ -130,6 +133,8 @@ the full module registry with keys and tiers.
 
 - Mailboxes **forwarding outside the organisation** [Critical]
 - Gmail filters forwarding externally [High]
+- Gmail filters that hide mail about invoices or payments, or everything from
+  one outside sender, the way a mailbox takeover does [High]
 - Gmail phishing and malware protections switched off, listed per switch and
   per organisational unit [Medium]
 - External forwarding addresses on file even where forwarding is off [Medium]
@@ -168,6 +173,8 @@ the full module registry with keys and tiers.
 
 - Third-party apps holding full or read-everything Gmail or Drive access
   [Medium]
+- Domain-wide delegation granted in the last 30 days, with broad scopes
+  [Medium]. No API lists older grants, so they stay on the check-by-hand list.
 - Every third-party app holding a token, with user counts and unidentified
   apps called out, plus third-party app access as the API reports it [Info]
 
@@ -195,8 +202,15 @@ the full module registry with keys and tiers.
 - Which Google services are switched on or off [Info]
 - The security-checklist settings no API exposes, listed so they get checked
   by hand in the Admin console, and other checklist settings (Advanced
-  Protection, passkeys, Chat file sharing, internal app trust, mail import
-  and more) shown raw [Info]
+  Protection, passkeys, mail import and more) shown raw [Info]
+- Settings looser than the CISA Google Workspace baseline: automatic
+  forwarding allowed, 2-step verification skipped on trusted devices,
+  internal apps trusted, any Marketplace app installable, Drive publishing to
+  the web, Drive suggesting public sharing, new files open to the whole
+  organisation, flagged attachments and spoofed mail left in the inbox, and
+  anyone able to create groups [Medium]; lower-risk baseline items [Info].
+  A setting nobody changed is judged at Google's documented default, and the
+  report says so.
 
 ### Google Classroom (Education tenants only)
 
@@ -225,8 +239,14 @@ runs can be diffed by who was named, not just by counts.
   assets), severity tiles up top, one section per finding with plain-English
   "what this means" and "what to do" copy, and evidence samples. Print it for
   a clean PDF.
-- `findings.csv`: the findings list in machine-readable form.
-- `findings_evidence.csv`: every evidence row of every finding.
+- `findings.csv`: the findings list in machine-readable form, with whether
+  each is new or carried over from last month.
+- `findings_evidence.csv`: every evidence row of every finding, with a stable
+  `evidence_id` for comparing months.
+- The report is credited to Outsource House (OSH.co.za) in its header and
+  footer, as the repository's NOTICE file requires. A report whose credit or
+  link was edited, removed or hidden shows a notice instead of its contents.
+- `qa_report.html`: for you, not the client. The delivery verdict.
 - One CSV per collected module, so every finding can be traced back to raw
   data.
 - `tenant_scope.log` + `gam_stderr.log`: the full audit trail.
@@ -283,11 +303,15 @@ timestamped run directory, with the report opened at the end.
 |---|---|
 | `--admin <email>` | The auditing admin. Verifies the service account's DWD scopes in the preflight, and is the account the Shared Drive scans run as. Without it those scans are skipped and per-user modules run unverified. |
 | `--list` | Print the module registry (key, title, tier) and exit. |
-| `--full` | Add the tier-4 modules: Gmail filters, vacation responders, managed browsers, context-aware access, Gmail profile sizes and Drive file counts. |
+| `--full` | Add the tier-4 modules: vacation responders, managed browsers, context-aware access, Gmail profile sizes and Drive file counts. |
 | `--only <keys>` | Comma-separated module keys; everything else is skipped. |
 | `--skip <keys>` | Comma-separated module keys to skip. |
 | `--skip-tier <n>` | Skip a whole tier, e.g. `--skip-tier 3` to leave out the heavy Drive scans. |
 | `--no-dns` | Skip the DNS checks. |
+| `--tenants <file>` | The tenants file (default `~/.osh/workspace-audit/tenants.json`). |
+| `--tenant <key>` | Audit one tenant from the tenants file. |
+| `--all` | Audit every enabled tenant in the tenants file, one after another. |
+| `--compare-with <dir>` | Compare with this run instead of the newest completed earlier run of the same customer. |
 | `--include-suspended` | Include suspended accounts in the per-user scans. Default is active accounts only, and the report says which. |
 | `--skip-never-logged-in` | Exclude accounts that have never signed in from the per-user scans. |
 | `--grant-temp-access` | The one write in the script. Needs `--admin`. See below. |
@@ -379,6 +403,10 @@ on a 4 GB machine and 10m49s on a 3 GB one, with no API rate-limit retries on
 either; memory is the ceiling, not Google's quota. Set `SCAN_THREADS` to 10 on
 a small box.
 
+Since v1.7.0 the default run also reads every active user's Gmail filters, one
+more per-mailbox sweep, so the check for filters that hide payment mail runs
+every month. Skip it with `--skip filters` on a tenant where that is too slow.
+
 Timeouts scale with the size of the tenant. GAM's own progress counters are
 echoed to the console every 30 seconds during a long scan, so a Drive
 enumeration that runs for hours doesn't look like a hang. If a command is
@@ -395,15 +423,35 @@ everything.
 Each run writes into its own timestamped directory under
 `./tenant_audit_runs/` (change with `--output-dir`). Runs are resumable:
 `manifest.json` records completed modules, and `--run-dir` picks up where a
-run stopped. A module marked partial because some mailboxes could not be read
-(Gmail off, for instance) is not re-run on resume, since it would only end
-partial again; one cut short by a timeout is.
+run stopped. An account with Gmail, Drive or Calendar switched off has nothing
+to read, so it does not make a module partial; the report names those
+accounts. A module marked partial for another reason is not re-run on resume,
+since it would only end partial again; one cut short by a timeout is.
 
 A default run on a small tenant takes a few minutes. The tier-3 Drive scans
 are the expensive part on large tenants; run them overnight, or start with
 `--skip-tier 3` and fill in the blanks later: run again with
 `--run-dir <that dir>` and no skip flag, and only the missing modules
 execute before the report re-renders over the complete data set.
+
+### Monthly runs and several tenants
+
+Copy `tenants.example.json` to `~/.osh/workspace-audit/tenants.json` and add
+one entry per client: its customer ID, and optionally the GAM config folder
+for that tenant (`gamcfgdir`, used as `GAMCFGDIR`), emergency super admins
+(`break_glass`). Keep the real file out of the
+repository, since it names your clients.
+
+- The run stops before collecting anything if `gam info domain` answers with
+  a different customer ID from the one in the file.
+- Runs go to `<output-dir>/<tenant key>/`, so each tenant's history stays
+  separate.
+- Break-glass accounts are left out of the dormancy checks and named in the
+  report, rather than showing up every month as dormant admins.
+- `--all` carries on when one tenant fails and returns the worst exit code.
+
+Exit codes: `0` complete, `1` preflight failed or wrong tenant, `2` complete
+but some modules could not run, `130` interrupted.
 
 ### Reading the report
 
@@ -423,6 +471,26 @@ A finding looks like this in the HTML:
 Evidence tables show a sample (10 rows by default) with the true total in
 the headline; the full list is always in the module's CSV next to the
 report.
+
+Under the severity tiles:
+
+- **Posture score.** Google has no score of its own, so one is calculated
+  from the findings: 15 points per critical, 7 per high and 3 per medium
+  finding, and the score halves for every 70 points. It never reaches 0, so
+  progress shows even on a badly set-up tenant. It uses the same formula as
+  the Microsoft 365 audit.
+- **Top actions.** The five most serious findings, each with the first step
+  to take.
+- **What changed since last month.** Each finding is marked new or carried
+  over, rows within a finding are marked new, and resolved findings are
+  listed. Only a completed earlier run of the same customer is used. A
+  finding whose data was missing or only partly collected in either run is
+  "not compared", never "resolved".
+- **Upgrade opportunities.** Protections the tenant's edition does not
+  include. They are never counted against the score.
+
+`qa_report.html` says "Ready to send" or "Hold for review" with the reasons:
+the run did not finish, or a module behind a critical check failed.
 
 ### DNS checks
 
@@ -462,6 +530,13 @@ which path ran.
 - **Drive-only sharing audit scripts**. External file sharing is one section
   of this report, alongside admins, 2SV, Gmail, Groups, licences, OAuth apps
   and DNS.
+- **CISA ScubaGoggles.** CISA's tool for checking a tenant against its SCuBA
+  Google Workspace baselines. This script's baseline settings checks were
+  written with ScubaGoggles as a guide (its rules are public domain), and run
+  on the data GAM already collects, so no second tool or set of credentials
+  is needed. ScubaGoggles reports configuration; this script also reports
+  the people-level findings it does not: who forwards mail outside, which
+  files are public, dormant admins, risky app grants.
 
 ## Frequently asked questions
 

@@ -9,6 +9,7 @@ resume. No GAM calls are made anywhere in here.
 
 import argparse
 import json
+import os
 import re
 import sys
 import tempfile
@@ -24,7 +25,7 @@ def make_args(**overrides):
                 no_dns=False, include_suspended=False,
                 skip_never_logged_in=False, no_open=True,
                 grant_temp_access=False, render_only=False, dry_run=False,
-                yes=True)
+                yes=True, compare_with=None)
     base.update(overrides)
     return argparse.Namespace(**base)
 
@@ -211,6 +212,51 @@ user@example.com,f1,vendor@example.com,forward leak@evil.example.net""")
 user@example.com,f1,boss@example.com,team@example.com""")
         self.assertEqual([], ts.check_filter_forwarding(self.ctx))
 
+    BEC_HEADER = "User,id,from,subject,query,label,trash,archive,markread"
+
+    def bec(self, line):
+        self.write_csv("filters", f"{self.BEC_HEADER}\n{line}")
+        return ts.check_filter_bec(self.ctx)
+
+    def test_bec_payment_word_plus_trash_fires(self):
+        # GAM7 prefixes each value with its column name.
+        found = self.bec("u@example.com,f1,,subject Invoice 2231,,,trash,,")
+        self.assertEqual(["filter-bec-patterns"], self.finding_ids(found))
+        self.assertEqual("hides mail about 'invoice'",
+                         found[0].evidence[0]["Why"])
+
+    def test_bec_payment_word_with_only_a_label_is_clean(self):
+        self.assertEqual([], self.bec(
+            "u@example.com,f1,,subject invoice,,label Accounts,,,"))
+
+    def test_bec_word_inside_another_word_is_clean(self):
+        # "eft" in "left", "ceo" in "ceorganic": whole words only.
+        self.assertEqual([], self.bec(
+            "u@example.com,f1,,subject who left the office,,,trash,,"))
+
+    def test_bec_single_external_sender_marked_read_fires(self):
+        found = self.bec(
+            "u@example.com,f1,from ceo@lookalike.example.net,,,,,,markread")
+        self.assertEqual("hides mail from ceo@lookalike.example.net",
+                         found[0].evidence[0]["Why"])
+
+    def test_bec_newsletter_archived_is_clean(self):
+        self.assertEqual([], self.bec(
+            "u@example.com,f1,from news@vendor.example.net,,,,,archive,"))
+        self.assertEqual([], self.bec(
+            "u@example.com,f1,from boss@example.com,,,,trash,,"))
+
+    def test_bec_blending_label_fires(self):
+        found = self.bec(
+            "u@example.com,f1,from x@vendor.example.net,,,label RSS Feeds,,archive,")
+        self.assertIn("label 'RSS Feeds'", found[0].evidence[0]["Why"])
+
+    def test_bec_partial_sweep_is_stated(self):
+        self.write_csv("filters", f"""{self.BEC_HEADER}
+u@example.com,f1,,query wire transfer,,,trash,,""", status="partial")
+        found = ts.check_filter_bec(self.ctx)
+        self.assertIn("only be read for some users", found[0].meaning)
+
 
 class TestDriveChecks(CtxTestCase):
     FILELIST_HEADER = ("Owner,id,name,mimeType,owners.0.emailAddress,"
@@ -259,6 +305,20 @@ sd1,Client Drive,p2,user,staff@example.com,organizer,False""")
         ids = self.finding_ids(findings)
         self.assertIn("sd-external-members", ids)
         self.assertEqual(1, findings[0].count)
+        self.assertEqual("not scanned", findings[0].evidence[0]["Files in drive"])
+
+    def test_shared_drive_members_with_file_count_and_outside_domain(self):
+        self.ctx.manifest["meta"]["shared_drive_file_counts"] = {"sd1": 3000}
+        self.write_csv("shareddriveacls", """id,name,permission.id,permission.type,permission.emailAddress,permission.domain,permission.role,permission.deleted
+sd1,Client Drive,p1,user,partner@other.example.net,other.example.net,reader,False
+sd1,Client Drive,p2,domain,,partner.example.org,reader,False
+sd1,Client Drive,p3,domain,,example.com,reader,False""")
+        found = ts.check_shared_drive_external(self.ctx)[0]
+        self.assertEqual(
+            [("partner@other.example.net", "3000"),
+             ("everyone at partner.example.org", "3000")],
+            [(r["External member"], r["Files in drive"])
+             for r in found.evidence])
 
     def test_deleted_user_acl_not_external(self):
         # Deleted users remain as ACL rows with permission.deleted=True and
@@ -300,6 +360,11 @@ class TestExternalFileShareChecks(CtxTestCase):
                                        findings["external-domain-shares"].evidence])
         self.assertEqual("MEDIUM", findings["external-user-shares"].severity)
         self.assertEqual("HIGH", findings["external-domain-shares"].severity)
+        aud = findings["target-audience-shares"]
+        self.assertEqual("INFO", aud.severity)
+        self.assertEqual([{"Audience ID": "c03abc", "Files": "1",
+                           "Example file": "aud.doc",
+                           "Owner": "u@example.com"}], aud.evidence)
 
     def test_anyone_rows_not_double_reported(self):
         # anyone-type ACLs belong to check_public_files, not this check.
@@ -487,9 +552,25 @@ never@example.com,2026-08-13,UNKNOWN,UNKNOWN,0,0""")
                           "short@example.com": "shorter than the policy minimum"},
                          {r["User"]: r["Problem"] for r in findings[0].evidence})
         second = ts.check_admin_second_factors(self.ctx)
+        self.assertEqual(["admin-second-factors"], self.finding_ids(second))
         self.assertEqual([{"Super admin": "boss@example.com",
                            "Security keys": "2", "Passkeys": "1",
                            "2SV enrolled": "True"}], second[0].evidence)
+
+    def test_admin_with_only_codes_is_not_phish_resistant(self):
+        self.write_csv("users", f"""{USERS_HEADER}
+app@example.com,False,False,2026-08-01T10:00:00Z,True,True,,True,False,Business
+key@example.com,False,False,2026-08-01T10:00:00Z,True,True,,True,False,Business
+no2sv@example.com,False,False,2026-08-01T10:00:00Z,False,False,,True,False,Business""")
+        self.write_csv("report_users", """email,accounts:num_security_keys,accounts:num_passkeys_enrolled
+app@example.com,0,0
+key@example.com,1,0
+no2sv@example.com,0,0""")
+        found = {f.fid: f for f in ts.check_admin_second_factors(self.ctx)}
+        # no2sv already has its own CRITICAL finding; not repeated here.
+        self.assertEqual([{"Super admin": "app@example.com"}],
+                         found["admins-not-phish-resistant"].evidence)
+        self.assertEqual("MEDIUM", found["admins-not-phish-resistant"].severity)
 
 
 class TestRound9DriveAndVault(CtxTestCase):
@@ -856,6 +937,18 @@ import csv as _csv
 
 
 class PolicyTestCase(CtxTestCase):
+    """Check-logic tests over hand-built partial policies. Google's defaults
+    are switched off here, or every missing field would take its default;
+    TestPolicyDefaults covers them."""
+    defaults_file = None
+
+    def setUp(self):
+        super().setUp()
+        original = ts.POLICY_DEFAULTS_FILE
+        ts.POLICY_DEFAULTS_FILE = (self.defaults_file
+                                   or self.run_dir / "no-defaults.json")
+        self.addCleanup(setattr, ts, "POLICY_DEFAULTS_FILE", original)
+
     def write_policies(self, settings, broken_rows=()):
         """settings: list of (type, orgUnitPath, value-dict) or
         (type, orgUnitPath, value-dict, sortOrder). Writes a policies.csv
@@ -954,6 +1047,87 @@ class TestPolicyParsing(PolicyTestCase):
             [("security.password", "/", {"minimumLength": 8})],
             broken_rows=["{this is not json at all"])
         self.assertEqual(1, len(ts._policy_settings(self.ctx)))
+
+
+class TestPolicyDefaults(PolicyTestCase):
+    defaults_file = ts.POLICY_DEFAULTS_FILE
+
+    def by_type(self):
+        return {(p["type"], p["ou"]): p for p in ts._policy_settings(self.ctx)}
+
+    def test_shipped_defaults_file_loads(self):
+        data = json.loads(ts.POLICY_DEFAULTS_FILE.read_text(encoding="utf-8"))
+        self.assertTrue(data["defaults"]["gmail.auto_forwarding"][
+            "enableAutoForwarding"])
+
+    def test_missing_setting_takes_google_default_at_root_only(self):
+        self.write_policies([("gmail.auto_forwarding", "/Sales",
+                              {"enableAutoForwarding": False}, 201.0)])
+        got = self.by_type()
+        root = got[("gmail.auto_forwarding", "/")]
+        self.assertIs(True, root["value"]["enableAutoForwarding"])
+        self.assertEqual(["enableAutoForwarding"], root["defaulted"])
+        # A child org unit's own value is never overwritten.
+        sales = got[("gmail.auto_forwarding", "/Sales")]
+        self.assertIs(False, sales["value"]["enableAutoForwarding"])
+        self.assertNotIn("defaulted", sales)
+
+    def test_admin_value_is_kept_and_only_gaps_filled(self):
+        self.write_policies([("drive_and_docs.external_sharing", "/",
+                              {"allowPublishingFiles": False}, 201.0)])
+        root = self.by_type()[("drive_and_docs.external_sharing", "/")]
+        self.assertIs(False, root["value"]["allowPublishingFiles"])
+        self.assertNotIn("allowPublishingFiles", root["defaulted"])
+        self.assertEqual("ALLOWED", root["value"]["externalSharingMode"])
+
+    def test_baseline_names_default_and_admin_values(self):
+        self.write_policies([("api_controls.internal_apps", "/",
+                              {"trustInternalApps": True}, 201.0)])
+        found = {f.fid: f for f in ts.check_policy_baseline(self.ctx)}
+        rows = {r["Setting"]: r for r in found["policy-baseline"].evidence}
+        self.assertEqual("admin", rows[
+            "Apps built inside the organisation are trusted without review"][
+            "Set by"])
+        fwd = rows["Users can set up automatic forwarding to outside "
+                   "addresses"]
+        self.assertEqual(("Google default", "GWS.GMAIL.11.1"),
+                         (fwd["Set by"], fwd["CISA baseline"]))
+
+    def test_baseline_clean_when_tightened(self):
+        self.write_policies([
+            ("gmail.auto_forwarding", "/", {"enableAutoForwarding": False}, 201.0),
+            ("security.two_step_verification_device_trust", "/",
+             {"allowTrustingDevice": False}, 201.0)])
+        labels = {r["Setting"] for f in ts.check_policy_baseline(self.ctx)
+                  for r in f.evidence}
+        self.assertNotIn("Users can set up automatic forwarding to outside "
+                         "addresses", labels)
+        self.assertNotIn("Users can skip 2-step verification on a device they "
+                         "mark as trusted", labels)
+
+    def test_marketplace_default_only_on_business_tenants(self):
+        self.write_policies([("gmail.auto_forwarding", "/",
+                              {"enableAutoForwarding": False}, 201.0)])
+        key = ("workspace_marketplace.apps_access_options", "/")
+        self.assertEqual("ALLOW_ALL", self.by_type()[key]["value"]["accessLevel"])
+        self.ctx._policy_cache = None
+        self.write_csv("licenses", "userEmail,skuId,skuDisplay\n"
+                       "u@example.com,1010070001,Education Fundamentals")
+        self.assertNotIn("accessLevel", self.by_type()[key]["value"])
+
+    def test_flagged_mail_left_in_inbox(self):
+        self.write_policies([("gmail.email_attachment_safety", "/", {
+            "enableEncryptedAttachmentProtection": True,
+            "encryptedAttachmentProtectionConsequence": "WARNING",
+            "enableAnomalousAttachmentProtection": True,
+            "anomalousAttachmentProtectionConsequence": "SPAM_FOLDER",
+            "enableAttachmentWithScriptsProtection": False,
+            "attachmentWithScriptsProtectionConsequence": "WARNING"}, 201.0)])
+        row = next(r for f in ts.check_policy_baseline(self.ctx)
+                   for r in f.evidence if r["CISA baseline"] == "GWS.GMAIL.5.5")
+        # Only the protection that is on AND only warns is named.
+        self.assertEqual("encryptedAttachmentProtectionConsequence",
+                         row["Value"])
 
 
 class TestPolicyChecks(PolicyTestCase):
@@ -1228,7 +1402,9 @@ class TestPolicyChecks(PolicyTestCase):
             ("security.password", "/", {"minimumLength": 14})])
         findings = ts.check_policy_settings_raw(self.ctx)
         self.assertEqual(["policy-settings-raw"], self.finding_ids(findings))
-        self.assertEqual({"Passkeys allowed", "Chat file sharing"},
+        # Chat file sharing is judged by check_policy_baseline since
+        # v1.7.0, so it is no longer repeated in the raw table.
+        self.assertEqual({"Passkeys allowed"},
                          {e["Setting"] for e in findings[0].evidence})
 
     def test_console_only_list_emitted_with_policies(self):
@@ -1446,14 +1622,15 @@ class TestModuleSelection(unittest.TestCase):
         keys = {m["key"] for m in ts.selected_modules(make_args())}
         self.assertIn("users", keys)
         self.assertIn("dns", keys)
-        self.assertNotIn("filters", keys)
+        # v1.7.0: filters run by default for the takeover-pattern check.
+        self.assertIn("filters", keys)
         # Round 9: two full sweeps nothing reads moved out of the default.
         self.assertNotIn("gmailprofile", keys)
         self.assertNotIn("filecounts", keys)
 
     def test_full_includes_tier4(self):
         keys = {m["key"] for m in ts.selected_modules(make_args(full=True))}
-        self.assertIn("filters", keys)
+        self.assertIn("vacation", keys)
         self.assertIn("caalevels", keys)
 
     def test_only(self):
@@ -1533,9 +1710,9 @@ class TestCollectSimple(CtxTestCase):
                 self.ctx, ts.MODULE_BY_KEY["forwards"])
         finally:
             ts.run_gam = original
-        self.assertEqual("partial", status)
+        self.assertEqual("ok", status)
         self.assertEqual(2, rows)
-        self.assertIn("exit 73", note)
+        self.assertIn("dead@example.com", note)
         written = (self.run_dir / "forwards.csv").read_text(encoding="utf-8")
         self.assertIn("b@example.com", written)
         # And a partial module still feeds the checks engine.
@@ -1555,7 +1732,7 @@ class TestCollectSimple(CtxTestCase):
                 self.ctx, ts.MODULE_BY_KEY["forwards"])
         finally:
             ts.run_gam = original
-        self.assertEqual("partial", status)
+        self.assertEqual("empty", status)
         self.assertEqual(0, rows)
         self.assertTrue((self.run_dir / "forwards.csv").is_file())
 
@@ -1658,6 +1835,8 @@ class TestRender(CtxTestCase):
             out = list(_csv.DictReader(fh))
         self.assertEqual(25, len(out))
         self.assertEqual({"id": "many", "severity": "MEDIUM",
+                          "evidence_id": "many:u24@example.com",
+                          "change": "first_run",
                           "User": "u24@example.com"}, out[-1])
         self.assertEqual(ts.EVIDENCE_ROWS, len(findings[0].evidence))
 
@@ -1676,6 +1855,42 @@ u@example.com,True,x@example.com""")
         self.assertIn("Checked and clean", html)
         self.assertIn(ts.CHECK_TITLES["check_external_forwarding"], html)
 
+    ADMIN_ROW = ("boss@example.com,False,False,2026-08-01T10:00:00Z,True,"
+                 "True,,True,False,Business")
+
+    def test_clean_needs_every_module_the_check_read(self):
+        # users collected, asps failed: no app password data exists, so the
+        # admin app password check must not claim clean (bug in v1.6.2).
+        self.write_csv("users", f"{USERS_HEADER}\n{self.ADMIN_ROW}")
+        self.ctx.set_module("asps", "error", 0, "missing scope")
+        ts.run_checks(self.ctx)
+        titles = dict(self.ctx.clean_checks)
+        self.assertNotIn(ts.CHECK_TITLES["check_admin_asps"], titles)
+        # Control: with both collected and nothing found, it is clean.
+        self.write_csv("asps", """User,codeId,name,creationTime
+user@example.com,1,Old mail app,2025-01-01T00:00:00Z""")
+        ts.run_checks(self.ctx)
+        titles = dict(self.ctx.clean_checks)
+        self.assertEqual("asps, users",
+                         titles[ts.CHECK_TITLES["check_admin_asps"]])
+
+    def test_partial_module_is_not_clean(self):
+        self.write_csv("forwards", """User,forwardEnabled,forwardTo
+u@example.com,False,""", status="partial")
+        ts.run_checks(self.ctx)
+        self.assertNotIn(ts.CHECK_TITLES["check_external_forwarding"],
+                         dict(self.ctx.clean_checks))
+
+    def test_optional_module_does_not_block_clean(self):
+        # Password strength reads users only to drop suspended accounts;
+        # without it the check still saw every password rating.
+        self.write_csv("report_users", """email,accounts:password_strength,accounts:password_length_compliance
+u@example.com,STRONG,COMPLIANT""")
+        self.ctx.set_module("users", "error", 0, "denied")
+        ts.run_checks(self.ctx)
+        self.assertIn(ts.CHECK_TITLES["check_user_password_strength"],
+                      dict(self.ctx.clean_checks))
+
     def test_every_check_has_a_title(self):
         for check in ts.CHECKS:
             self.assertIn(check.__name__, ts.CHECK_TITLES)
@@ -1688,6 +1903,392 @@ boss@example.com,False,False,2026-08-01T10:00:00Z,False,False,,True,False,Busine
         self.assertEqual(severities,
                          sorted(severities,
                                 key=ts.SEVERITY_ORDER.index))
+
+
+class TestPostureScore(unittest.TestCase):
+    def f(self, sev, fid="x"):
+        return ts.Finding(fid, sev, "t", "m", "r", [], "s")
+
+    def test_clean_tenant_scores_100(self):
+        self.assertEqual(100, ts.posture_score([]))
+        self.assertEqual(100, ts.posture_score([self.f("INFO")] * 20))
+
+    def test_halves_every_70_points(self):
+        # 2 critical (30) + 4 high (28) + 4 medium (12) = 70 points.
+        findings = ([self.f("CRITICAL")] * 2 + [self.f("HIGH")] * 4
+                    + [self.f("MEDIUM")] * 4)
+        self.assertEqual(50, ts.posture_score(findings))
+        self.assertEqual(25, ts.posture_score(findings * 2))
+
+    def test_never_zero(self):
+        self.assertEqual(1, ts.posture_score([self.f("CRITICAL")] * 500))
+
+    def test_internal_check_errors_do_not_count(self):
+        self.assertEqual(100, ts.posture_score(
+            [self.f("CRITICAL", "check-error-check_x")]))
+
+
+class TestCompareWithPrevious(unittest.TestCase):
+    """Two run folders side by side, as --output-dir lays them out."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def make_run(self, name, customer="C01", complete=True, modules=None,
+                 collected="2026-09-01 08:00"):
+        run_dir = self.root / name
+        run_dir.mkdir()
+        ctx = ts.RunContext(run_dir, make_args())
+        ctx.manifest["meta"].update(customer_id=customer, complete=complete,
+                                    collected_at=collected)
+        for key, status in (modules or {"users": "ok"}).items():
+            ctx.set_module(key, status, 1)
+        return ctx
+
+    def finding(self, fid, users, sev="HIGH"):
+        f = ts.Finding(fid, sev, f"title {fid}", "m", "Fix it. Then more.",
+                       [{"User": u, "Last sign-in": "today"} for u in users],
+                       "users.csv")
+        f.modules = ["users"]
+        return f
+
+    def test_first_run(self):
+        ctx = self.make_run("tenant_audit_20261001_000000")
+        f = self.finding("a", ["x@example.com"])
+        history = ts.compare_with_previous(ctx, [f], ts.find_previous_run(ctx))
+        self.assertEqual("first_run", f.change)
+        self.assertEqual("", history["previous"])
+        html = ts.render_html(ctx, [f]).read_text(encoding="utf-8")
+        self.assertIn("first audit", html)
+        self.assertNotIn("What changed since", html)
+
+    def test_new_persisting_resolved_by_evidence_row(self):
+        prev = self.make_run("tenant_audit_20260901_000000")
+        ts.render_html(prev, [self.finding("a", ["x@example.com",
+                                                 "y@example.com"]),
+                              self.finding("gone", ["z@example.com"])])
+        ctx = self.make_run("tenant_audit_20261001_000000",
+                            collected="2026-10-01 08:00")
+        a = self.finding("a", ["y@example.com", "w@example.com"])
+        b = self.finding("b", ["q@example.com"], sev="CRITICAL")
+        self.assertEqual(prev.run_dir.resolve(),
+                         ts.find_previous_run(ctx).resolve())
+        history = ts.compare_with_previous(ctx, [a, b],
+                                           ts.find_previous_run(ctx))
+        self.assertEqual("persisting", a.change)
+        self.assertEqual("new", b.change)
+        self.assertEqual(["gone"], [r["id"] for r in history["resolved"]])
+        self.assertEqual("new", a.row_changes["a:w@example.com"])
+        self.assertEqual("persisting", a.row_changes["a:y@example.com"])
+        self.assertEqual(1, history["resolved_rows"])     # x was fixed
+        html = ts.render_html(ctx, [b, a]).read_text(encoding="utf-8")
+        self.assertIn("What changed since 2026-09-01 08:00", html)
+        self.assertIn("title gone", html)
+        self.assertIn("new this month", html)
+        self.assertIn("also last month", html)
+        self.assertIn("up from 0", html)          # critical tile
+        self.assertIn("down from 2", html)        # high tile: a, gone -> a
+        self.assertIn("Top actions", html)
+        self.assertIn("<li><strong>title b</strong>. Fix it.</li>", html)
+
+    def test_compared_on_what_ran(self):
+        # caalevels (tier 4) ran in neither run and courses is n/a in both:
+        # left out. A finding that reads no module compares as it is. One
+        # that a module failed in BOTH runs is still not compared.
+        mods = {"users": "ok", "courses": "n/a", "tokens": "error"}
+        prev = self.make_run("tenant_audit_20260901_000000", modules=mods)
+        old = [self.finding(fid, ["z@example.com"])
+               for fid in ("edition", "byhand", "gone", "tok")]
+        old[0].modules = ["caalevels", "users", "courses"]
+        old[1].modules = []
+        old[3].modules = ["tokens"]
+        ts.render_html(prev, old)
+        ctx = self.make_run("tenant_audit_20261001_000000", modules=mods)
+        now = [self.finding(fid, ["z@example.com"])
+               for fid in ("edition", "byhand", "tok")]
+        now[0].modules = ["caalevels", "users", "courses"]
+        now[1].modules = []
+        now[2].modules = ["tokens"]
+        history = ts.compare_with_previous(ctx, now,
+                                           ts.find_previous_run(ctx))
+        self.assertEqual(["persisting", "persisting", "not_compared"],
+                         [f.change for f in now])
+        self.assertEqual(["gone"], [r["id"] for r in history["resolved"]])
+
+    def test_pre_170_run_cannot_resolve(self):
+        prev = self.make_run("tenant_audit_20260901_000000")
+        (prev.run_dir / "findings.csv").write_text(
+            "severity,id,title,count\nHIGH,gone,t,1\n", encoding="utf-8")
+        ctx = self.make_run("tenant_audit_20261001_000000")
+        history = ts.compare_with_previous(ctx, [],
+                                           ts.find_previous_run(ctx))
+        self.assertEqual([], history["resolved"])
+        self.assertEqual(["gone"], [r["id"] for r in history["not_compared"]])
+
+    def test_partial_module_is_not_compared(self):
+        prev = self.make_run("tenant_audit_20260901_000000")
+        ts.render_html(prev, [self.finding("gone", ["z@example.com"])])
+        ctx = self.make_run("tenant_audit_20261001_000000",
+                            modules={"users": "partial"})
+        a = self.finding("a", ["y@example.com"])
+        history = ts.compare_with_previous(ctx, [a],
+                                           ts.find_previous_run(ctx))
+        self.assertEqual("not_compared", a.change)
+        self.assertEqual([], history["resolved"])
+        self.assertEqual(["gone"],
+                         [r["id"] for r in history["not_compared"]
+                          if isinstance(r, dict)])
+
+    def test_module_missing_this_run_is_not_a_fix(self):
+        # tokens collected last month, failed this month: an account that
+        # dropped off a list built from it was not looked at, not fixed.
+        prev = self.make_run("tenant_audit_20260901_000000",
+                             modules={"users": "ok", "tokens": "ok"})
+        old = self.finding("risk", ["x@example.com", "y@example.com"])
+        old.modules = ["tokens", "users"]
+        ts.render_html(prev, [old])
+        ctx = self.make_run("tenant_audit_20261001_000000",
+                            modules={"users": "ok", "tokens": "error"})
+        now = self.finding("risk", ["y@example.com"])
+        now.modules = ["tokens", "users"]
+        history = ts.compare_with_previous(ctx, [now],
+                                           ts.find_previous_run(ctx))
+        self.assertEqual("not_compared", now.change)
+        self.assertEqual(0, history["resolved_rows"])
+        html = ts.render_html(ctx, [now]).read_text(encoding="utf-8")
+        self.assertIn("not like for like", html)
+
+    def test_baseline_is_complete_run_of_same_customer_only(self):
+        self.make_run("tenant_audit_20260801_000000")
+        self.make_run("tenant_audit_20260901_000000", customer="C99")
+        self.make_run("tenant_audit_20260915_000000", complete=False)
+        self.make_run("tenant_audit_20261101_000000")   # later, not earlier
+        ctx = self.make_run("tenant_audit_20261001_000000")
+        self.assertEqual("tenant_audit_20260801_000000",
+                         ts.find_previous_run(ctx).name)
+
+    def test_compare_with_flag_wins(self):
+        other = self.make_run("tenant_audit_20260101_000000", customer="C99")
+        ctx = self.make_run("tenant_audit_20261001_000000")
+        ctx.args.compare_with = other.run_dir
+        self.assertEqual(other.run_dir, ts.find_previous_run(ctx))
+
+    def test_score_trend_oldest_first_and_capped(self):
+        for month in range(1, 9):
+            run = self.make_run(f"tenant_audit_2026{month:02d}01_000000",
+                                collected=f"2026-{month:02d}-01 08:00")
+            run.manifest["meta"]["posture_score"] = month * 10
+            run.save()
+        ctx = self.make_run("tenant_audit_20261001_000000",
+                            collected="2026-10-01 08:00")
+        trend = ts.score_trend(ctx, 95)
+        self.assertEqual(ts.SCORE_TREND_RUNS, len(trend))
+        self.assertEqual(("2026-10-01", 95), trend[-1])
+        self.assertEqual(("2026-04-01", 40), trend[0])
+
+
+class TestDriveSharingLog(CtxTestCase):
+    HEADER = ("name,actor.email,id.time,doc_id,doc_title,new_value,"
+              "target_user,visibility")
+
+    def test_each_event_type(self):
+        self.write_csv("report_drive_sharing", f"""{self.HEADER}
+change_document_visibility,a@example.com,2026-10-01T09:00:00Z,d1,Budget,people_with_link,,people_with_link
+change_document_visibility,a@example.com,2026-10-01T09:01:00Z,d2,Plan,public_on_the_web,,public_on_the_web
+change_document_visibility,a@example.com,2026-10-01T09:02:00Z,d3,Memo,public_in_the_domain,,public_in_the_domain
+change_document_visibility,a@example.com,2026-10-01T09:03:00Z,d4,Old,private,,private
+change_user_access,b@example.com,2026-10-02T09:00:00Z,d5,Deck,can_view,x@partner.example,shared_externally
+change_user_access,b@example.com,2026-10-02T09:00:00Z,d5,Deck,can_view,x@partner.example,shared_externally
+change_user_access,b@example.com,2026-10-02T09:01:00Z,d6,Sheet,can_edit,partner.example,shared_externally
+change_user_access,c@example.com,2026-10-02T09:02:00Z,d7,Notes,can_edit,team@example.com,shared_internally
+change_user_access,c@example.com,2026-10-02T09:03:00Z,d8,Notes,can_view,alias.example.com,shared_internally
+change_user_access,c@example.com,2026-10-02T09:04:00Z,d9,Gone,none,y@partner.example,private""")
+        found = {f.fid: f for f in ts.check_drive_sharing_log(self.ctx)}
+        public = found["drive-made-public-30d"]
+        self.assertEqual("HIGH", public.severity)
+        self.assertEqual({"d1": "anyone with the link",
+                          "d2": "public on the web"},
+                         {r["File ID"]: r["Opened to"] for r in public.evidence})
+        outside = found["drive-shared-outside-30d"]
+        self.assertEqual("MEDIUM", outside.severity)
+        # Internal shares and removed access are ignored; a repeated event
+        # for the same file counts once.
+        self.assertEqual([{"User": "b@example.com", "Files shared out": "2",
+                           "Outside recipients":
+                               "partner.example, x@partner.example"}],
+                         outside.evidence)
+
+    def test_internal_only_is_clean(self):
+        self.write_csv("report_drive_sharing", f"""{self.HEADER}
+change_user_access,c@example.com,2026-10-02T09:02:00Z,d7,Notes,can_edit,team@example.com,shared_internally""")
+        self.assertEqual([], ts.check_drive_sharing_log(self.ctx))
+
+    def test_module_is_default_tier_with_both_events(self):
+        mod = ts.MODULE_BY_KEY["report_drive_sharing"]
+        self.assertEqual(1, mod["tier"])
+        self.assertIn("change_document_visibility,change_user_access",
+                      mod["args"])
+
+
+class TestDwdGrants(CtxTestCase):
+    def test_broad_grant_is_medium_and_narrow_is_info(self):
+        self.write_csv("report_admin", """name,API_CLIENT_NAME,API_SCOPES,actor.email,id.time
+AUTHORIZE_API_CLIENT_ACCESS,1031,"https://mail.google.com/,https://www.googleapis.com/auth/calendar",a@example.com,2026-10-01T09:00:00Z
+CHANGE_APPLICATION_SETTING,,,a@example.com,2026-10-01T09:00:00Z""")
+        found = ts.check_dwd_grants(self.ctx)
+        self.assertEqual("MEDIUM", found[0].severity)
+        self.assertEqual("full Gmail access",
+                         found[0].evidence[0]["Broad access"])
+        self.write_csv("report_admin", """name,API_CLIENT_NAME,API_SCOPES,actor.email,id.time
+AUTHORIZE_API_CLIENT_ACCESS,2042,https://www.googleapis.com/auth/calendar,a@example.com,2026-10-01T09:00:00Z""")
+        self.assertEqual("INFO", ts.check_dwd_grants(self.ctx)[0].severity)
+
+    def test_no_grants_is_clean(self):
+        self.write_csv("report_admin", """name,API_CLIENT_NAME,API_SCOPES
+CHANGE_APPLICATION_SETTING,,""")
+        self.assertEqual([], ts.check_dwd_grants(self.ctx))
+
+
+class TestCredit(CtxTestCase):
+    def test_report_carries_credit_and_locked_guard(self):
+        html = ts.render_html(self.ctx, []).read_text(encoding="utf-8")
+        for element_id in ("osh-credit-head", "osh-credit-foot"):
+            self.assertEqual(1, html.count(ts._credit_html(element_id)))
+        self.assertIn("Prepared by <a href='https://osh.co.za'>"
+                      "Outsource House (OSH.co.za)</a>", html)
+        # Hidden until the guard has checked the credits.
+        self.assertIn("<body class='locked'>", html)
+        self.assertIn("<noscript>", html)
+        # The value the browser computes for an untouched credit.
+        self.assertIn(ts._fnv1a("https://osh.co.za|Prepared by Outsource "
+                                "House (OSH.co.za)"), html)
+
+    def test_fnv1a_known_value(self):
+        # FNV-1a 32-bit of "a" is e40c292c.
+        self.assertEqual("e40c292c", ts._fnv1a("a"))
+
+
+class TestUpgradeOpportunities(CtxTestCase):
+    def test_business_starter_lists_dlp(self):
+        self.write_csv("licenses", """userEmail,skuId,skuDisplay
+u@example.com,1010020027,Google Workspace Business Starter""")
+        ups = {u["Protection"] for u in ts.upgrade_opportunities(self.ctx)}
+        self.assertIn("Data loss prevention (DLP)", ups)
+        self.assertIn("Advanced mobile management", ups)
+        html = ts.render_html(self.ctx, []).read_text(encoding="utf-8")
+        self.assertIn("Upgrade opportunities", html)
+
+    def test_enterprise_plus_lists_none(self):
+        self.write_csv("licenses", """userEmail,skuId,skuDisplay
+u@example.com,1010020020,Google Workspace Enterprise Plus""")
+        self.assertEqual([], ts.upgrade_opportunities(self.ctx))
+
+    def test_no_licence_data_lists_none(self):
+        self.ctx.set_module("licenses", "error", 0, "denied")
+        self.assertEqual([], ts.upgrade_opportunities(self.ctx))
+
+    def test_every_gated_feature_has_a_note(self):
+        for feature, _ in ts.EDITION_FEATURES:
+            self.assertIn(feature, ts.UPGRADE_NOTES)
+
+
+class TestMonthlyService(CtxTestCase):
+    def patch(self, name, value):
+        original = getattr(ts, name)
+        setattr(ts, name, value)
+        self.addCleanup(setattr, ts, name, original)
+
+    def test_wrong_customer_id_aborts_before_collecting(self):
+        calls = []
+
+        def fake_gam(args, **_):
+            calls.append(args[0])
+            if args == ["info", "domain"]:
+                return 0, "Customer ID: C0other\nPrimary Domain: other.example\n", ""
+            return 0, "GAM 7.48.22", ""
+        self.patch("locate_gam", lambda: "/usr/bin/gam")
+        self.patch("run_gam", fake_gam)
+        self.patch("https_reachable", lambda host: True)
+        self.ctx.args.tenant_entry = {"customer_id": "C0right"}
+        self.assertFalse(ts.preflight(self.ctx, []))
+        self.assertEqual(["version", "info"], calls)   # nothing after identity
+        self.assertIn("NOT C0right", self.ctx.manifest["preflight"][-1][2])
+
+    def test_break_glass_admin_not_dormant_but_listed(self):
+        self.write_csv("users", f"""{USERS_HEADER}
+bg@example.com,False,False,Never,True,True,,True,False,Business
+old@example.com,False,False,Never,True,True,,True,False,Business""")
+        self.ctx.manifest["meta"]["break_glass"] = ["bg@example.com"]
+        findings = ts.run_checks(self.ctx)
+        dormant = [r["User"] for f in findings if f.fid == "dormant-admin"
+                   for r in f.all_evidence]
+        self.assertEqual(["old@example.com"], dormant)
+        self.assertEqual(["bg@example.com"],
+                         self.ctx.manifest["meta"]["break_glass_seen"])
+        html = ts.render_html(self.ctx, findings).read_text(encoding="utf-8")
+        self.assertIn("excluded from the dormancy checks as configured: "
+                      "bg@example.com", html)
+
+    def test_delivery_gate_and_exit_codes(self):
+        self.ctx.manifest["meta"]["complete"] = True
+        self.write_csv("users", f"{USERS_HEADER}\n"
+                       "u@example.com,False,False,Never,True,True,,False,False,Business")
+        self.ctx.set_module("courses", "n/a", 0, "no Education licence held")
+        self.assertEqual((True, []), ts.delivery_gate(self.ctx))
+        self.assertEqual(0, ts.exit_code(self.ctx))
+        self.ctx.set_module("asps", "error", 0, "denied")
+        ok, reasons = ts.delivery_gate(self.ctx)
+        self.assertFalse(ok)
+        self.assertIn("asps", reasons[0])
+        self.assertEqual(2, ts.exit_code(self.ctx))
+
+        self.ctx.manifest["meta"]["complete"] = False
+        self.assertIn("the run did not finish",
+                      ts.delivery_gate(self.ctx)[1])
+        self.assertEqual(130, ts.exit_code(self.ctx))
+        code, _ = ts.finish(self.ctx)
+        self.assertEqual(130, code)
+        qa = (self.run_dir / "qa_report.html").read_text(encoding="utf-8")
+        self.assertIn("Hold for review", qa)
+
+
+    def test_load_tenants_requires_customer_id(self):
+        path = self.run_dir / "tenants.json"
+        path.write_text('{"tenants": {"a": {"name": "A"}}}', encoding="utf-8")
+        with self.assertRaises(ts.ConfigError):
+            ts.load_tenants(path)
+        path.write_text('{"tenants": {"a": {"customer_id": "C01", '
+                        '"break_glass": ["BG@Example.com"], '
+                        '"gamcfgdir": "~/gam/a"}}}', encoding="utf-8")
+        a = ts.load_tenants(path)["a"]
+        self.assertEqual(["bg@example.com"], a["break_glass"])
+        self.assertTrue(a["enabled"])
+        self.assertFalse(a["gamcfgdir"].startswith("~"))
+
+    def test_all_returns_worst_code_and_keeps_going(self):
+        path = self.run_dir / "tenants.json"
+        path.write_text(json.dumps({"tenants": {
+            k: {"customer_id": k, "gamcfgdir": f"/cfg/{k}"}
+            for k in ("a", "b", "c", "d")}}), encoding="utf-8")
+        codes = {"a": 0, "b": 2, "d": 2}
+        seen = []
+
+        def fake_run(args, tenant):
+            seen.append((tenant["key"], os.environ.get("GAMCFGDIR")))
+            if tenant["key"] == "c":
+                raise RuntimeError("boom")
+            return codes[tenant["key"]]
+        self.patch("run_tenant", fake_run)
+        self.patch("check_for_updates", lambda: None)
+        before = os.environ.get("GAMCFGDIR")
+        # c raises (counts as 1); 1 outranks 2 in EXIT_PRIORITY.
+        self.assertEqual(1, ts.main(["--all", "--tenants", str(path)]))
+        self.assertEqual(["a", "b", "c", "d"], [k for k, _ in seen])
+        self.assertEqual(before, os.environ.get("GAMCFGDIR"))
 
 
 class TestDohFallbackParsing(unittest.TestCase):
@@ -1725,20 +2326,49 @@ class TestBatchedPartialCoverage(CtxTestCase):
             ts.run_gam = original
         return captured
 
-    def test_exit_zero_with_a_failed_mailbox_is_partial(self):
+    def test_exit_zero_with_a_mailbox_without_gmail_is_complete(self):
+        # An account with Gmail switched off has nothing to read: complete,
+        # and the note names it (v1.7.0; it was partial every month).
         status, rows, note = self.run_collect(
             0, "User,enabled\na@example.com,True\n",
             "Getting IMAP for b@example.com\n"
             "User: b@example.com, Gmail Service/App not enabled\n")
+        self.assertEqual("ok", status)
+        self.assertEqual(1, rows)
+        self.assertEqual(ts.NO_SERVICE_NOTE + "b@example.com", note)
+
+    def test_exit_zero_with_a_failed_mailbox_is_partial(self):
+        # Control: a real failure alongside it keeps the module partial.
+        status, rows, note = self.run_collect(
+            0, "User,enabled\na@example.com,True\n",
+            "User: b@example.com, Gmail Service/App not enabled\n"
+            "ERROR: User: c@example.com, Quota exceeded\n")
         self.assertEqual("partial", status)
         self.assertEqual(1, rows)
-        self.assertIn("b@example.com", note)
 
     def test_clean_exit_zero_is_still_ok(self):
         status, rows, note = self.run_collect(
             0, "User,enabled\na@example.com,True\n", "Getting IMAP settings\n")
         self.assertEqual("ok", status)
         self.assertEqual("", note)
+
+
+class TestNoServiceOnly(unittest.TestCase):
+    def test_only_service_off_lines(self):
+        err = ("Getting all Filters\nGot 3 Filters\n"
+               "User: A@example.com, Gmail Service/App not enabled (1/9)\n"
+               "User: b@example.com, Drive Service/App not enabled\n"
+               "User: gone@example.com, Does not exist\n")
+        self.assertEqual(["a@example.com", "b@example.com", "gone@example.com"],
+                         ts.no_service_only(err))
+
+    def test_any_other_failure_is_none(self):
+        for line in ("Timed out after 900s", "ERROR: 403 Forbidden",
+                     "User: x@example.com, Print Failed: Not Authorized"):
+            with self.subTest(line=line):
+                self.assertIsNone(ts.no_service_only(
+                    "User: b@example.com, Gmail Service/App not enabled\n"
+                    + line))
 
 
 class TestRowsCache(CtxTestCase):
@@ -1945,7 +2575,7 @@ a@example.com,Google-Apps,Google Workspace,1010020028,Google Workspace Business 
         ts.check_classroom_settings(self.ctx)
         self.assertEqual([], self.ctx.consulted)
         status, _, note = ts.collect_classroom(self.ctx, ts.MODULE_BY_KEY["courses"])
-        self.assertEqual("skipped", status)
+        self.assertEqual("n/a", status)
         self.assertIn("no Education licence", note)
 
     def test_pending_teachers_can_create_classes_is_medium(self):
@@ -2361,7 +2991,8 @@ class TestBatchedRedirectCounting(CtxTestCase):
             status, rows, note = ts.collect_backupcodes(self.ctx, mod)
         finally:
             ts.run_gam = original
-        self.assertEqual("partial", status)
+        self.assertEqual("ok", status)
+        self.assertIn("dead@example.com", note)
         self.assertEqual(1, rows)
         written = (self.run_dir / "backupcodes.csv").read_text(encoding="utf-8")
         self.assertIn("u@example.com,10", written)
@@ -2518,6 +3149,16 @@ class TestSharedDriveScanAsMember(CtxTestCase):
                        "D1,team@example.com,organizer,group")
         self.calls = []
 
+    LISTING = "id,name,hasAugmentedPermissions\nF1,a.doc,True\nF2,b.doc,False\n"
+
+    def two_step(self, acl_out, listing=None):
+        """Step 1 answers the listing, step 2 the ACLs."""
+        def fake(args):
+            if "id,name,mimeType,hasaugmentedpermissions" in args:
+                return 0, listing or self.LISTING, ""
+            return 0, acl_out, ""
+        return fake
+
     def run_with(self, fake):
         original = ts.run_gam
         ts.run_gam = lambda args, **kw: (self.calls.append(args), fake(args))[1]
@@ -2529,7 +3170,7 @@ class TestSharedDriveScanAsMember(CtxTestCase):
 
     def test_organizer_first_no_grant(self):
         out = "id,name,permission.type\nF1,a.doc,anyone\n"
-        status, rows, note = self.run_with(lambda a: (0, out, ""))
+        status, rows, note = self.run_with(self.two_step(out))
         self.assertEqual(("ok", 1, ""), (status, rows, note))
         self.assertEqual("org@example.com", self.calls[0][1])
         self.assertFalse(any("drivefileacl" in c for c in self.calls))
@@ -2540,9 +3181,10 @@ class TestSharedDriveScanAsMember(CtxTestCase):
         def fake(args):
             if args[1] == "org@example.com":
                 return 1, "", "Drive Service/App not enabled\n"
-            return 0, "id,name\nF1,a.doc\n", ""
+            return self.two_step("id,name\nF1,a.doc\n")(args)
         status, rows, _ = self.run_with(fake)
-        self.assertEqual(["org@example.com", "writer@example.com"],
+        self.assertEqual(["org@example.com", "writer@example.com",
+                          "writer@example.com"],
                          [c[1] for c in self.calls])
         self.assertEqual(("ok", 1), (status, rows))
 
@@ -2553,10 +3195,57 @@ class TestSharedDriveScanAsMember(CtxTestCase):
             if args[1] == "org@example.com":
                 return (60, "Owner,id,name\n",
                         "User: org@example.com, Drive Service/App not enabled\n")
-            return 0, "id,name\nF1,a.doc\n", ""
+            return self.two_step("id,name\nF1,a.doc\n")(args)
         status, rows, _ = self.run_with(fake)
         self.assertEqual("writer@example.com", self.calls[-1][1])
         self.assertEqual(("ok", 1), (status, rows))
+
+    def test_acls_fetched_only_for_files_with_their_own_sharing(self):
+        out = "id,name,permission.type\nF1,a.doc,anyone\n"
+        self.run_with(self.two_step(out))
+        step1, step2 = self.calls
+        # Step 1 asks for no permissions, so GAM makes no per-file calls.
+        self.assertFalse(any("basicpermissions" in a for a in step1))
+        self.assertNotIn("pm", step1)
+        i = step2.index("csvfile")
+        id_file = Path(step2[i + 1].rsplit(":id", 1)[0])
+        self.assertEqual(["F1"], [r["id"] for r in ts.read_csv_rows(id_file)])
+        self.assertIn("norecursion", step2)
+        self.assertIn("pm", step2)
+
+    def test_flagged_folder_is_listed_with_its_contents(self):
+        # Children of a folder shared outside inherit it and are not
+        # flagged themselves (dev, 2026-10-07): the folder is expanded.
+        listing = ("id,name,mimeType,hasAugmentedPermissions\n"
+                   "FO,Shared,application/vnd.google-apps.folder,True\n"
+                   "C1,child,application/vnd.google-apps.document,False\n"
+                   "F1,a.doc,application/vnd.google-apps.document,True\n")
+        acls = ("id,name,permission.id,permission.type\n"
+                "F1,a.doc,p1,user\n")
+        folder_acls = ("id,name,permission.id,permission.type\n"
+                       "FO,Shared,p2,user\nC1,child,p2,user\n"
+                       "F1,a.doc,p1,user\n")
+
+        def fake(args):
+            if "id,name,mimeType,hasaugmentedpermissions" in args:
+                return 0, listing, ""
+            return 0, folder_acls if "showparent" in args else acls, ""
+        status, rows, _ = self.run_with(fake)
+        steps = self.calls[1:]
+        self.assertEqual([["norecursion"], ["showparent"]],
+                         [[a for a in c if a in ("norecursion", "showparent")]
+                          for c in steps])
+        # F1 came back from both calls; it is kept once.
+        self.assertEqual(["F1", "FO", "C1"],
+                         [r["id"] for r in
+                          self.ctx.rows("shareddrive_external")])
+        self.assertEqual(("ok", 3), (status, rows))
+
+    def test_drive_with_no_own_sharing_needs_one_call(self):
+        listing = "id,name,hasAugmentedPermissions\nF2,b.doc,False\n"
+        status, rows, _ = self.run_with(self.two_step("", listing))
+        self.assertEqual(1, len(self.calls))
+        self.assertEqual(("empty", 0), (status, rows))
 
 
 class TestLicenceWasteGating(CtxTestCase):
@@ -2642,6 +3331,8 @@ class TestPlainLogFile(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()):
             ts.setup_logging(Path(tmp))
             ts.logger.info("\x1b[1;92mgreen\x1b[0m")
+            # The suite silences _emit, so log what print_error would.
+            ts.logger.error("\x1b[91m[ERROR] [CRITICAL] once\x1b[0m")
             logging_text = (Path(tmp) / "tenant_scope.log").read_text(
                 encoding="utf-8")
             ts.logger = None
@@ -2649,3 +3340,5 @@ class TestPlainLogFile(unittest.TestCase):
             logging.shutdown()
         self.assertIn("green", logging_text)
         self.assertNotIn("\x1b[", logging_text)
+        self.assertIn(" [ERROR] [CRITICAL] once", logging_text)
+        self.assertEqual(1, logging_text.count("[ERROR]"))
