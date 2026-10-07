@@ -49,7 +49,7 @@ YOU ASSUME ALL RISK ASSOCIATED WITH THE USE OF THIS SOFTWARE.
 Author:       Paul Ogier
 Created:      2026-08-15
 Updated:      2026-10-07
-Version:      1.7.0
+Version:      1.7.1
 Status:       Production
 Python:       3.9+
 Dependencies: GAM ADV X (GAM7) only. Stdlib only on the Python side.
@@ -124,6 +124,14 @@ Notes that matter when reading results:
     in the report where they apply.
 
 Changelog
+  2026-10-07 - v1.7.1 - Rendering error fixed: the report no longer needs
+                        JavaScript to open, so a viewer that blocks scripts
+                        shows it instead of a blank page. The credit names
+                        the tool and links to the repository instead of
+                        saying who prepared the report, and is readable on
+                        the dark header. Repository renamed to
+                        GoogleWorkspaceScripts; the update check reads the
+                        new path.
   2026-10-07 - v1.7.0 - New findings: files made public or shared outside
                         in the last 30 days (Drive audit log), domain-wide
                         delegation granted in the last 30 days, Gmail
@@ -280,12 +288,12 @@ csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
 # CONFIGURATION
 ###############################################################################
 
-SCRIPT_VERSION = "1.7.0"
+SCRIPT_VERSION = "1.7.1"
 
 # [OPTIONAL] Startup check against the remote VERSION file. Fail-silent.
 CHECK_FOR_UPDATES = True
 UPDATE_CHECK_URL = (
-    "https://raw.githubusercontent.com/PaulOgier/GAMScripts/main/"
+    "https://raw.githubusercontent.com/PaulOgier/GoogleWorkspaceScripts/main/"
     "google-workspace-security-audit/VERSION"
 )
 
@@ -295,14 +303,10 @@ UPDATE_CHECK_URL = (
 # and the conventional Windows path C:\GAM7\gam.exe.
 GAM_COMMAND = "gam"
 
-# The report credit, shown in the header and footer of every report. The
-# report checks it in the browser and shows a notice instead of its contents
-# if either credit was edited, removed, hidden or pointed elsewhere. The
-# NOTICE file at the repository root carries the same attribution, which
-# Apache 2.0 clause 4(d) requires redistributions to keep.
+# The report credit, shown in the header and footer of every report. Plain
+# HTML with no script, so the report opens wherever it is shared.
 CREDIT_NAME = "Outsource House (OSH.co.za)"
-CREDIT_URL = "https://osh.co.za"
-CREDIT_PREFIX = "Prepared by"
+CREDIT_URL = "https://github.com/PaulOgier/GoogleWorkspaceScripts"
 SCRIPT_DIR = Path(__file__).resolve().parent
 # Where tenants.json is looked for when --tenants is not given, in order.
 # JSON rather than TOML: the script supports Python 3.9 and tomllib is 3.11.
@@ -531,7 +535,7 @@ def check_for_updates():
         if remote_t > local_t:
             print_warning(f"A newer version is available: v{remote} "
                           f"(you are running v{SCRIPT_VERSION}) - "
-                          f"https://github.com/PaulOgier/GAMScripts/releases")
+                          f"https://github.com/PaulOgier/GoogleWorkspaceScripts/releases")
     except Exception:
         pass
 
@@ -6039,6 +6043,7 @@ STYLE = """
   header.page .inner { max-width:980px; margin:0 auto; }
   header.page h1 { margin:0 0 6px; font-size:26px; }
   header.page p { margin:0; color:#b8c4cf; }
+  header.page a { color:#fff; }
   h2 { margin:32px 0 12px; font-size:20px; border-bottom:2px solid var(--line);
        padding-bottom:6px; }
   .tiles { display:flex; gap:12px; margin:20px 0; flex-wrap:wrap; }
@@ -6069,7 +6074,6 @@ STYLE = """
   ol.top li { margin-bottom:6px; }
   footer { color:var(--muted); font-size:13px; padding:24px 16px;
            text-align:center; }
-  body.locked > *:not(noscript) { display:none; }
   @media print {
     body { background:#fff; }
     section.card, .tile { box-shadow:none; border:1px solid #ccc;
@@ -6080,52 +6084,13 @@ STYLE = """
 
 
 
-def _fnv1a(text: str) -> str:
-    """32-bit FNV-1a over UTF-16 code units, the same as the report's own
-    check in the browser (JavaScript's charCodeAt)."""
-    value = 0x811C9DC5
-    data = text.encode("utf-16-le")
-    for i in range(0, len(data), 2):
-        value ^= data[i] | (data[i + 1] << 8)
-        value = (value * 0x01000193) & 0xFFFFFFFF
-    return format(value, "08x")
-
-
 def _credit_html(element_id: str) -> str:
-    return (f"<span id='{element_id}'>{CREDIT_PREFIX} <a href='{CREDIT_URL}'>"
-            f"{CREDIT_NAME}</a></span>")
-
-
-def _credit_guard_script() -> str:
-    """Inline script that shows the report only when both credits are intact
-    and visible. The body starts locked (hidden), so deleting this script
-    leaves a blank page rather than an unchecked report. Same check as
-    m365_scope.py: FNV-1a over the link's href attribute, "|", and the
-    credit's text."""
-    expected = _fnv1a(f"{CREDIT_URL}|{CREDIT_PREFIX} {CREDIT_NAME}")
-    return f"""<script>
-(function () {{
-  function h(t) {{ var v = 0x811c9dc5;
-    for (var i = 0; i < t.length; i++) {{
-      v ^= t.charCodeAt(i); v = Math.imul(v, 0x01000193) >>> 0; }}
-    return ('0000000' + v.toString(16)).slice(-8); }}
-  function shown(e) {{
-    for (; e && e.nodeType === 1; e = e.parentNode) {{
-      var c = window.getComputedStyle(e);
-      if (c.display === 'none' || c.visibility === 'hidden' ||
-          c.opacity === '0') {{ return false; }} }}
-    return true; }}
-  function ok(id) {{ var e = document.getElementById(id);
-    var a = e && e.getElementsByTagName('a')[0];
-    return !!a && shown(e) &&
-      h(a.getAttribute('href') + '|' + e.textContent) === '{expected}'; }}
-  document.body.className = '';
-  if (!(ok('osh-credit-head') && ok('osh-credit-foot'))) {{
-    document.body.innerHTML = '<p style="padding:40px;font-size:18px">' +
-      'This report has been altered and cannot be shown. Ask ' +
-      'Outsource House (https://osh.co.za) for the original.</p>'; }}
-}})();
-</script>"""
+    """Credit the tool, not the report: anyone may run it for their own
+    clients. The URL is printed as the link text because links do not open
+    in a sandboxed viewer or on paper."""
+    shown = CREDIT_URL.removeprefix("https://")
+    return (f"<span id='{element_id}'>Made with the Google Workspace Security "
+            f"Audit by {CREDIT_NAME}: <a href='{CREDIT_URL}'>{shown}</a></span>")
 
 
 def _evidence_table(finding: Finding, show_changes: bool = False) -> str:
@@ -6431,10 +6396,7 @@ def render_html(ctx: RunContext, findings: List[Finding],
 <title>Workspace Audit - {escape(domain)}</title>
 <style>{STYLE}</style>
 </head>
-<body class='locked'>
-<noscript><p style="padding:40px;font-size:18px">This report needs
-JavaScript to open. Allow scripts for this file, or ask Outsource House
-(https://osh.co.za) for a PDF copy.</p></noscript>
+<body>
 <header class='page'><div class='inner'>
   <h1>Google Workspace Audit - {escape(domain)}</h1>
   <p>Customer {escape(meta.get('customer_id', '?'))} &middot;
@@ -6468,10 +6430,9 @@ JavaScript to open. Allow scripts for this file, or ask Outsource House
     <tbody>{preflight_rows}</tbody></table></div>
   </section>
 </div>
-<footer>{_credit_html("osh-credit-foot")} with tenant_scope.py
+<footer>{_credit_html("osh-credit-foot")}. tenant_scope.py
 v{SCRIPT_VERSION}. Print this page for a PDF copy.
 </footer>
-{_credit_guard_script()}
 </body>
 </html>"""
     out_path = ctx.run_dir / "audit_report.html"

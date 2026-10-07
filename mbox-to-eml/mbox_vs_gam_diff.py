@@ -27,7 +27,7 @@ Read-only, standard library only.
 Exit codes: 0 = sets identical, 1 = differences listed, 2 = usage or a CSV without the
 expected columns.
 Copyright (c) 2026 Paul Ogier, Outsource House. Apache License 2.0.
-Part of https://github.com/PaulOgier/GAMScripts
+Part of https://github.com/PaulOgier/GoogleWorkspaceScripts
 """
 import collections
 import csv

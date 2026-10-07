@@ -2154,22 +2154,19 @@ CHANGE_APPLICATION_SETTING,,""")
 
 
 class TestCredit(CtxTestCase):
-    def test_report_carries_credit_and_locked_guard(self):
+    def test_report_carries_credit_without_script(self):
         html = ts.render_html(self.ctx, []).read_text(encoding="utf-8")
         for element_id in ("osh-credit-head", "osh-credit-foot"):
             self.assertEqual(1, html.count(ts._credit_html(element_id)))
-        self.assertIn("Prepared by <a href='https://osh.co.za'>"
-                      "Outsource House (OSH.co.za)</a>", html)
-        # Hidden until the guard has checked the credits.
-        self.assertIn("<body class='locked'>", html)
-        self.assertIn("<noscript>", html)
-        # The value the browser computes for an untouched credit.
-        self.assertIn(ts._fnv1a("https://osh.co.za|Prepared by Outsource "
-                                "House (OSH.co.za)"), html)
-
-    def test_fnv1a_known_value(self):
-        # FNV-1a 32-bit of "a" is e40c292c.
-        self.assertEqual("e40c292c", ts._fnv1a("a"))
+        self.assertIn("Made with the Google Workspace Security Audit by "
+                      "Outsource House (OSH.co.za): <a href='https://github.com/"
+                      "PaulOgier/GoogleWorkspaceScripts'>github.com/PaulOgier/"
+                      "GoogleWorkspaceScripts</a>", html)
+        self.assertNotIn("Prepared by", html)
+        # Shared copies (TamingShare, mail previews) run no scripts.
+        self.assertNotIn("<script", html)
+        self.assertNotIn("<noscript>", html)
+        self.assertIn("<body>", html)
 
 
 class TestUpgradeOpportunities(CtxTestCase):

@@ -154,8 +154,8 @@ Step-by-step installation of GAM7, GYB and rclone:
 Clone the repository, or download `offboard_user.py` on its own.
 
 ```
-git clone https://github.com/PaulOgier/GAMScripts.git
-cd GAMScripts/google-workspace-offboarding
+git clone https://github.com/PaulOgier/GoogleWorkspaceScripts.git
+cd GoogleWorkspaceScripts/google-workspace-offboarding
 python3 offboard_user.py
 ```
 
@@ -276,7 +276,7 @@ mailbox again. A backup that comes up short against GYB's own message
 database fails the run.
 
 Messages whose headers Gmail refuses on import are recorded in a
-skipped-messages CSV. The [GYB Mailbox Tools](../gyb-gmail-backup-tools/) in
+skipped-messages CSV. The [GYB Mailbox Tools](../gyb-gmail-backup-tools/README.md) in
 this repository check a backup and find those messages.
 
 ## Drive transfer and backup
@@ -360,7 +360,7 @@ must have a destination or the run aborts before any change.
 **Does it work with GAMADV-XTD3?**
 It targets GAM7 (GAM ADV X), the successor to GAMADV-XTD3, and is verified
 against the GAM7 command set. Upgrade first; the
-[GAM7 Update](../gam7-update/) wrapper in this repository does that.
+[GAM7 Update](../gam7-update/README.md) wrapper in this repository does that.
 
 **Does it work on Windows?**
 Yes. Both test suites run on Windows and Ubuntu in GitHub Actions on every
@@ -405,4 +405,4 @@ Paul Ogier is a Google Workspace consultant and trainer at
 [Outsource House](https://osh.co.za) in South Africa, and teaches the
 [Taming GAM7 & GAMADV-XTD3](https://taming.tech/GAMCourse) course on Udemy.
 Questions and bug reports are welcome as
-[GitHub issues](https://github.com/PaulOgier/GAMScripts/issues).
+[GitHub issues](https://github.com/PaulOgier/GoogleWorkspaceScripts/issues).

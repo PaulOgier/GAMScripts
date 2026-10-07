@@ -1,7 +1,7 @@
 # Moved: Google Workspace User Offboarding (offboard_user.py)
 
 The offboarding script, its command builder, tests and installation guides
-now live at [**google-workspace-offboarding/**](../google-workspace-offboarding/).
+now live at [**google-workspace-offboarding/**](../google-workspace-offboarding/README.md).
 
 Nothing else has changed: same `offboard_user.py`, same flags, same
 behaviour. Update any bookmarks or links you have to the old folder.

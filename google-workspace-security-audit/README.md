@@ -1,10 +1,11 @@
-# Google Workspace Security Audit Script for GAM7 (Tenant Scoping Audit)
+# Google Workspace Security Audit Script (GAM7, free and open source)
 
-A free, open-source, **read-only Google Workspace security audit** in a single
-Python file. `tenant_scope.py` collects tenant configuration and
+A free, open-source, **read-only Google Workspace (formerly G Suite) security
+audit** in a single Python file, for a Google Workspace security assessment
+you run yourself. `tenant_scope.py` collects tenant configuration and
 security-posture data through [GAM7](https://github.com/GAM-team/GAM), runs a
 findings engine over it, and renders a self-contained HTML report your client
-(or your manager) can actually read: what was found, why it matters, what to do.
+(or your manager) can read: what was found, why it matters, what to do.
 
 Use it to audit a Google Workspace tenant on day one of a new client, to
 baseline a security uplift, to scope a Google Workspace migration or domain
@@ -12,6 +13,16 @@ move, or to produce the security section of an acquisition due-diligence pack.
 
 Built and maintained by Paul Ogier, [Outsource House](https://osh.co.za).
 Training at [Taming.Tech](https://taming.tech).
+
+Quick start (full steps under [Install](#install) and [Usage](#usage)):
+
+```
+git clone https://github.com/PaulOgier/GoogleWorkspaceScripts.git
+cd GoogleWorkspaceScripts/google-workspace-security-audit
+python3 tenant_scope.py --admin admin@yourdomain.com
+```
+
+![Google Workspace security audit report showing severity tiles, a posture score and the top actions for public files, super admins without 2-step verification and Shared Drives with no manager](docs/sample-report.png)
 
 ## Contents
 
@@ -243,9 +254,11 @@ runs can be diffed by who was named, not just by counts.
   each is new or carried over from last month.
 - `findings_evidence.csv`: every evidence row of every finding, with a stable
   `evidence_id` for comparing months.
-- The report is credited to Outsource House (OSH.co.za) in its header and
-  footer, as the repository's NOTICE file requires. A report whose credit or
-  link was edited, removed or hidden shows a notice instead of its contents.
+- The report's header and footer say it was made with the Google Workspace
+  Security Audit by Outsource House (OSH.co.za), with the repository URL.
+  The credit names the tool, not who prepared the
+  report, so it stays true when you run it for your own clients. The report
+  needs no JavaScript, so it opens in a sandboxed viewer or a mail preview.
 - `qa_report.html`: for you, not the client. The delivery verdict.
 - One CSV per collected module, so every finding can be traced back to raw
   data.
@@ -259,9 +272,9 @@ Every GAM command the script issues is a read (`print`, `report`, `info`,
 non-member scan silently returns zero rows and the drive would look clean.
 Each Shared Drive is therefore listed as one of its own active members,
 organizers first, and nobody's access changes. Only a drive that no member
-can list (none active, or none with a Drive licence) needs the flag, which
-adds the auditing admin as organizer, scans, and removes the grant again; by
-default those drives are reported **UNSCANNED** instead.
+can list (none active, or none with a Drive licence) needs the flag. It adds
+the auditing admin as organizer, scans, and removes the grant again. Without
+it, those drives are reported **UNSCANNED**.
 
 Backup verification codes never reach disk. The collector keeps only the
 per-user count.
@@ -283,8 +296,8 @@ Clone the repository, or download `tenant_scope.py` on its own; it has no
 dependencies beyond Python and GAM7.
 
 ```
-git clone https://github.com/PaulOgier/GAMScripts.git
-cd GAMScripts/google-workspace-security-audit
+git clone https://github.com/PaulOgier/GoogleWorkspaceScripts.git
+cd GoogleWorkspaceScripts/google-workspace-security-audit
 python3 tenant_scope.py --admin admin@yourdomain.com
 ```
 
@@ -392,15 +405,15 @@ Collection runs in three passes. The domain and user lists go first because
 everything else depends on them. The tenant-level prints (OUs, groups, admins,
 devices, policies, reports, DNS) then run four at a time, since each is one
 short GAM process and the long ones (`report users`, `tokens`) hide the rest.
-The per-mailbox modules and the Drive scans run one at a time: each already
+The per-mailbox modules and the Drive scans run one at a time. Each already
 forks up to 20 GAM processes as a batch over an explicit list of the accounts
-being audited, and the tier-3 Drive sweeps use the same batch instead of one
-GAM process per user.
+being audited. The tier-3 Drive sweeps use the same batch instead of one GAM
+process per user.
 
 Each per-mailbox batch runs up to 20 GAM workers (`SCAN_THREADS`), which want
 about 4 GB of free memory. On a 130,000-file test tenant a full run took 5m51s
 on a 4 GB machine and 10m49s on a 3 GB one, with no API rate-limit retries on
-either; memory is the ceiling, not Google's quota. Set `SCAN_THREADS` to 10 on
+either. Memory runs out before Google's quota does. Set `SCAN_THREADS` to 10 on
 a small box.
 
 Since v1.7.0 the default run also reads every active user's Gmail filters, one
@@ -429,10 +442,10 @@ accounts. A module marked partial for another reason is not re-run on resume,
 since it would only end partial again; one cut short by a timeout is.
 
 A default run on a small tenant takes a few minutes. The tier-3 Drive scans
-are the expensive part on large tenants; run them overnight, or start with
-`--skip-tier 3` and fill in the blanks later: run again with
-`--run-dir <that dir>` and no skip flag, and only the missing modules
-execute before the report re-renders over the complete data set.
+are the expensive part on large tenants. Run them overnight, or start with
+`--skip-tier 3` and fill in the blanks later. Run again with
+`--run-dir <that dir>` and no skip flag, and only the missing modules run
+before the report re-renders over the complete data set.
 
 ### Monthly runs and several tenants
 
@@ -509,7 +522,7 @@ which path ran.
   Google's defaults, the administrator's own policy and a copy per
   licence SKU for the same org unit; the highest `sortOrder` wins, per
   Google's Max reducer. Licence scoping is not modelled, so a setting
-  that genuinely differs between two SKUs in one org unit shows only the
+  that differs between two SKUs in one org unit shows only the
   winner.
 
 ## How it compares to other Google Workspace audit tools
@@ -533,48 +546,99 @@ which path ran.
 - **CISA ScubaGoggles.** CISA's tool for checking a tenant against its SCuBA
   Google Workspace baselines. This script's baseline settings checks were
   written with ScubaGoggles as a guide (its rules are public domain), and run
-  on the data GAM already collects, so no second tool or set of credentials
-  is needed. ScubaGoggles reports configuration; this script also reports
+  on the data GAM already collects, so you need no second tool or set of
+  credentials. ScubaGoggles reports configuration; this script also reports
   the people-level findings it does not: who forwards mail outside, which
   files are public, dormant admins, risky app grants.
 
 ## Frequently asked questions
 
-**Is it safe to run against a live production tenant?**
+### Is it safe to run against a live production tenant?
+
 Yes. Every command is a read. The only write, `--grant-temp-access`, is off
 by default, is only used on a drive none of its members can list, and removes
 its own grant when the scan finishes.
 
-**Does it work with GAMADV-XTD3?**
+### Does it work with GAMADV-XTD3?
+
 It is built and tested against GAM7 (GAM ADV X), the successor to
 GAMADV-XTD3, and looks for the `gam7` binary. If you are still on
-GAMADV-XTD3, upgrade first; the [GAM7 Update](../gam7-update/) wrapper in
+GAMADV-XTD3, upgrade first; the [GAM7 Update](../gam7-update/README.md) wrapper in
 this repository does that safely on macOS and Linux.
 
-**Do I need a service account with domain-wide delegation?**
+### Do I need a service account with domain-wide delegation?
+
 For the tenant-level modules, no. The per-mailbox modules (forwarding,
 delegates, IMAP/POP, send-as) and the Drive scans do need domain-wide
 delegation, which is the standard GAM7 setup. The preflight tells you which
 scopes are missing, and the report lists any module that could not run.
 
-**Can I use it before a Google Workspace to Google Workspace migration?**
+### Can I use it before a Google Workspace to Google Workspace migration?
+
 That is one of the reasons it exists. Run it on the source tenant to
 inventory users, licences, groups, Shared Drives, external sharing and
 forwarding before you move anything, and again on the target tenant when the
 migration is done.
 
-**How long does a Google Workspace audit take with this script?**
+### How long does a Google Workspace audit take with this script?
+
 A few minutes on a small tenant. On large tenants the Drive sharing scans are
 the slow part; run them overnight with `--run-dir` resume, or skip tier 3 for
 a quick first picture.
 
-**Does it fix anything?**
+### Does it fix anything?
+
 No. It reports. Fixing is a decision for a human with context, and the "what
 to do" copy in each finding is written for that human.
 
-**Which GAM commands does it run?**
+### Which GAM commands does it run?
+
 `--dry-run` prints every GAM command without executing it, so you can review
-the whole list before the first real run.
+the whole list before the first real run. The preflight still runs
+`gam version` and `gam info domain`.
+
+### How do I find files shared publicly in Google Drive across the whole domain?
+
+Run the default audit. The Drive scans read the sharing on every user's files
+and every Shared Drive, and the report lists files public on the web,
+"anyone with the link" files and files shared with outside domains or
+people. The Drive audit log adds files opened to anyone in the last 30 days.
+
+### How do I find users forwarding email outside the organisation in Google Workspace?
+
+The Gmail section of the report lists every mailbox forwarding to an outside
+address, Gmail filters that forward externally, and forwarding addresses on
+file where forwarding is off. Each finding traces back to a CSV of the raw
+rows.
+
+### How do I check which super admins don't have 2-step verification?
+
+The "Super admins, admin roles and 2-step verification" section reports super
+admins without 2SV as Critical, and also lists super admins with 2SV but no
+security key or passkey, and those enrolled but not held to it by policy.
+
+### How do I find dormant Google Workspace accounts and wasted licences?
+
+The "Accounts, licences and dormant users" section lists licensed accounts
+never signed into or dormant for more than 90 days, suspended accounts still
+holding licences, and licences owned but not assigned. Emergency accounts
+listed under `break_glass` in `tenants.json` are left out of the dormancy
+checks; `--skip-never-logged-in` leaves accounts that have never signed in
+out of the per-user scans.
+
+### Can I run a Google Workspace security audit every month and see what changed?
+
+Yes. Each run is compared with the last completed run of the same customer
+ID, and every finding is marked new, persisting or resolved, with a posture
+score and its trend. `--compare-with <dir>` picks a different earlier run, and
+`--tenants` with `--all` runs every tenant in one go (see
+[Monthly runs and several tenants](#monthly-runs-and-several-tenants)).
+
+### Does it check against the CISA Google Workspace baselines?
+
+Yes, for the settings GAM can read. The "Tenant policies" section reports
+settings looser than the CISA SCuBA Google Workspace baseline, each row citing
+its requirement. It does not run ScubaGoggles itself.
 
 ## Tests
 
@@ -582,7 +646,7 @@ the whole list before the first real run.
 python3 -m unittest test_tenant_scope -v
 ```
 
-215 tests, no GAM calls, no fixtures on disk beyond temp directories.
+283 tests, no GAM calls, no fixtures on disk beyond temp directories.
 
 ## Licence
 
@@ -595,4 +659,4 @@ Paul Ogier is a Google Workspace consultant and trainer at
 [Outsource House](https://osh.co.za) in South Africa, and teaches the
 [Taming GAM7 & GAMADV-XTD3](https://taming.tech/GAMCourse) course on Udemy.
 Questions and bug reports are welcome as
-[GitHub issues](https://github.com/PaulOgier/GAMScripts/issues).
+[GitHub issues](https://github.com/PaulOgier/GoogleWorkspaceScripts/issues).

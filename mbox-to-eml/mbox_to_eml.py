@@ -17,7 +17,7 @@ path limit on machines that have not enabled long paths.
 
 Exit codes: 0 = every message written, 1 = nothing written or a message failed, 2 = usage.
 Copyright (c) 2026 Paul Ogier, Outsource House. Apache License 2.0.
-Part of https://github.com/PaulOgier/GAMScripts
+Part of https://github.com/PaulOgier/GoogleWorkspaceScripts
 """
 import email.header
 import email.utils

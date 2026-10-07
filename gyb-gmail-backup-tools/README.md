@@ -164,7 +164,7 @@ quarantined.
 Yes. They open the databases read-only and never write to the folder.
 
 **Do they work with the offboarding script in this repository?**
-Yes. The [Google Workspace offboarding script](../google-workspace-offboarding/)
+Yes. The [Google Workspace offboarding script](../google-workspace-offboarding/README.md)
 uses GYB for mailbox migration; these tools check the backup it leaves
 behind and find the messages its skipped-messages CSV names.
 

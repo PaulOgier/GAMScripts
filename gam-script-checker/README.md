@@ -63,7 +63,7 @@ Where Google documents a way to undo something, the line carries an **UNDO** not
 
 You need two things:
 
-1. **The whole `gam-script-checker` folder**, not just `gamcheck.py`. The checker reads the `verbs` folder next to it and will not work without it. You can ignore the `developers` folder: it holds the tests and the tools that rebuild `verbs`. To get it, open the [GAM Script Checker releases](https://github.com/PaulOgier/GAMScripts/releases?q=gam-script-checker&expanded=true), find the newest one, download the `.zip` file under **Assets** whose name starts with `gam-script-checker`, and unzip it:
+1. **The whole `gam-script-checker` folder**, not just `gamcheck.py`. The checker reads the `verbs` folder next to it and will not work without it. You can ignore the `developers` folder: it holds the tests and the tools that rebuild `verbs`. To get it, open the [GAM Script Checker releases](https://github.com/PaulOgier/GoogleWorkspaceScripts/releases?q=gam-script-checker&expanded=true), find the newest one, download the `.zip` file under **Assets** whose name starts with `gam-script-checker`, and unzip it:
    - **Mac:** double-click the zip (Safari may already have unzipped it).
    - **Windows:** right-click the zip and choose **Extract All**. Double-clicking only shows what is inside, and the checker cannot run from there.
    - **Linux:** right-click the zip and choose **Extract Here**.
@@ -205,7 +205,7 @@ In paste mode the checker also tidies what you pasted, and tells you when it doe
 - **Placeholders read as CANNOT TELL.** A command copied from documentation with `<GOOGLE SHEET ID>` or `<UserTypeEntity>` still in it cannot be judged.
 - **It says what a script would do, not whether it works.** A command GAM7 would reject can still get a verdict when its verb is valid. A green READ-ONLY is not a syntax check: `gam info cros crosquery "id:X"` reads as READ-ONLY although GAM7 rejects it, because `crosquery` is an entity word that belongs before the verb, not after `info cros`. Check the grammar in GAM's own wiki before you run something you have not run before.
 - **Python that calls Google's APIs directly** (`googleapiclient`) without gam is not analysed.
-- **The command tables go out of date.** They are built from GAM's own source (GAM7 7.48.07, GAMADV-XTD3 7.06.04, legacy GAM 6.58). A command they do not know is CANNOT TELL. A new safety switch added to a command GAM already had is not picked up automatically.
+- **The command tables go out of date.** They are built from GAM's own source (GAM7 7.48.20, GAMADV-XTD3 7.06.04, legacy GAM 6.58). A command they do not know is CANNOT TELL. A new safety switch added to a command GAM already had is not picked up automatically.
 
 A command written for GAMADV-XTD3 or legacy GAM that GAM7 no longer accepts is named as such, because it will stop with an error on GAM7.
 
